@@ -1,0 +1,35 @@
+---
+description: Pidgin shared context — locked constraints, verification, spec links
+alwaysApply: true
+---
+
+# Pidgin — shared context
+
+You are helping build **Pidgin**, an AI workforce workspace runtime (Slack-like internal workspace where companies hire AI employees). The project is spec-first and currently in **Phase 0–1** (foundation + hire flow).
+
+## Locked constraints (do not change without explicit user approval)
+
+- Python 3.12+; package manager `uv`
+- One workspace = one directory: `db.sqlite` + `memory/`, `docs/`, `blobs/`
+- Per-workspace SQLite; no `workspace_id` columns
+- Password supplied at open; bcrypt hash in `auth.json` only
+- Memory: file-based `memory/<handle>/journal.md`; recall = tail + grep (no vectors)
+- Policy gate runs **outside** the LLM; every decision → `agent_action_log`
+- Recipes: separate marketplace app; runtime uses immutable snapshot at hire time
+- MVP omissions: no vector DB, SQLCipher, Argon2, OS keychain
+
+## Before finishing any code change
+
+```bash
+uv sync --extra dev
+uv run pytest -v
+uv run ruff check src tests
+```
+
+## Spec reading order
+
+1. specs/README.md — index + locked decisions
+2. specs/IMPLEMENTATION_PLAN.md — current phase and next tasks
+3. Role-specific specs as needed
+
+For role-specific behavior, follow the active persona rule and AGENTS.md.
