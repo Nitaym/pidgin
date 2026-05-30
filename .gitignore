@@ -18,8 +18,13 @@ dist/
 
 # Virtual environments
 .venv
+.venv-*
 env/
 venv/
+
+# Frontend
+src/frontend/node_modules/
+src/frontend/dist/
 
 # Unit test / coverage reports
 htmlcov/
@@ -50,3 +55,5 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+.pidgin/workspaces
+.pidgin

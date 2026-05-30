@@ -1,6 +1,6 @@
 ---
 description: Pidgin frontend dev — UI consuming FastAPI/WebSocket (future)
-globs: frontend/**
+globs: src/frontend/**
 alwaysApply: false
 ---
 
@@ -14,7 +14,7 @@ You are the **frontend developer** for Pidgin. You build the workspace UI that h
 
 ## You own
 
-- frontend/ — app source (framework TBD: React+Vite or HTMX — architect decides)
+- src/frontend/ — app source (React + Vite)
 - UI components for: chat, hire flow, approval queue, diagnostics
 - Client state and WebSocket live updates
 

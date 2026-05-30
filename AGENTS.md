@@ -22,7 +22,7 @@ Cursor agent configuration for building Pidgin. These are **dev-workflow persona
 | Tester | `/tester` | `tester.mdc` | `tests/**` | Pytest, acceptance coverage, regression tests |
 | Backend dev | `/backend-dev` | `backend-dev.mdc` | `src/**`, `migrations/**` | Runtime, DB, gate, API |
 | Recipes writer | `/recipes-writer` | `recipes-writer.mdc` | `recipes/**`, `specs/RECIPES_SPEC.md` | Role/hierarchy JSON, prompt templates, permissions |
-| Frontend dev | `/frontend-dev` | `frontend-dev.mdc` | `frontend/**` | UI (future) |
+| Frontend dev | `/frontend-dev` | `frontend-dev.mdc` | `src/frontend/**` | UI |
 
 ---
 
@@ -32,7 +32,7 @@ Cursor agent configuration for building Pidgin. These are **dev-workflow persona
 2. **Automatic** — open files in the role's glob scope; the matching rule attaches to context.
 3. **Explicit in any chat** — start with `Act as the backend dev persona.` or reference `@backend-dev` in Cursor.
 4. **Dedicated chats** — create one Agent chat per role; run the slash command once and pin it, or paste a kickoff prompt from below.
-5. **Handoffs** — when switching roles mid-feature, leave a handoff block (task ID, files touched, open questions). See [IMPLEMENTATION_PLAN §Parallelization guide](specs/IMPLEMENTATION_PLAN.md).
+5. **Handoffs** — when switching roles mid-feature, create a **Linear ticket** with the handoff block below. State clearly **who you are handing off to** (target persona, e.g. backend dev, tester). See [IMPLEMENTATION_PLAN §Parallelization guide](specs/IMPLEMENTATION_PLAN.md).
 
 ### Slash command examples
 
@@ -114,23 +114,32 @@ Do not fix src/ — write failing tests and hand off to backend dev. Run uv run 
 | Acceptance coverage | `/tester List MVP_USER_STORIES acceptance bullets with no matching pytest test.` |
 | User story review | `Review specs/MVP_USER_STORIES.md — are acceptance criteria testable and aligned with current phase?` |
 | Spec review | `Review [file] for consistency with SCHEMA_SPEC and AGENT_RUNTIME_SPEC. List conflicts only.` |
-| Phase handoff | `Here is a handoff from [role]: [paste handoff block]. Continue as [your role].` |
+| Phase handoff | Open the Linear handoff ticket, then: `Continue as [your role] — see Linear ticket [ID].` |
 | Explicit override | `Ignore file context — act as [role] for this task: [task]` |
 
 ---
 
 ## Handoff template
 
-Copy into chat or PR when switching personas:
+**Handoffs go in Linear.** Create or update a ticket when switching personas; do not rely on chat-only handoffs.
+
+- **Title:** include both roles, e.g. `Handoff: backend dev → tester`
+- **Assignee / label:** set the **handoff target** — the persona (or person) who should pick up the work
+- **Description:** use this block:
 
 ```markdown
 ## Handoff: [from-role] → [to-role]
+
+**Hand off to:** [to-role] (required — name the persona taking over)
+
 - Phase task: [e.g. 1.1 RECIPES_SPEC]
 - Done: ...
 - Blocked on: ...
 - Files: ...
 - Verify: uv run pytest -v
 ```
+
+The receiving agent should start from the Linear ticket (link or ID in chat is fine).
 
 ---
 
@@ -158,4 +167,4 @@ Copy into chat or PR when switching personas:
 - Keep each `.mdc` under ~50 lines; move long checklists to spec docs and link them.
 - Persona slash commands live in `.cursor/commands/` — edit those files to change default focus text.
 - When a locked decision changes, update **only** `pidgin-core.mdc` + `specs/IMPLEMENTATION_PLAN.md`.
-- When frontend work starts, create `frontend/` and activate `frontend-dev.mdc`; decide React vs HTMX in architect chat first.
+- When frontend work starts, use `src/frontend/` and activate `frontend-dev.mdc`.
