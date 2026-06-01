@@ -6,13 +6,16 @@ from pathlib import Path
 
 from pidgin.util.ids import utc_now_iso
 
-
-MIGRATION_VERSION = "001_initial"
+MIGRATION_VERSIONS = ("001_initial", "002_hire_customization")
 SYSTEM_EMPLOYEE_ID = "000000000000000000000000"
 
 
-def migration_sql_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "migrations" / f"{MIGRATION_VERSION}.sql"
+def migrations_dir() -> Path:
+    return Path(__file__).resolve().parents[3] / "migrations"
+
+
+def migration_sql_path(version: str) -> Path:
+    return migrations_dir() / f"{version}.sql"
 
 
 def checksum(text: str) -> str:
@@ -27,27 +30,30 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 
 def apply_migrations(conn: sqlite3.Connection) -> None:
-    sql_path = migration_sql_path()
-    sql = sql_path.read_text(encoding="utf-8")
-    digest = checksum(sql)
-
     has_table = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
     ).fetchone()
 
-    if has_table:
-        applied = conn.execute(
-            "SELECT version FROM schema_migrations WHERE version = ?",
-            (MIGRATION_VERSION,),
-        ).fetchone()
-        if applied is not None:
-            return
+    for version in MIGRATION_VERSIONS:
+        sql_path = migration_sql_path(version)
+        sql = sql_path.read_text(encoding="utf-8")
+        digest = checksum(sql)
 
-    conn.executescript(sql)
-    conn.execute(
-        "INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)",
-        (MIGRATION_VERSION, utc_now_iso(), digest),
-    )
+        if has_table:
+            applied = conn.execute(
+                "SELECT version FROM schema_migrations WHERE version = ?",
+                (version,),
+            ).fetchone()
+            if applied is not None:
+                continue
+
+        conn.executescript(sql)
+        conn.execute(
+            "INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)",
+            (version, utc_now_iso(), digest),
+        )
+        has_table = True
+
     conn.commit()
 
 

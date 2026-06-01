@@ -10,6 +10,18 @@ _RECIPE_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
 _VALID_ACTIONS = {action.value for action in ActionType}
 
 
+class DefaultJobRequirements(BaseModel):
+    mission: str = ""
+    responsibilities: list[str] = Field(default_factory=list)
+    out_of_scope: list[str] = Field(default_factory=list)
+
+
+class DefaultIdealCandidate(BaseModel):
+    tone: str = ""
+    decision_framework: str = ""
+    escalation_rules: str = ""
+
+
 class RecipePermissions(BaseModel):
     can_read: list[str] = Field(default_factory=list)
     can_write: list[str] = Field(default_factory=list)
@@ -34,6 +46,8 @@ class RoleRecipe(BaseModel):
     permissions: RecipePermissions
     default_channels: list[str] = Field(default_factory=list)
     system_prompt_template: str
+    default_job_requirements: DefaultJobRequirements | None = None
+    default_ideal_candidate: DefaultIdealCandidate | None = None
     tools: list[str] = Field(default_factory=list)
 
     @field_validator("recipe_id")

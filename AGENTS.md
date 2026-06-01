@@ -19,34 +19,66 @@ Cursor agent configuration for building Pidgin. These are **dev-workflow persona
 |---------|---------------|-----------|----------------------------|----------|
 | Product | `/product` | `product.mdc` | `specs/MVP_USER_STORIES.md`, `specs/*USER_STORIES*` | User stories, acceptance criteria, MVP scope |
 | Architect | `/architect` | `architect.mdc` | `specs/**` | Schema design, phase planning, spec consistency |
-| Tester | `/tester` | `tester.mdc` | `tests/**` | Pytest, acceptance coverage, regression tests |
-| Backend dev | `/backend-dev` | `backend-dev.mdc` | `src/**`, `migrations/**` | Runtime, DB, gate, API |
+| Fullstack dev | `/fullstack` | `fullstack.mdc` | `src/**`, `tests/**`, `migrations/**` | Backend, frontend; pytest + **manual UI** in browser |
 | Recipes writer | `/recipes-writer` | `recipes-writer.mdc` | `recipes/**`, `specs/RECIPES_SPEC.md` | Role/hierarchy JSON, prompt templates, permissions |
-| Frontend dev | `/frontend-dev` | `frontend-dev.mdc` | `src/frontend/**` | UI |
 
 ---
 
 ## How to invoke
 
-1. **Slash command (recommended)** — type `/` in Agent chat and pick a persona (`/architect`, `/backend-dev`, `/tester`, `/product`, `/recipes-writer`, `/frontend-dev`). Add your task on the same line or in the next message.
+1. **Slash command (recommended)** — type `/` in Agent chat and pick a persona (`/fullstack`, `/architect`, `/product`, `/recipes-writer`). Add your task on the same line or in the next message.
 2. **Automatic** — open files in the role's glob scope; the matching rule attaches to context.
-3. **Explicit in any chat** — start with `Act as the backend dev persona.` or reference `@backend-dev` in Cursor.
+3. **Explicit in any chat** — start with `Act as the fullstack dev persona.` or reference `@fullstack` in Cursor.
 4. **Dedicated chats** — create one Agent chat per role; run the slash command once and pin it, or paste a kickoff prompt from below.
-5. **Handoffs** — when switching roles mid-feature, create a **Linear ticket** with the handoff block below. State clearly **who you are handing off to** (target persona, e.g. backend dev, tester). See [IMPLEMENTATION_PLAN §Parallelization guide](specs/IMPLEMENTATION_PLAN.md).
+5. **Handoffs** — when switching roles mid-feature, create a **Linear ticket** with the handoff block below. State clearly **who you are handing off to** (target persona). See [IMPLEMENTATION_PLAN §Parallelization guide](specs/IMPLEMENTATION_PLAN.md).
 
 ### Slash command examples
 
 ```
-/backend-dev Implement Phase 0.8 — wire gate() into the turn stub.
+/fullstack Implement the hire wizard step 3 change and manually verify US-6 in the browser.
 
 /architect What's blocked for Phase 1?
 
 /product Add hire-flow user stories for Phase 1 to MVP_USER_STORIES.md.
 
 /recipes-writer Draft RECIPES_SPEC.md from the support-agent stub.
-
-/tester Audit US-1 through US-5 — which acceptance criteria lack pytest coverage?
 ```
+
+---
+
+## Manual UI testing (fullstack dev)
+
+**Policy:** UI acceptance is verified **manually in a real browser** via Cursor's browser tools — not Playwright or `tests/e2e/` specs (deferred until explicitly requested).
+
+### Start the app
+
+```bash
+# Terminal A — API (dev auth for local testing)
+PIDGIN_ALLOW_DEV_AUTH=1 uv run pidgin-admin --home ~/.pidgin
+
+# Terminal B — frontend
+cd src/frontend && npm run dev
+# → http://127.0.0.1:5173
+```
+
+Use **Dev sign-in (local only)** on `/login`, then exercise the flow from `specs/MVP_USER_STORIES.md`.
+
+### Agent checklist (before marking UI work done)
+
+1. Read the US-* story acceptance bullets.
+2. Navigate the UI step by step in the browser tool.
+3. Capture snapshot/screenshot at key steps.
+4. Report:
+
+```markdown
+## Manual UI verification — US-[N]
+- [ ] criterion 1 — pass/fail + note
+- [ ] criterion 2 — pass/fail + note
+```
+
+5. If a criterion fails, fix or hand off to product/architect — do not skip verification.
+
+**Backend-only changes:** `uv run pytest -v` is sufficient; no browser pass required.
 
 ---
 
@@ -72,13 +104,13 @@ Current focus: read specs/IMPLEMENTATION_PLAN.md and tell me what's blocked for 
 Do not write src/ code unless I ask.
 ```
 
-### Backend dev
+### Fullstack dev
 
 ```
-You are the Pidgin backend dev persona. Follow .cursor/rules/backend-dev.mdc and AGENTS.md.
+You are the Pidgin fullstack dev persona. Follow .cursor/rules/fullstack.mdc and AGENTS.md.
 
-Current focus: [e.g. Phase 0.8 — wire gate() into turn stub].
-Run pytest and ruff before finishing. Stop and hand off if you hit a spec gap.
+Current focus: [e.g. hire wizard step 3].
+Backend: pytest. UI: manually verify US-* in browser (no Playwright). Run ruff + pytest before finishing.
 ```
 
 ### Recipes writer
@@ -90,28 +122,11 @@ Current focus: [e.g. draft RECIPES_SPEC.md from recipes/support-agent-v0.1.json]
 Hierarchy vs role recipes are separate. Do not change runtime code.
 ```
 
-### Frontend dev
-
-```
-You are the Pidgin frontend dev persona. Follow .cursor/rules/frontend-dev.mdc and AGENTS.md.
-
-API-first: confirm endpoints exist before building UI. Framework is TBD — ask architect if unclear.
-```
-
-### Tester
-
-```
-You are the Pidgin tester persona. Follow .cursor/rules/tester.mdc and AGENTS.md.
-
-Current focus: [e.g. map US-3 acceptance to integration tests].
-Do not fix src/ — write failing tests and hand off to backend dev. Run uv run pytest -v before finishing.
-```
-
 ### Task-specific starters
 
 | Task | Starter message |
 |------|-----------------|
-| Acceptance coverage | `/tester List MVP_USER_STORIES acceptance bullets with no matching pytest test.` |
+| Manual UI check | `/fullstack Manually verify US-[N] in the browser against MVP_USER_STORIES.md.` |
 | User story review | `Review specs/MVP_USER_STORIES.md — are acceptance criteria testable and aligned with current phase?` |
 | Spec review | `Review [file] for consistency with SCHEMA_SPEC and AGENT_RUNTIME_SPEC. List conflicts only.` |
 | Phase handoff | Open the Linear handoff ticket, then: `Continue as [your role] — see Linear ticket [ID].` |
@@ -123,7 +138,7 @@ Do not fix src/ — write failing tests and hand off to backend dev. Run uv run 
 
 **Handoffs go in Linear.** Create or update a ticket when switching personas; do not rely on chat-only handoffs.
 
-- **Title:** include both roles, e.g. `Handoff: backend dev → tester`
+- **Title:** include both roles, e.g. `Handoff: product → fullstack`
 - **Assignee / label:** set the **handoff target** — the persona (or person) who should pick up the work
 - **Description:** use this block:
 
@@ -136,7 +151,7 @@ Do not fix src/ — write failing tests and hand off to backend dev. Run uv run 
 - Done: ...
 - Blocked on: ...
 - Files: ...
-- Verify: uv run pytest -v
+- Verify: `uv run pytest -v` (backend); manual UI checklist for US-* (frontend)
 ```
 
 The receiving agent should start from the Linear ticket (link or ID in chat is fine).
@@ -147,10 +162,10 @@ The receiving agent should start from the Linear ticket (link or ID in chat is f
 
 | Phase | Primary persona | Secondary |
 |-------|-----------------|-----------|
-| 0 Foundation | Backend dev | Tester (coverage), Product (acceptance), Architect (spec gaps) |
-| 1 Hire + recipes | Recipes writer + Backend dev | Tester, Product (hire/chat stories), Architect (RECIPES_SPEC) |
-| 2 Conversation + API | Backend dev | Tester, Product (UI/API acceptance), Frontend dev (when UI starts) |
-| 3+ Connectors, Pulse | Backend dev | Tester, Product, Architect |
+| 0 Foundation | Fullstack dev | Product (acceptance), Architect (spec gaps) |
+| 1 Hire + recipes | Recipes writer + Fullstack dev | Product (hire/chat stories), Architect (RECIPES_SPEC) |
+| 2 Conversation + API | Fullstack dev | Product (UI/API acceptance) |
+| 3+ Connectors, Pulse | Fullstack dev | Product, Architect |
 
 ---
 
@@ -158,7 +173,7 @@ The receiving agent should start from the Linear ticket (link or ID in chat is f
 
 1. **Architect chat** — write `specs/RECIPES_SPEC.md` (Phase 1 blocker per IMPLEMENTATION_PLAN).
 2. **Recipes writer chat** — expand `recipes/support-agent-v0.1.json` to match that spec.
-3. **Backend dev chat** — implement Phase 1 loader + `pidgin hire` CLI against the frozen spec.
+3. **Fullstack chat** — implement a feature; pytest for API, manual browser pass for UI stories.
 
 ---
 
@@ -166,5 +181,5 @@ The receiving agent should start from the Linear ticket (link or ID in chat is f
 
 - Keep each `.mdc` under ~50 lines; move long checklists to spec docs and link them.
 - Persona slash commands live in `.cursor/commands/` — edit those files to change default focus text.
+- Fullstack dev verifies UI stories manually in browser; Playwright e2e in `tests/e2e/` is **not** required at this stage.
 - When a locked decision changes, update **only** `pidgin-core.mdc` + `specs/IMPLEMENTATION_PLAN.md`.
-- When frontend work starts, use `src/frontend/` and activate `frontend-dev.mdc`.

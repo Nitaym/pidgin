@@ -1,16 +1,48 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from pidgin.api.deps import require_workspace_session
 from pidgin.db.chat import get_or_create_room_conversation, list_messages, list_rooms
 from pidgin.db.diagnostics import get_turn, list_audit_log, list_inbound_events, list_turns
-from pidgin.db.employees import list_agents
-from pidgin.hire import HireError, hire_support_agent
+from pidgin.db.employees import get_agent_by_handle, list_agents
+from pidgin.db.principals import get_or_create_operator_principal
+from pidgin.hire import HireError, TemplateHireRequest, hire_support_agent, hire_with_template
+from pidgin.hr_assist import (
+    HrAssistError,
+    create_session,
+    get_session,
+    send_operator_message,
+)
+from pidgin.hr_assist import (
+    list_messages as list_hr_assist_messages,
+)
+from pidgin.recipes.catalog import (
+    UnknownRecipeError,
+    bundled_template_detail,
+    list_bundled_template_summaries,
+)
 from pidgin.services import inject_test_event
 from pidgin.services.admin import process_pending_events
+from pidgin.services.brief import (
+    BriefError,
+    create_template_from_agent,
+    duplicate_bundled_template,
+    update_agent_brief,
+)
 from pidgin.services.chat import send_chat_message
+from pidgin.templates import (
+    TemplateError,
+    create_workspace_template,
+    delete_workspace_template,
+    get_workspace_template,
+    list_workspace_template_summaries,
+    save_workspace_template_version,
+)
+from pidgin.types.customization import HireCustomization, IdealCandidate, JobRequirements
 
 router = APIRouter(prefix="/{workspace_slug}/api", tags=["workspace"])
 
@@ -24,25 +56,337 @@ class SendMessageBody(BaseModel):
     agent_handle: str = Field(default="support")
 
 
+class HireCustomizationBody(BaseModel):
+    job_requirements: JobRequirements = Field(default_factory=JobRequirements)
+    ideal_candidate: IdealCandidate = Field(default_factory=IdealCandidate)
+    your_take: str = ""
+
+
+class HireBody(BaseModel):
+    template_source: str = Field(default="bundled")
+    template_id: str | None = None
+    slug: str | None = None
+    version: int | None = None
+    customization: HireCustomizationBody | None = None
+    display_name: str | None = None
+    handle: str | None = None
+    manager_principal_id: str | None = None
+
+
+class CreateWorkspaceTemplateBody(BaseModel):
+    name: str = Field(min_length=1)
+    slug: str | None = None
+    customization: HireCustomizationBody | None = None
+    duplicate_from_recipe_id: str | None = None
+
+
+class PatchWorkspaceTemplateBody(BaseModel):
+    name: str | None = None
+    customization: HireCustomizationBody
+
+
+class CreateTemplateFromAgentBody(BaseModel):
+    name: str = Field(min_length=1)
+    slug: str | None = None
+
+
+class CreateHrAssistSessionBody(BaseModel):
+    context_type: str = Field(pattern="^(hire|agent|template)$")
+    context_id: str = Field(min_length=1)
+
+
+class HrAssistMessageBody(BaseModel):
+    body_text: str = Field(min_length=1)
+
+
 @router.get("/agents")
 def api_list_agents(workspace_slug: str, request: Request) -> list[dict]:
     session = require_workspace_session(request, workspace_slug)
     return list_agents(session.conn)
 
 
+@router.get("/role-templates")
+def api_list_role_templates(workspace_slug: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    bundled = list_bundled_template_summaries()
+    workspace = list_workspace_template_summaries(Path(session.paths_root))
+    return {"bundled": bundled, "workspace": workspace}
+
+
+@router.get("/role-templates/bundled/{recipe_id}")
+def api_get_bundled_template(workspace_slug: str, recipe_id: str, request: Request) -> dict:
+    _ = workspace_slug
+    require_workspace_session(request, workspace_slug)
+    try:
+        return bundled_template_detail(recipe_id)
+    except UnknownRecipeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/hire")
+def api_hire(workspace_slug: str, request: Request, body: HireBody | None = None) -> dict[str, str]:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        if body is None or (
+            body.template_id is None
+            and body.slug is None
+            and body.display_name is None
+            and body.customization is None
+        ):
+            return hire_support_agent(session.conn, paths_root=session.paths_root)
+
+        if body.template_source not in {"bundled", "workspace"}:
+            raise HireError("template_source must be bundled or workspace")
+
+        customization = (
+            HireCustomization.model_validate(body.customization.model_dump())
+            if body.customization is not None
+            else None
+        )
+        return hire_with_template(
+            session.conn,
+            paths_root=session.paths_root,
+            request=TemplateHireRequest(
+                template_source=body.template_source,  # type: ignore[arg-type]
+                template_id=body.template_id,
+                slug=body.slug,
+                workspace_version=body.version,
+                customization=customization,
+                display_name=body.display_name or "",
+                handle=body.handle,
+                manager_principal_id=body.manager_principal_id,
+            ),
+        )
+    except HireError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/agents/{handle}/brief")
+def api_get_agent_brief(workspace_slug: str, handle: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    agent = get_agent_by_handle(session.conn, handle)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    customization = HireCustomization.from_json(agent.get("hire_customization_json"))
+    return {
+        "handle": handle,
+        "customization": customization.model_dump() if customization else None,
+    }
+
+
+@router.patch("/agents/{handle}/brief")
+def api_patch_agent_brief(
+    workspace_slug: str,
+    handle: str,
+    body: HireCustomizationBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        customization = HireCustomization.model_validate(body.model_dump())
+        return update_agent_brief(
+            session.conn,
+            Path(session.paths_root),
+            handle=handle,
+            customization=customization,
+            actor_principal_id=get_or_create_operator_principal(session.conn),
+        )
+    except BriefError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/agents/{handle}/create-template")
+def api_create_template_from_agent(
+    workspace_slug: str,
+    handle: str,
+    body: CreateTemplateFromAgentBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return create_template_from_agent(
+            session.conn,
+            Path(session.paths_root),
+            handle=handle,
+            name=body.name,
+            slug=body.slug,
+            actor_principal_id=get_or_create_operator_principal(session.conn),
+        )
+    except BriefError as exc:
+        status = 404 if "not found" in str(exc).lower() else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
+@router.get("/role-templates/workspace/{slug}")
+def api_get_workspace_template(workspace_slug: str, slug: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return get_workspace_template(Path(session.paths_root), slug)
+    except TemplateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/role-templates/workspace/{slug}/versions/{version}")
+def api_get_workspace_template_version(
+    workspace_slug: str,
+    slug: str,
+    version: int,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return get_workspace_template(Path(session.paths_root), slug, version=version)
+    except TemplateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/role-templates/workspace")
+def api_create_workspace_template(
+    workspace_slug: str,
+    body: CreateWorkspaceTemplateBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    actor_id = get_or_create_operator_principal(session.conn)
+    customization = (
+        HireCustomization.model_validate(body.customization.model_dump())
+        if body.customization is not None
+        else None
+    )
+    try:
+        if body.duplicate_from_recipe_id:
+            return duplicate_bundled_template(
+                Path(session.paths_root),
+                name=body.name,
+                slug=body.slug,
+                recipe_id=body.duplicate_from_recipe_id,
+                customization=customization,
+                actor_principal_id=actor_id,
+            )
+        if customization is None:
+            raise TemplateError("customization or duplicate_from_recipe_id is required")
+        return create_workspace_template(
+            Path(session.paths_root),
+            name=body.name,
+            slug=body.slug,
+            customization=customization,
+            actor_principal_id=actor_id,
+        )
+    except (TemplateError, BriefError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.patch("/role-templates/workspace/{slug}")
+def api_patch_workspace_template(
+    workspace_slug: str,
+    slug: str,
+    body: PatchWorkspaceTemplateBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    customization = HireCustomization.model_validate(body.customization.model_dump())
+    try:
+        return save_workspace_template_version(
+            Path(session.paths_root),
+            slug,
+            name=body.name,
+            customization=customization,
+            actor_principal_id=get_or_create_operator_principal(session.conn),
+        )
+    except TemplateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/role-templates/workspace/{slug}")
+def api_delete_workspace_template(workspace_slug: str, slug: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        delete_workspace_template(Path(session.paths_root), slug)
+    except TemplateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"deleted": slug}
+
+
+@router.post("/hr-assist/sessions")
+def api_create_hr_assist_session(
+    workspace_slug: str,
+    body: CreateHrAssistSessionBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    created = create_session(
+        Path(session.paths_root),
+        context_type=body.context_type,  # type: ignore[arg-type]
+        context_id=body.context_id,
+    )
+    return {
+        "session_id": created.session_id,
+        "context_type": created.context_type,
+        "context_id": created.context_id,
+        "created_at": created.created_at,
+        "updated_at": created.updated_at,
+        "messages": [],
+    }
+
+
+@router.get("/hr-assist/sessions/{session_id}")
+def api_get_hr_assist_session(
+    workspace_slug: str,
+    session_id: str,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        meta = get_session(Path(session.paths_root), session_id)
+        messages = list_hr_assist_messages(Path(session.paths_root), session_id)
+    except HrAssistError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "session_id": meta.session_id,
+        "context_type": meta.context_type,
+        "context_id": meta.context_id,
+        "created_at": meta.created_at,
+        "updated_at": meta.updated_at,
+        "messages": messages,
+    }
+
+
+@router.get("/hr-assist/sessions/{session_id}/messages")
+def api_list_hr_assist_messages(
+    workspace_slug: str,
+    session_id: str,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        messages = list_hr_assist_messages(Path(session.paths_root), session_id)
+    except HrAssistError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"session_id": session_id, "messages": messages}
+
+
+@router.post("/hr-assist/sessions/{session_id}/messages")
+def api_send_hr_assist_message(
+    workspace_slug: str,
+    session_id: str,
+    body: HrAssistMessageBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return send_operator_message(
+            Path(session.paths_root),
+            session_id,
+            body_text=body.body_text,
+        )
+    except HrAssistError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @router.get("/rooms")
 def api_list_rooms(workspace_slug: str, request: Request) -> list[dict]:
     session = require_workspace_session(request, workspace_slug)
     return list_rooms(session.conn)
-
-
-@router.post("/hire")
-def api_hire_support(workspace_slug: str, request: Request) -> dict[str, str]:
-    session = require_workspace_session(request, workspace_slug)
-    try:
-        return hire_support_agent(session.conn, paths_root=session.paths_root)
-    except HireError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/rooms/{room_id}/messages")

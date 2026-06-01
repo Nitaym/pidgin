@@ -37,9 +37,56 @@ Top-level object:
 | `permissions` | object | yes | See §3 |
 | `default_channels` | string[] | no | Suggested rooms/channels (e.g. `#support`) |
 | `system_prompt_template` | string | yes | Jinja-style `{{display_name}}`, `{{role_title}}` |
+| `default_job_requirements` | object | no | Pre-fill for hire wizard **Job requirements** (see §2.1) |
+| `default_ideal_candidate` | object | no | Pre-fill for **Ideal candidate profile** (see §2.1) |
 | `tools` | string[] | no | Tool IDs enabled for this role (empty in MVP stub) |
 
 Examples: `recipes/support-agent-v0.1.json`, `recipes/executive-assistant-v0.1.json`.
+
+### 2.1 Hire wizard pre-fill objects
+
+Bundled Pidgin role templates may include defaults that seed the hire wizard ([MVP_USER_STORIES.md](MVP_USER_STORIES.md) US-6). Values map directly to `ai_employees.hire_customization_json` ([SCHEMA_SPEC.md](SCHEMA_SPEC.md) §7.1).
+
+**`default_job_requirements`:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `mission` | string | Primary purpose |
+| `responsibilities` | string[] | Ordered bullet list |
+| `out_of_scope` | string[] | Explicit boundaries |
+
+**`default_ideal_candidate`:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `tone` | string | Communication style |
+| `decision_framework` | string | How the agent should decide |
+| `escalation_rules` | string | When and how to escalate |
+
+Example fragment:
+
+```json
+{
+  "default_job_requirements": {
+    "mission": "Resolve customer issues quickly and empathetically.",
+    "responsibilities": [
+      "Triage inbound support messages",
+      "Draft replies for operator approval"
+    ],
+    "out_of_scope": [
+      "Billing refunds without approval",
+      "Legal commitments"
+    ]
+  },
+  "default_ideal_candidate": {
+    "tone": "Professional, warm, concise",
+    "decision_framework": "Prioritize customer impact, then SLA, then effort",
+    "escalation_rules": "Escalate billing disputes and angry VIPs to the owner"
+  }
+}
+```
+
+Omitted objects or fields mean empty wizard sections. Workspace **Your role templates** store the same content in versioned Markdown files instead of JSON ([SCHEMA_SPEC.md](SCHEMA_SPEC.md) §4.1.1).
 
 ---
 
@@ -114,3 +161,4 @@ The full canonical JSON is stored in `ai_employee_recipe_snapshots.bundle_json`.
 | `display_name` at hire | Recipe JSON `display_name` is a catalog default only; operator sets the live name when hiring (e.g. personal name). Prompts use `{{display_name}}` from the hired employee. |
 | Initial employee status | `draft` until interview completes |
 | Upgrade flow | New snapshot + pointer update (Phase 4+) |
+| Hire pre-fill | `default_job_requirements` / `default_ideal_candidate` optional; recipes writer adds when updating bundled templates (PID-8) |

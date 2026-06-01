@@ -9,7 +9,6 @@ export function TeamPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
   const loadTeam = useCallback(async () => {
     if (!slug) return;
@@ -26,19 +25,6 @@ export function TeamPage() {
     void loadTeam().catch((err: Error) => setError(err.message));
   }, [loadTeam]);
 
-  async function handleHire() {
-    if (!slug) return;
-    setError(null);
-    setMessage(null);
-    try {
-      const result = await api.hireSupport(slug);
-      setMessage(`Hired ${result.display_name} — open ${result.room_name} to chat.`);
-      await loadTeam();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Hire failed");
-    }
-  }
-
   async function handleLogout() {
     await api.logout();
     await refresh();
@@ -52,8 +38,11 @@ export function TeamPage() {
       <div className="hero panel stack">
         <p className="muted">Signed in as {user?.name || user?.email}</p>
         <h3 style={{ margin: 0 }}>{workspace?.display_name}</h3>
-        <p className="muted">Your AI team lives here. Hire your first agent to get started.</p>
+        <p className="muted">Your AI team lives here. Hire roles with customizable briefs.</p>
         <div className="row">
+          <Link to="hire" className="btn">
+            Hire a role
+          </Link>
           <button type="button" className="secondary" onClick={() => void handleLogout()}>
             Sign out
           </button>
@@ -61,23 +50,21 @@ export function TeamPage() {
       </div>
 
       {error ? <div className="error">{error}</div> : null}
-      {message ? <div className="success">{message}</div> : null}
 
       <section className="panel stack">
         <h3 style={{ margin: 0 }}>Your AI team</h3>
         {agents.length === 0 ? (
           <>
-            <p className="muted">No agents hired yet. Start with the Support Agent recipe.</p>
-            <button type="button" onClick={() => void handleHire()}>
-              Hire Support Agent
-            </button>
+            <p className="muted">No agents hired yet. Start with Hire a role.</p>
+            <Link to="hire">Open hire wizard →</Link>
           </>
         ) : (
           <ul>
             {agents.map((agent) => (
               <li key={agent.id}>
-                {agent.display_name} — {agent.role_title} (@{agent.handle}) ·{" "}
-                {agent.current_status}
+                <Link to={`agents/${agent.handle}`}>{agent.display_name}</Link>
+                {" — "}
+                {agent.role_title} (@{agent.handle}) · {agent.current_status}
               </li>
             ))}
           </ul>

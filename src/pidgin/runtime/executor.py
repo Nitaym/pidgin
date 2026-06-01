@@ -6,9 +6,9 @@ import sqlite3
 from pidgin.db.chat import insert_message
 from pidgin.db.employees import get_agent
 from pidgin.llm import stub_chat_reply
-from pidgin.recipes import RoleRecipe, render_system_prompt
+from pidgin.recipes import RoleRecipe
 from pidgin.runtime.turn import TurnContext, complete_turn, start_turn
-from pidgin.types import ProcessingStatus
+from pidgin.types.customization import HireCustomization
 from pidgin.util.ids import new_ulid, utc_now_iso
 
 
@@ -52,6 +52,7 @@ def _execute_chat_turn(
         (agent["recipe_snapshot_id"],),
     ).fetchone()
     recipe = RoleRecipe.model_validate_json(snapshot["bundle_json"] if snapshot else "{}")
+    customization = HireCustomization.from_json(agent["hire_customization_json"])
 
     ctx = start_turn(conn, event_row)
     conn.execute(
@@ -70,6 +71,7 @@ def _execute_chat_turn(
         recipe=recipe,
         agent_display_name=agent["display_name"],
         user_message=payload["message_text"],
+        customization=customization,
     )
 
     insert_message(

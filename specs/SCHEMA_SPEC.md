@@ -118,6 +118,12 @@ Full details (columns, indexes, constraints, lifecycle notes) for each table are
 | `memory/<agent_handle>/journal.md` | Per-agent append-only memory journal (`remember` / `recall`) |
 | `docs/<document_id>.txt` | Extracted text for an ingested document |
 | `blobs/<ab>/<cd>/<sha256>` | Original uploaded/ingested files |
+| `role-templates/<slug>/manifest.json` | Workspace role template metadata (see §4.1.1) |
+| `role-templates/<slug>/v<N>.md` | Versioned role brief body (Markdown + YAML frontmatter) |
+| `hr-assist/sessions/<session_id>/meta.json` | HR assist session metadata (see §4.1.2) |
+| `hr-assist/sessions/<session_id>/messages.jsonl` | HR assist chat transcript (append-only JSONL) |
+| `audit/brief-edits/<employee_id>.jsonl` | Post-hire brief edit audit trail (see §4.1.3) |
+| `audit/template-versions/<slug>.jsonl` | Workspace template version-create audit trail |
 
 \* `inbound_events` is append-only for payload and trigger metadata; `processing_status` and three companion operational fields are mutable. This is the one declared exception to strict append-only — see §9 for the rationale.
 
@@ -228,10 +234,159 @@ Each workspace is **one directory** containing:
 - `docs/` — extracted document text
 - `blobs/` — original files
 - `auth.json` — password verifier only (see §4.2)
+- `role-templates/` — **Your role templates** (text files, not DB; see §4.1.1)
+- `hr-assist/sessions/` — HR assist chat sessions (file-based; see §4.1.2)
+- `audit/` — file-based audit for hire UX (brief edits, template versions; see §4.1.3)
 
 Workspaces are isolated by **file separation**. Each workspace has its **own password**, but **Pidgin does not store or manage that password** — the caller supplies it when opening a workspace (CLI flag, environment variable, or interactive prompt). For MVP, where the operator keeps the password is their problem (password manager, `.env` file, sticky note). For production deployment, passwords come from a proper secret store (e.g. Kubernetes Secret, Vault) injected at runtime.
 
 **Not in MVP:** OS keychain integration, Argon2id/AES credential encryption, SQLCipher full-DB encryption, vector search. These are post-MVP upgrades.
+
+#### 4.1.1 Workspace role templates (locked — files, not DB)
+
+**Your role templates** live under `role-templates/<slug>/`. Pidgin role templates remain bundled JSON in `recipes/*.json` ([RECIPES_SPEC.md](RECIPES_SPEC.md)); duplicating into the workspace creates a new slug folder starting at `v1.md`.
+
+```
+role-templates/
+  <slug>/
+    manifest.json       # metadata; points at current_version
+    v1.md               # version 1 body
+    v2.md               # version 2 body (prior versions never overwritten)
+    ...
+```
+
+**Manifest schema** (`manifest.json`):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `name` | string | yes | Display name shown in UI |
+| `slug` | string | yes | Directory name; kebab-case; stable across versions |
+| `current_version` | integer | yes | Latest version number; matches highest `v<N>.md` |
+| `created_at` | string | yes | UTC ISO 8601 ms |
+| `updated_at` | string | yes | UTC ISO 8601 ms; bumped on every new version |
+| `lineage` | object | no | Provenance when copied from Pidgin template or agent |
+
+Optional `lineage` keys:
+
+| Key | Type | When set |
+|---|---|---|
+| `source_recipe_id` | string | Duplicated from bundled Pidgin role template |
+| `source_recipe_version` | string | Semver of bundled template at duplicate time |
+| `derived_from_agent_id` | string | Created via “Create template from agent” |
+| `derived_from_agent_handle` | string | Human-readable handle for UI lineage note |
+
+**Version body format (locked):** Markdown with YAML frontmatter. Each save under the **same slug** writes a **new** `v<N>.md` file; prior version files are never edited or deleted except on explicit template delete (entire slug folder).
+
+Example `v2.md`:
+
+```markdown
+---
+version: 2
+created_at: 2026-05-31T10:00:00.000Z
+created_by_principal_id: 01J...
+---
+
+## Job requirements
+
+### Mission
+…
+
+### Responsibilities
+- …
+
+### Out of scope
+- …
+
+## Ideal candidate profile
+
+### Tone
+…
+
+### Decision framework
+…
+
+### Escalation rules
+…
+
+## Your take
+…
+```
+
+**Version promotion:** saving with unchanged `name` / `slug` increments `current_version`, writes `v{N+1}.md`, updates `manifest.updated_at`. The UI shows the latest version as current; older files remain browsable.
+
+**API mapping:** `GET/POST/PATCH .../role-templates` read and write these files — see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) Hire UX API routes.
+
+#### 4.1.2 HR assist sessions (locked — files, not DB)
+
+HR assist chat threads persist under `hr-assist/sessions/<session_id>/`:
+
+```
+hr-assist/sessions/
+  <session_id>/
+    meta.json
+    messages.jsonl
+```
+
+`session_id` is a ULID. `meta.json`:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `session_id` | string | yes | Same as directory name |
+| `context_type` | string | yes | `hire` \| `agent` \| `template` |
+| `context_id` | string | yes | Hire session ULID, `ai_employees.id`, or template `slug` |
+| `created_at` | string | yes | UTC ISO 8601 ms |
+| `updated_at` | string | yes | Bumped on each message append |
+
+`messages.jsonl` — one JSON object per line (append-only):
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Message ULID |
+| `role` | string | yes | `operator` \| `assist` |
+| `body_text` | string | yes | Plain text |
+| `created_at` | string | yes | UTC ISO 8601 ms |
+| `suggestion` | object | no | Present on `assist` messages when actionable |
+
+**Suggestion payload** (for **Apply to form** / **Append to your take**):
+
+```json
+{
+  "action": "apply",
+  "targets": {
+    "job_requirements.mission": "…",
+    "ideal_candidate.tone": "…"
+  }
+}
+```
+
+| `action` | Behavior |
+|---|---|
+| `apply` | Overwrite listed dot-path keys in the active form (`targets` map) |
+| `append_your_take` | Append `targets.your_take` (string) to the **Your take** field with a newline separator |
+
+Dot-path keys match [§7.1](#71-hire_customization_json) field names. UI may ignore unknown keys; backend validates paths on apply.
+
+**API:** `POST .../hr-assist/sessions`, `POST/GET .../hr-assist/sessions/{id}/messages` — see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+
+#### 4.1.3 Hire UX audit files (locked — files, not DB)
+
+Post-hire brief edits and workspace template version creates append to JSONL audit files (not `agent_action_log` — those remain for gated agent actions).
+
+| Path | When written |
+|---|---|
+| `audit/brief-edits/<employee_id>.jsonl` | Each save of job requirements, ideal candidate, or your take on an agent profile |
+| `audit/template-versions/<slug>.jsonl` | Each new `v<N>.md` created for a workspace template |
+
+Each JSONL line:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | string | yes | Audit entry ULID |
+| `occurred_at` | string | yes | UTC ISO 8601 ms |
+| `actor_principal_id` | string | yes | Operator who performed the action |
+| `action` | string | yes | `brief_edit` \| `template_version_create` |
+| `summary` | string | yes | Human-readable one-liner for UI |
+| `changes_json` | string | no | JSON string: field-level diff or `{ "from_version": 1, "to_version": 2 }` |
 
 ### 4.2 Workspace password (verify only, never store)
 
@@ -296,6 +451,21 @@ workspaces/<workspace_id>/
     01J....txt                ← extracted text; id matches ingested_documents.id
   blobs/
     ab/cd/<sha256>            ← original files
+  role-templates/
+    support-lead/
+      manifest.json
+      v1.md
+      v2.md
+  hr-assist/
+    sessions/
+      01J.../
+        meta.json
+        messages.jsonl
+  audit/
+    brief-edits/
+      01J....jsonl            ← one file per ai_employees.id
+    template-versions/
+      support-lead.jsonl      ← one file per template slug
   _debug/                     ← optional debug export
 ```
 
@@ -466,6 +636,7 @@ CREATE TABLE ai_employees (
                                'active', 'paused', 'offboarded'
                              )),
   permission_overrides_json  TEXT,                    -- merged on top of recipe at gate time
+  hire_customization_json   TEXT,                    -- operator brief; see §7.1
   default_channels_json      TEXT,                    -- email alias, slack handle
   created_at                 TEXT NOT NULL,
   updated_at                 TEXT NOT NULL,
@@ -476,6 +647,87 @@ CREATE TABLE ai_employees (
 ```
 
 Notes: `current_status` is a cache of the latest row in `ai_employees_status_log`. The **resolved permission profile** (effective `can_read`/`can_write`/`requires_approval`/`blocked`) is *not stored* — computed at gate time from `recipe_snapshot.bundle_json` + `permission_overrides_json`.
+
+`hire_customization_json` holds the operator-editable brief (job requirements, ideal candidate profile, your take). It is **mutable** after hire; the immutable `ai_employee_recipe_snapshots` row is never updated for brief changes. See §7.1.
+
+### 7.1 `hire_customization_json`
+
+JSON object persisted on `ai_employees` at hire and updated on post-hire profile saves ([MVP_USER_STORIES.md](MVP_USER_STORIES.md) US-6, US-9). Shape aligns with hire wizard and agent profile fields:
+
+```json
+{
+  "job_requirements": {
+    "mission": "string",
+    "responsibilities": ["string"],
+    "out_of_scope": ["string"]
+  },
+  "ideal_candidate": {
+    "tone": "string",
+    "decision_framework": "string",
+    "escalation_rules": "string"
+  },
+  "your_take": "string"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `job_requirements.mission` | string | Primary purpose of the role |
+| `job_requirements.responsibilities` | string[] | Ordered list; empty array allowed |
+| `job_requirements.out_of_scope` | string[] | Explicit boundaries |
+| `ideal_candidate.tone` | string | Communication style |
+| `ideal_candidate.decision_framework` | string | How the agent should decide |
+| `ideal_candidate.escalation_rules` | string | When and how to escalate |
+| `your_take` | string | Freeform operator additions |
+
+**Pre-fill at hire:** bundled recipe `default_job_requirements` and `default_ideal_candidate` ([RECIPES_SPEC.md](RECIPES_SPEC.md) §2) seed the wizard; operator edits are written to this column at hire. Workspace template `v<N>.md` bodies parse into the same shape.
+
+**Post-hire edits:** `PATCH .../agents/{handle}/brief` (or equivalent) replaces the full object or merges sections; each save appends to `audit/brief-edits/<employee_id>.jsonl` (§4.1.3).
+
+### 7.2 Resolved system prompt merge (turn time)
+
+At turn time the runtime builds the agent system prompt from the **immutable recipe snapshot** plus the **mutable customization**. Merge order (locked):
+
+1. **Base template** — `bundle_json.system_prompt_template` from `ai_employees.recipe_snapshot_id`.
+2. **Placeholder render** — substitute `{{display_name}}`, `{{role_title}}`, and other recipe-defined placeholders from the `ai_employees` row (and workspace context as defined in [RECIPES_SPEC.md](RECIPES_SPEC.md)).
+3. **Customization append** — if `hire_customization_json` is non-null, append a fixed markdown section block:
+
+```markdown
+
+---
+
+## Job requirements (operator-defined)
+
+**Mission:** {mission}
+
+**Responsibilities:**
+- {responsibility_1}
+- …
+
+**Out of scope:**
+- {item_1}
+- …
+
+## Ideal candidate profile (operator-defined)
+
+**Tone:** {tone}
+
+**Decision framework:** {decision_framework}
+
+**Escalation rules:** {escalation_rules}
+
+## Your take
+
+{your_take}
+```
+
+Omit subsections whose source field is empty or missing. Lists render as markdown bullets; empty arrays omit the subsection heading.
+
+4. **Runtime injections** — time, recall context, pending timers/watchers per [AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md) §4 append after the merged system prompt.
+
+The merged prompt is **not stored** — derived on each turn. `model_invocations.request_messages_json` captures what was actually sent.
+
+**Invariant:** customization changes affect subsequent turns immediately; they never mutate `ai_employee_recipe_snapshots.bundle_json`.
 
 ### `ai_employees_status_log` (A)
 
@@ -1103,6 +1355,7 @@ Notes: This is the single most important table for audit, security review, and p
 |---|---|
 | `conversations.last_activity_at` | `MAX(messages.created_at)` for the conversation |
 | `ai_employees.resolved_permission_profile` | merge of `recipe_snapshot.bundle_json.permissions` + `workspace.settings_json.overrides` + `ai_employees.permission_overrides_json` |
+| `ai_employees.resolved_system_prompt` | §7.2 merge of snapshot `system_prompt_template` + `hire_customization_json` |
 | `turns.total_input_tokens` etc. | `SUM(model_invocations.input_tokens)` for the turn |
 | `turns.action_count` | `COUNT(agent_action_log)` for the turn |
 | `ai_employees.pending_approval_count` | `COUNT(pending_approvals WHERE ai_employee_id=? AND current_status='open')` |
@@ -1118,6 +1371,21 @@ If profiling later shows any of these are expensive enough to need caching, we a
 - Each migration is a numbered SQL file with a checksum recorded in `schema_migrations.checksum`.
 - On every `open_workspace`, the runtime checks for pending migrations and applies them inside a transaction. Failure aborts the open.
 - The same migration files apply to every workspace's DB; per-workspace customization lives in `workspace.settings_json`, not in schema variations.
+
+### 15.1 Migration ledger
+
+| Version | File | Change |
+|---|---|---|
+| `001_initial` | `migrations/001_initial.sql` | 26 tables — initial schema |
+| `002_hire_customization` | `migrations/002_hire_customization.sql` | Add `ai_employees.hire_customization_json TEXT` (nullable) |
+
+`002_hire_customization.sql`:
+
+```sql
+ALTER TABLE ai_employees ADD COLUMN hire_customization_json TEXT;
+```
+
+Existing rows: column is `NULL` until hire flow or profile edit populates it. Hire UX file layout (`role-templates/`, `hr-assist/`, `audit/`) requires **no migration** — directories are created on first use.
 
 ---
 
@@ -1140,5 +1408,8 @@ If profiling later shows any of these are expensive enough to need caching, we a
 - [PRODUCT_SPEC.md](PRODUCT_SPEC.md) — Product vision, entities, recipe model
 - [SECURITY_SPEC.md](SECURITY_SPEC.md) — Principals, trust labels, policy decisions, attribution model
 - [INTEGRATION_WOFKLOW.md](INTEGRATION_WOFKLOW.md) — Connector model, the four-identity attribution
-- [AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md) — Triggers, actions, turn lifecycle, gate semantics
+- [AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md) — Triggers, actions, turn lifecycle, gate semantics, prompt construction
+- [RECIPES_SPEC.md](RECIPES_SPEC.md) — Bundled role recipe fields, `default_job_requirements`, prompt template
+- [HIRE_UX.md](HIRE_UX.md) — Hire wizard UX, template vocabulary, HR assist surfaces
+- [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) — Phase 1B hire UX tasks and API routes
 - [TECH_STACK_SPEC.md](TECH_STACK_SPEC.md) — Python stack, MVP tooling, what we deliberately omit

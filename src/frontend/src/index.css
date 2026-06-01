@@ -269,6 +269,90 @@ a.btn:hover,
   font-size: 0.85rem;
 }
 
+.split-layout {
+  display: grid;
+  grid-template-columns: 1fr min(320px, 36%);
+  gap: 1rem;
+  align-items: start;
+}
+
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+
+.template-card {
+  padding: 1rem;
+}
+
+.template-card strong {
+  display: block;
+}
+
+.hr-assist {
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100vh - 4rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.hr-assist-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 120px;
+  max-height: 280px;
+}
+
+.hr-msg {
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.hr-msg.operator {
+  background: var(--human-bg);
+  align-self: flex-end;
+}
+
+.hr-msg.assist {
+  background: #f3f4f6;
+  align-self: flex-start;
+}
+
+.brief-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin: 0;
+}
+
+.brief-section legend {
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+.review-list {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0;
+}
+
+.review-list dt {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.review-list dd {
+  margin: 0;
+}
+
 @media (max-width: 768px) {
   .layout {
     grid-template-columns: 1fr;
@@ -276,5 +360,14 @@ a.btn:hover,
 
   .sidebar {
     padding-bottom: 0.5rem;
+  }
+
+  .split-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .hr-assist {
+    position: static;
+    max-height: none;
   }
 }

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from pidgin.recipes import RoleRecipe, render_system_prompt
+from pidgin.types.customization import HireCustomization
 
 
 @dataclass(frozen=True)
@@ -16,8 +17,13 @@ def stub_chat_reply(
     recipe: RoleRecipe,
     agent_display_name: str,
     user_message: str,
+    customization: HireCustomization | None = None,
 ) -> StubReply:
-    _ = render_system_prompt(recipe, display_name=agent_display_name)
+    _ = render_system_prompt(
+        recipe,
+        display_name=agent_display_name,
+        customization=customization,
+    )
     trimmed = user_message.strip()
     if not trimmed:
         reply = (

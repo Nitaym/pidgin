@@ -85,6 +85,8 @@ def insert_ai_employee(
     default_channels: list[str],
     initial_status: str = "draft",
     actor_principal_id: str,
+    manager_principal_id: str | None = None,
+    hire_customization_json: str | None = None,
 ) -> str:
     now = utc_now_iso()
     conn.execute(
@@ -92,8 +94,9 @@ def insert_ai_employee(
         INSERT INTO ai_employees (
           id, display_name, role_title, handle, recipe_snapshot_id,
           human_owner_principal_id, manager_principal_id, current_status,
-          permission_overrides_json, default_channels_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?, ?)
+          permission_overrides_json, default_channels_json, hire_customization_json,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
         """,
         (
             employee_id,
@@ -102,8 +105,10 @@ def insert_ai_employee(
             handle,
             recipe_snapshot_id,
             human_owner_principal_id,
+            manager_principal_id,
             initial_status,
             json.dumps(default_channels),
+            hire_customization_json,
             now,
             now,
         ),
@@ -139,3 +144,21 @@ def fetch_recipe_snapshot(
         "SELECT * FROM ai_employee_recipe_snapshots WHERE id = ?",
         (snapshot_id,),
     ).fetchone()
+
+
+def update_hire_customization(
+    conn: sqlite3.Connection,
+    *,
+    employee_id: str,
+    hire_customization_json: str,
+) -> None:
+    now = utc_now_iso()
+    conn.execute(
+        """
+        UPDATE ai_employees
+        SET hire_customization_json = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (hire_customization_json, now, employee_id),
+    )
+    conn.commit()

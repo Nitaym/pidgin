@@ -57,7 +57,7 @@ export function WelcomePage() {
         {step === 1 ? (
           <div className="stack">
             <ul className="wizard-list">
-              <li>Hire agents from proven role recipes</li>
+              <li>Hire agents from proven role templates</li>
               <li>Chat in team rooms like #support</li>
               <li>Review turns and audit logs as you grow</li>
             </ul>

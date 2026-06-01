@@ -63,11 +63,14 @@ uv run pidgin-admin --home ~/.pidgin
 | Tests | 🟡 Partial | Foundation + admin + product flow tests |
 | `recipes/support-agent-v0.1.json` | 🟡 Stub | No schema validation yet |
 | `MVP_USER_STORIES.md` | 🟡 Updating | US-1–US-3 now reference admin UI |
-| `RECIPES_SPEC.md` | ❌ Missing | Blocker for Phase 1 hire flow |
+| `RECIPES_SPEC.md` | ✅ Done | Bundle schema + `default_job_requirements` / `default_ideal_candidate` (PID-6) |
+| `HIRE_UX.md` | ✅ Done | Wizard UX; architect handoffs resolved in §8 |
+| Hire UX storage (SCHEMA_SPEC §4.1) | ✅ Spec'd | `role-templates/`, `hr-assist/`, `audit/` file layout locked |
+| `migrations/002_hire_customization.sql` | ❌ Missing | Adds `hire_customization_json` — backend dev (PID-7) |
 | `src/pidgin/llm/` | ❌ Missing | Phase 2 |
 | Repository helpers (status-log, append-only guard) | ❌ Missing | Phase 0.5 |
 
-**Next agent should:** wire real LLM gateway, improve chat UX (WebSocket/polling), Phase 1 interview/onboarding stubs. **Do not** prioritize gate matrix work.
+**Next agent should:** implement Phase 1B hire wizard backend (PID-7) — migration 002, `hire_customization_json`, role-template file I/O, hire API extensions. Frontend hire UX (PID-8) follows. **Do not** prioritize gate matrix work.
 
 ### MVP priority order
 
@@ -160,6 +163,81 @@ uv run pidgin-admin --home ~/.pidgin
 
 ---
 
+### Phase 1B — Hire wizard + customization (US-6)
+
+**Goal:** Multi-step hire wizard with Pidgin role templates, operator customization persisted at hire, immutable recipe snapshot unchanged.
+
+**UX spec:** [HIRE_UX.md](HIRE_UX.md) §3. **Storage:** [SCHEMA_SPEC.md](SCHEMA_SPEC.md) §7.1, §7.2.
+
+| ID | Task | Primary files | Done when |
+|---|---|---|---|
+| 1B.1 | Migration 002 | `migrations/002_hire_customization.sql` | `hire_customization_json` column on `ai_employees` |
+| 1B.2 | Bundled template listing | `src/pidgin/recipes/`, `api/routes/` | `GET .../role-templates` returns Pidgin templates + defaults from JSON |
+| 1B.3 | Hire with customization | `src/pidgin/hire/`, `api/routes/` | `POST .../hire` accepts `template_id`, `customization`, identity; writes snapshot + customization |
+| 1B.4 | Prompt merge stub | `src/pidgin/runtime/prompt.py` | Turn builder appends customization per SCHEMA_SPEC §7.2 |
+| 1B.5 | Hire wizard UI | `src/frontend/` | Steps 1–5 per HIRE_UX §3; no “recipe” in UI copy |
+| 1B.6 | Hire wizard tests | `tests/integration/test_hire.py` | US-6 acceptance: pre-fill, persist customization, snapshot immutable |
+
+**Depends on:** Phase 1 (basic hire path).
+
+---
+
+### Phase 1B2 — Your role templates (US-8, US-10)
+
+**Goal:** Workspace template CRUD as versioned files; duplicate Pidgin template; create template from agent.
+
+**Storage:** [SCHEMA_SPEC.md](SCHEMA_SPEC.md) §4.1.1.
+
+| ID | Task | Primary files | Done when |
+|---|---|---|---|
+| 1B2.1 | Template file I/O | `src/pidgin/templates/` (new) | Read/write `role-templates/<slug>/manifest.json` + `v<N>.md` |
+| 1B2.2 | Version promotion | same | Same slug save → new `v{N+1}.md`; manifest `current_version` bumped; prior files kept |
+| 1B2.3 | Template API | `src/pidgin/api/routes/` | `GET/POST/PATCH .../role-templates` per route table below |
+| 1B2.4 | Duplicate Pidgin template | `services/` | Creates workspace copy at `v1.md` with lineage |
+| 1B2.5 | Create from agent | `services/` | Copies `hire_customization_json` + permissions summary into new template |
+| 1B2.6 | Template audit | `audit/template-versions/` writer | JSONL line on each new version |
+| 1B2.7 | Template UI + tests | `src/frontend/`, `tests/` | US-8, US-10 acceptance |
+
+**Depends on:** Phase 1B.1 (shared customization shape).
+
+---
+
+### Phase 1B3 — Post-hire brief edit + audit (US-9)
+
+**Goal:** Edit job requirements, ideal candidate, your take on agent profile; audit trail; prompt merge picks up changes.
+
+| ID | Task | Primary files | Done when |
+|---|---|---|---|
+| 1B3.1 | Brief PATCH API | `api/routes/` | `PATCH .../agents/{handle}/brief` updates `hire_customization_json` |
+| 1B3.2 | Brief edit audit | `src/pidgin/audit/` (new) | Appends to `audit/brief-edits/<employee_id>.jsonl` |
+| 1B3.3 | Agent profile UI | `src/frontend/` | Editable sections + save per HIRE_UX §4 |
+| 1B3.4 | Turn prompt refresh | `runtime/prompt.py` | Subsequent turns use updated customization (§7.2) |
+| 1B3.5 | Brief edit tests | `tests/integration/` | US-9 acceptance |
+
+**Depends on:** Phase 1B.4 (prompt merge).
+
+---
+
+### Phase 1C — Pidgin HR assist (US-7)
+
+**Goal:** Built-in hiring coach chat; Apply / Append suggestions; session persistence. Stub LLM acceptable.
+
+**Storage:** [SCHEMA_SPEC.md](SCHEMA_SPEC.md) §4.1.2.
+
+| ID | Task | Primary files | Done when |
+|---|---|---|---|
+| 1C.1 | HR assist session I/O | `src/pidgin/hr_assist/` (new) | `meta.json` + append-only `messages.jsonl` |
+| 1C.2 | HR assist API | `api/routes/` | `POST .../hr-assist/sessions`, message POST/GET |
+| 1C.3 | Assist stub LLM | `src/pidgin/llm/` or inline stub | Returns reply + optional `suggestion` payload |
+| 1C.4 | Apply / Append handlers | `api/` or frontend | `apply` overwrites form fields; `append_your_take` appends text |
+| 1C.5 | HR assist UI | `src/frontend/` | Panel on hire steps 2–3, agent profile, template editor |
+| 1C.6 | Degraded mode | `api/` | Hire and save succeed when assist unavailable (US-7) |
+| 1C.7 | HR assist tests | `tests/integration/` | US-7 acceptance |
+
+**Depends on:** Phase 1B.5 (hire form fields exist). May ship after 1B if form UI lands first.
+
+---
+
 ### Phase 2 — First conversation loop
 
 **Goal:** Human posts in Pidgin-native chat → agent turn → stub LLM → `say` action → message in DB. **Chat + diagnostics in admin UI.**
@@ -222,7 +300,11 @@ flowchart TD
   P4[Phase 4 Product Surfaces]
 
   P0 --> P1
-  P1 --> P2
+  P1 --> P1B[Phase 1B Hire wizard]
+  P1B --> P1B2[Phase 1B2 Workspace templates]
+  P1B --> P1B3[Phase 1B3 Post-hire edit]
+  P1B --> P1C[Phase 1C HR assist]
+  P1B --> P2
   P2 --> P3
   P3 --> P4
 
@@ -239,6 +321,7 @@ pidgin/
   pyproject.toml
   migrations/
     001_initial.sql
+    002_hire_customization.sql
   recipes/
     support-agent-v0.1.json
   src/pidgin/
@@ -257,6 +340,9 @@ pidgin/
     runtime/
     recipes/               # Phase 1
     hire/                  # Phase 1
+    templates/             # Phase 1B2 — role-templates/ file I/O
+    hr_assist/             # Phase 1C
+    audit/                 # Phase 1B3 — brief-edits, template-versions JSONL
     llm/                   # Phase 2
     connectors/            # Phase 2+
     pulse/                 # Phase 3
@@ -293,16 +379,63 @@ See [AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md) §10.1 for the full diagnosti
 
 ---
 
+## Hire UX API routes (Phase 1B–1C)
+
+Base path: `/api/workspaces/{workspace_id}` (authenticated operator session). HTML admin routes mirror these where noted in [HIRE_UX.md](HIRE_UX.md).
+
+| Method | Route | Phase | Purpose |
+|---|---|---|---|
+| GET | `/role-templates` | 1B | List Pidgin bundled templates + workspace templates (manifest summary) |
+| GET | `/role-templates/bundled/{recipe_id}` | 1B | Single bundled template with `default_job_requirements`, `default_ideal_candidate` |
+| GET | `/role-templates/workspace/{slug}` | 1B2 | Workspace template manifest + current version body |
+| GET | `/role-templates/workspace/{slug}/versions/{n}` | 1B2 | Historical version body |
+| POST | `/role-templates/workspace` | 1B2 | Create blank or duplicate template → new slug folder + `v1.md` |
+| PATCH | `/role-templates/workspace/{slug}` | 1B2 | Save new version (`v{N+1}.md`) or update manifest name |
+| DELETE | `/role-templates/workspace/{slug}` | 1B2 | Remove entire slug folder (with confirmation) |
+| POST | `/hire` | 1B | Hire with `template_source`, `template_id`/`slug`, `customization`, identity fields |
+| GET | `/agents/{handle}/brief` | 1B3 | Read `hire_customization_json` |
+| PATCH | `/agents/{handle}/brief` | 1B3 | Update customization + append brief-edit audit |
+| POST | `/agents/{handle}/create-template` | 1B2 | Create workspace template from agent (US-10) |
+| POST | `/hr-assist/sessions` | 1C | Create session (`context_type`, `context_id`) → returns `session_id` |
+| GET | `/hr-assist/sessions/{session_id}` | 1C | Session meta + message list |
+| POST | `/hr-assist/sessions/{session_id}/messages` | 1C | Operator message → assist reply (+ optional `suggestion`) |
+| GET | `/hr-assist/sessions/{session_id}/messages` | 1C | Paginated transcript |
+
+**`POST /hire` body (illustrative):**
+
+```json
+{
+  "template_source": "bundled",
+  "template_id": "support-agent",
+  "customization": {
+    "job_requirements": { "mission": "…", "responsibilities": [], "out_of_scope": [] },
+    "ideal_candidate": { "tone": "…", "decision_framework": "…", "escalation_rules": "…" },
+    "your_take": ""
+  },
+  "display_name": "Jane",
+  "handle": "jane",
+  "manager_principal_id": "01J..."
+}
+```
+
+Workspace template hire: `"template_source": "workspace"`, `"slug": "support-lead"`, `"version": 2` (optional; default latest).
+
+---
+
 ## Schema quick reference
 
 **Workspace directory** (`~/.pidgin/workspaces/<workspace_id>/`):
 
 ```
 auth.json          # bcrypt hash only
-db.sqlite          # 26 tables
+db.sqlite          # 26 tables (+ hire_customization_json via migration 002)
 memory/<handle>/journal.md
 docs/<id>.txt
 blobs/<ab>/<cd>/<sha256>
+role-templates/<slug>/manifest.json + v<N>.md
+hr-assist/sessions/<id>/meta.json + messages.jsonl
+audit/brief-edits/<employee_id>.jsonl
+audit/template-versions/<slug>.jsonl
 _debug/            # optional
 ```
 
@@ -355,13 +488,15 @@ After Phase 0 admin shell is green:
 | [SCHEMA_SPEC.md](SCHEMA_SPEC.md) | Table definitions, file layout |
 | [SECURITY_SPEC.md](SECURITY_SPEC.md) | Trust labels, invocation policy |
 | [TECH_STACK_SPEC.md](TECH_STACK_SPEC.md) | Libraries, deliberate omissions |
-| [MVP_USER_STORIES.md](MVP_USER_STORIES.md) | Acceptance criteria US-1–US-5 |
+| [MVP_USER_STORIES.md](MVP_USER_STORIES.md) | Acceptance criteria US-1–US-11 |
+| [HIRE_UX.md](HIRE_UX.md) | Hire wizard, templates, HR assist UX vocabulary |
+| [RECIPES_SPEC.md](RECIPES_SPEC.md) | Bundled role recipe JSON schema |
 
 ---
 
 ## Suggested first tasks for the next agent
 
 1. **Verify:** `uv sync --extra dev --extra api && uv run pytest -v`
-2. **Human smoke:** `pidgin-admin` → create workspace → hire → chat
-3. **Real LLM:** replace stub replies in `src/pidgin/llm/`
-4. **RECIPES_SPEC.md:** document bundled recipe schema (if extending hire)
+2. **PID-7 (backend dev):** `002_hire_customization.sql`, hire API + `hire_customization_json`, role-template file module, prompt merge §7.2
+3. **PID-8 (frontend dev):** hire wizard UI against Phase 1B API routes
+4. **Recipes writer:** add `default_job_requirements` / `default_ideal_candidate` to bundled JSON files per RECIPES_SPEC §2.1

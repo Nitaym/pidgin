@@ -14,6 +14,8 @@ Documentation for the Pidgin AI workforce platform. Read top-down: product visio
 | [TECH_STACK_SPEC.md](TECH_STACK_SPEC.md) | Python MVP stack, libraries, deliberate omissions |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | Phased build plan, current status, agent handoff |
 | [MVP_USER_STORIES.md](MVP_USER_STORIES.md) | Acceptance criteria for Phase 0–2 |
+| [HIRE_UX.md](HIRE_UX.md) | Hire wizard UX, templates, HR assist vocabulary |
+| [RECIPES_SPEC.md](RECIPES_SPEC.md) | Role recipe JSON schema, hire pre-fill fields |
 | [main_features.md](main_features.md) | Short feature notes |
 
 ## MVP technical decisions (locked)

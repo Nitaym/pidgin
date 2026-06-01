@@ -51,4 +51,4 @@ Align with SECURITY_SPEC trust labels. Use the buckets from support-agent-v0.1.j
 ## Hand off to
 
 - **Architect** — new recipe fields, hierarchy vs role schema changes
-- **Backend dev** — spec is stable; implement loader + pidgin hire CLI
+- **Fullstack dev** — spec is stable; implement loader + hire flow with tests

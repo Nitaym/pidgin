@@ -4,11 +4,15 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from pidgin.db.chat import create_room, ensure_room_member, get_room_by_name
 from pidgin.db.employees import HiredAgent, insert_ai_employee, insert_recipe_snapshot
 from pidgin.db.principals import get_or_create_operator_principal, insert_agent_principal
+from pidgin.recipes.catalog import UnknownRecipeError, bundled_recipe_path, load_bundled_recipe
 from pidgin.recipes.loader import load_role_recipe
+from pidgin.recipes.models import RoleRecipe
+from pidgin.types.customization import HireCustomization
 from pidgin.util.ids import new_ulid
 from pidgin.workspace.manager import WorkspacePaths
 
@@ -16,6 +20,7 @@ DEFAULT_SUPPORT_RECIPE = (
     Path(__file__).resolve().parents[3] / "recipes" / "support-agent-v0.1.json"
 )
 DEFAULT_SUPPORT_ROOM = "#support"
+SUPPORT_RECIPE_ID = "support-agent"
 
 
 class HireError(Exception):
@@ -38,6 +43,37 @@ class HireRequest:
     recipe_path: Path
     handle: str | None = None
     owner_principal_id: str | None = None
+    manager_principal_id: str | None = None
+    hire_customization_json: str | None = None
+
+
+@dataclass
+class TemplateHireRequest:
+    template_source: Literal["bundled", "workspace"]
+    template_id: str | None = None
+    slug: str | None = None
+    workspace_version: int | None = None
+    customization: HireCustomization | None = None
+    display_name: str = ""
+    handle: str | None = None
+    manager_principal_id: str | None = None
+
+
+def _ensure_support_singleton(conn: sqlite3.Connection, recipe_id: str) -> None:
+    if recipe_id != SUPPORT_RECIPE_ID:
+        return
+    existing = conn.execute(
+        """
+        SELECT e.id
+        FROM ai_employees e
+        JOIN ai_employee_recipe_snapshots s ON s.id = e.recipe_snapshot_id
+        WHERE s.recipe_id = ?
+        LIMIT 1
+        """,
+        (SUPPORT_RECIPE_ID,),
+    ).fetchone()
+    if existing is not None:
+        raise HireError("Support agent is already hired")
 
 
 def hire_from_recipe(
@@ -49,6 +85,7 @@ def hire_from_recipe(
         raise HireError(f"Recipe file not found: {request.recipe_path}")
 
     recipe = load_role_recipe(request.recipe_path)
+    _ensure_support_singleton(conn, recipe.recipe_id)
     handle = request.handle or derive_handle(request.display_name)
 
     existing = conn.execute(
@@ -59,6 +96,7 @@ def hire_from_recipe(
         raise HireError(f"Handle already in use: {handle}")
 
     owner_id = request.owner_principal_id or get_or_create_operator_principal(conn)
+    manager_id = request.manager_principal_id or owner_id
     employee_id = new_ulid()
     snapshot_id = new_ulid()
     source_url = request.recipe_path.resolve().as_uri()
@@ -78,7 +116,9 @@ def hire_from_recipe(
         handle=handle,
         recipe_snapshot_id=snapshot_id,
         human_owner_principal_id=owner_id,
+        manager_principal_id=manager_id,
         default_channels=recipe.default_channels,
+        hire_customization_json=request.hire_customization_json,
         actor_principal_id=owner_id,
     )
     principal_id = insert_agent_principal(
@@ -100,34 +140,33 @@ def hire_from_recipe(
     )
 
 
-def hire_support_agent(
+def _resolve_bundled_hire(
+    request: TemplateHireRequest,
+) -> tuple[Path, RoleRecipe, HireCustomization]:
+    if not request.template_id:
+        raise HireError("template_id is required for bundled hire")
+    try:
+        recipe_path = bundled_recipe_path(request.template_id)
+        recipe = load_bundled_recipe(request.template_id)
+    except UnknownRecipeError as exc:
+        raise HireError(str(exc)) from exc
+    customization = request.customization or HireCustomization.from_recipe_defaults(recipe)
+    return recipe_path, recipe, customization
+
+
+def _setup_default_room(
     conn: sqlite3.Connection,
     *,
-    paths_root: Path | str | None = None,
-    recipe_path: Path | None = None,
-) -> dict[str, str]:
-    existing = conn.execute(
-        "SELECT id, display_name FROM ai_employees WHERE handle = 'support' LIMIT 1"
-    ).fetchone()
-    if existing is not None:
-        raise HireError("Support agent is already hired")
-
-    recipe_file = recipe_path or DEFAULT_SUPPORT_RECIPE
-    recipe = load_role_recipe(recipe_file)
-    paths = WorkspacePaths(root=Path(paths_root)) if paths_root else None
-
-    hired = hire_from_recipe(
-        conn,
-        paths,
-        HireRequest(display_name=recipe.display_name, recipe_path=recipe_file, handle="support"),
-    )
-
-    room = get_room_by_name(conn, DEFAULT_SUPPORT_ROOM)
+    hired: HiredAgent,
+    recipe: RoleRecipe,
+) -> tuple[str, str]:
+    room_name = recipe.default_channels[0] if recipe.default_channels else DEFAULT_SUPPORT_ROOM
+    room = get_room_by_name(conn, room_name)
     if room is None:
         room_id = create_room(
             conn,
-            name=DEFAULT_SUPPORT_ROOM,
-            purpose="Customer support conversations",
+            name=room_name,
+            purpose=f"{recipe.display_name} conversations",
         )
     else:
         room_id = room["id"]
@@ -135,11 +174,106 @@ def hire_support_agent(
     operator_id = get_or_create_operator_principal(conn)
     ensure_room_member(conn, room_id, operator_id)
     ensure_room_member(conn, room_id, hired.principal_id)
+    conn.commit()
+    return room_id, room_name
+
+
+def _resolve_workspace_hire(
+    request: TemplateHireRequest,
+    paths: WorkspacePaths,
+) -> tuple[Path, RoleRecipe, HireCustomization]:
+    from pidgin.templates.workspace import (
+        TemplateError,
+        customization_from_template,
+        get_workspace_template,
+    )
+
+    if not request.slug:
+        raise HireError("slug is required for workspace template hire")
+    try:
+        detail = get_workspace_template(
+            paths.root,
+            request.slug,
+            version=request.workspace_version,
+        )
+    except TemplateError as exc:
+        raise HireError(str(exc)) from exc
+
+    lineage = detail.get("lineage") or {}
+    recipe_id = lineage.get("source_recipe_id")
+    if not recipe_id:
+        raise HireError("Workspace template missing source_recipe_id lineage")
+    try:
+        recipe_path = bundled_recipe_path(recipe_id)
+        recipe = load_bundled_recipe(recipe_id)
+    except UnknownRecipeError as exc:
+        raise HireError(str(exc)) from exc
+
+    customization = request.customization or customization_from_template(
+        paths.root,
+        request.slug,
+        version=request.workspace_version,
+    )
+    return recipe_path, recipe, customization
+
+
+def hire_with_template(
+    conn: sqlite3.Connection,
+    *,
+    paths_root: Path | str | None,
+    request: TemplateHireRequest,
+) -> dict[str, str]:
+    paths = WorkspacePaths(root=Path(paths_root)) if paths_root else None
+
+    if request.template_source == "workspace":
+        if paths is None:
+            raise HireError("Workspace paths required for workspace template hire")
+        recipe_path, recipe, customization = _resolve_workspace_hire(request, paths)
+    else:
+        recipe_path, recipe, customization = _resolve_bundled_hire(request)
+
+    display_name = request.display_name.strip() or recipe.display_name
+
+    hired = hire_from_recipe(
+        conn,
+        paths,
+        HireRequest(
+            display_name=display_name,
+            recipe_path=recipe_path,
+            handle=request.handle,
+            manager_principal_id=request.manager_principal_id,
+            hire_customization_json=customization.to_json(),
+        ),
+    )
+    room_id, room_name = _setup_default_room(conn, hired=hired, recipe=recipe)
 
     return {
         "ai_employee_id": hired.ai_employee_id,
-        "display_name": recipe.display_name,
+        "display_name": display_name,
         "room_id": room_id,
-        "room_name": DEFAULT_SUPPORT_ROOM,
+        "room_name": room_name,
         "handle": hired.handle,
+        "recipe_id": recipe.recipe_id,
     }
+
+
+def hire_support_agent(
+    conn: sqlite3.Connection,
+    *,
+    paths_root: Path | str | None = None,
+    recipe_path: Path | None = None,
+) -> dict[str, str]:
+    recipe_file = recipe_path or DEFAULT_SUPPORT_RECIPE
+    recipe = load_role_recipe(recipe_file)
+    customization = HireCustomization.from_recipe_defaults(recipe)
+    return hire_with_template(
+        conn,
+        paths_root=paths_root,
+        request=TemplateHireRequest(
+            template_source="bundled",
+            template_id=recipe.recipe_id,
+            customization=customization,
+            display_name=recipe.display_name,
+            handle="support",
+        ),
+    )

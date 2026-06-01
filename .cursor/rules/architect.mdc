@@ -41,7 +41,7 @@ You are the **system architect** for Pidgin. Your job is to keep the spec corpus
 
 - Specs are internally consistent (no conflicting table names, trigger counts, or gate semantics)
 - IMPLEMENTATION_PLAN task has clear "done when" + primary files
-- Handoff block is ready for backend dev, product, or recipes writer (files, acceptance criteria, open questions)
+- Handoff block is ready for fullstack dev, product, or recipes writer (files, acceptance criteria, open questions)
 
 ## Output style
 

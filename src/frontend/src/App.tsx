@@ -1,10 +1,13 @@
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useApp } from "./context/AppContext";
+import { AgentProfilePage } from "./pages/AgentProfilePage";
 import { ChatPage } from "./pages/ChatPage";
 import { DebugPage } from "./pages/DebugPage";
+import { HireWizardPage } from "./pages/HireWizardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { TeamPage } from "./pages/TeamPage";
+import { TemplateEditorPage, TemplatesPage } from "./pages/TemplatesPage";
 import { WelcomePage } from "./pages/WelcomePage";
 
 function RootRedirect() {
@@ -51,6 +54,10 @@ function WorkspaceApp() {
     <Routes>
       <Route element={<Layout title="Team" />}>
         <Route index element={<TeamPage />} />
+        <Route path="hire" element={<HireWizardPage />} />
+        <Route path="templates" element={<TemplatesPage />} />
+        <Route path="templates/:templateSlug" element={<TemplateEditorPage />} />
+        <Route path="agents/:handle" element={<AgentProfilePage />} />
       </Route>
       <Route element={<Layout title="Chat" />}>
         <Route path="rooms/:roomId/chat" element={<ChatPage />} />

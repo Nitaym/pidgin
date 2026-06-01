@@ -22,6 +22,8 @@ export function Layout({ title = "Pidgin", showNav = true }: LayoutProps) {
             <NavLink to="" end>
               Team
             </NavLink>
+            <NavLink to="hire">Hire a role</NavLink>
+            <NavLink to="templates">Your templates</NavLink>
             <NavLink to="debug">Diagnostics</NavLink>
           </nav>
         ) : null}
