@@ -246,7 +246,7 @@ Project layout (TBD at scaffold time): `src/pidgin/` with `runtime/`, `gate/`, `
 | 2   | Email connector              | IMAP library choice                    |
 | 3   | PDF text extraction          | `pypdf` vs `pdfplumber`                |
 | 4   | CLI framework                | `typer` vs `click`                     |
-| 5   | First connector to implement | Likely Pidgin-native chat before Slack |
+| 5   | First connector to implement | **Locked:** `pidgin_chat` → Slack → Gmail → Drive → Meet → Zoom ([CONNECTORS_SPEC.md](CONNECTORS_SPEC.md)) |
 
 
 ---

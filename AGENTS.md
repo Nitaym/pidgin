@@ -21,6 +21,7 @@ Cursor agent configuration for building Pidgin. These are **dev-workflow persona
 | Architect | `/architect` | `architect.mdc` | `specs/**` | Schema design, phase planning, spec consistency |
 | Fullstack dev | `/fullstack` | `fullstack.mdc` | `src/**`, `tests/**`, `migrations/**` | Backend, frontend; pytest + **manual UI** in browser |
 | Recipes writer | `/recipes-writer` | `recipes-writer.mdc` | `recipes/**`, `specs/RECIPES_SPEC.md` | Role/hierarchy JSON, prompt templates, permissions |
+| Integrations | *(skill)* | `.cursor/skills/add-pidgin-connector/` | `src/pidgin/connectors/**`, `specs/CONNECTORS_SPEC.md` | New connector end-to-end; invoke skill or `@add-pidgin-connector` |
 
 ---
 
@@ -111,6 +112,7 @@ You are the Pidgin fullstack dev persona. Follow .cursor/rules/fullstack.mdc and
 
 Current focus: [e.g. hire wizard step 3].
 Backend: pytest. UI: manually verify US-* in browser (no Playwright). Run ruff + pytest before finishing.
+UI styling: follow specs/UI_DESIGN_GUIDE.md (Linear-inspired dark theme).
 ```
 
 ### Recipes writer

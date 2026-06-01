@@ -22,13 +22,14 @@ export function BriefForm({ value, onChange, showYourTake = true }: BriefFormPro
   const ideal = value.ideal_candidate;
 
   return (
-    <div className="stack">
-      <fieldset className="brief-section">
-        <legend>Job requirements</legend>
-        <label className="field">
-          Mission
+    <div className="brief-form stack">
+      <section className="brief-section">
+        <h3 className="brief-section-title">Job requirements</h3>
+        <div className="field">
+          <label htmlFor="brief-mission">Mission</label>
           <textarea
-            rows={3}
+            id="brief-mission"
+            rows={5}
             value={job.mission}
             onChange={(e) =>
               onChange({
@@ -37,11 +38,12 @@ export function BriefForm({ value, onChange, showYourTake = true }: BriefFormPro
               })
             }
           />
-        </label>
-        <label className="field">
-          Responsibilities (one per line)
+        </div>
+        <div className="field">
+          <label htmlFor="brief-responsibilities">Responsibilities (one per line)</label>
           <textarea
-            rows={4}
+            id="brief-responsibilities"
+            rows={6}
             value={listToLines(job.responsibilities)}
             onChange={(e) =>
               onChange({
@@ -53,11 +55,12 @@ export function BriefForm({ value, onChange, showYourTake = true }: BriefFormPro
               })
             }
           />
-        </label>
-        <label className="field">
-          Out of scope (one per line)
+        </div>
+        <div className="field">
+          <label htmlFor="brief-out-of-scope">Out of scope (one per line)</label>
           <textarea
-            rows={3}
+            id="brief-out-of-scope"
+            rows={5}
             value={listToLines(job.out_of_scope)}
             onChange={(e) =>
               onChange({
@@ -69,15 +72,16 @@ export function BriefForm({ value, onChange, showYourTake = true }: BriefFormPro
               })
             }
           />
-        </label>
-      </fieldset>
+        </div>
+      </section>
 
-      <fieldset className="brief-section">
-        <legend>Ideal candidate profile</legend>
-        <label className="field">
-          Tone
+      <section className="brief-section">
+        <h3 className="brief-section-title">Ideal candidate profile</h3>
+        <div className="field">
+          <label htmlFor="brief-tone">Tone</label>
           <textarea
-            rows={2}
+            id="brief-tone"
+            rows={4}
             value={ideal.tone}
             onChange={(e) =>
               onChange({
@@ -86,11 +90,12 @@ export function BriefForm({ value, onChange, showYourTake = true }: BriefFormPro
               })
             }
           />
-        </label>
-        <label className="field">
-          Decision framework
+        </div>
+        <div className="field">
+          <label htmlFor="brief-decision-framework">Decision framework</label>
           <textarea
-            rows={3}
+            id="brief-decision-framework"
+            rows={5}
             value={ideal.decision_framework}
             onChange={(e) =>
               onChange({
@@ -99,11 +104,12 @@ export function BriefForm({ value, onChange, showYourTake = true }: BriefFormPro
               })
             }
           />
-        </label>
-        <label className="field">
-          Escalation rules
+        </div>
+        <div className="field">
+          <label htmlFor="brief-escalation-rules">Escalation rules</label>
           <textarea
-            rows={3}
+            id="brief-escalation-rules"
+            rows={5}
             value={ideal.escalation_rules}
             onChange={(e) =>
               onChange({
@@ -112,18 +118,23 @@ export function BriefForm({ value, onChange, showYourTake = true }: BriefFormPro
               })
             }
           />
-        </label>
-      </fieldset>
+        </div>
+      </section>
 
       {showYourTake ? (
-        <label className="field">
-          Your take
-          <textarea
-            rows={4}
-            value={value.your_take}
-            onChange={(e) => onChange({ ...value, your_take: e.target.value })}
-          />
-        </label>
+        <section className="brief-section">
+          <h3 className="brief-section-title">Your take</h3>
+          <div className="field">
+            <label htmlFor="brief-your-take">Notes for this hire</label>
+            <textarea
+              id="brief-your-take"
+              rows={6}
+              placeholder="Anything specific to this role or candidate…"
+              value={value.your_take}
+              onChange={(e) => onChange({ ...value, your_take: e.target.value })}
+            />
+          </div>
+        </section>
       ) : null}
     </div>
   );

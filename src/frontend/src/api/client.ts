@@ -139,6 +139,8 @@ export const api = {
       body: JSON.stringify({ name, slug }),
     }),
   listAgents: (slug: string) => request<Agent[]>(`${workspaceBase(slug)}/agents`),
+  getAgent: (slug: string, handle: string) =>
+    request<Agent>(`${workspaceBase(slug)}/agents/${handle}`),
   listRooms: (slug: string) => request<Room[]>(`${workspaceBase(slug)}/rooms`),
   listRoleTemplates: (slug: string) =>
     request<RoleTemplatesResponse>(`${workspaceBase(slug)}/role-templates`),
@@ -198,13 +200,18 @@ export const api = {
       { method: "POST" },
     ),
   getAgentBrief: (slug: string, handle: string) =>
-    request<{ handle: string; customization: HireCustomization | null }>(
-      `${workspaceBase(slug)}/agents/${handle}/brief`,
-    ),
+    request<
+      Partial<Agent> & { handle: string; customization: HireCustomization | null }
+    >(`${workspaceBase(slug)}/agents/${handle}/brief`),
   patchAgentBrief: (slug: string, handle: string, customization: HireCustomization) =>
     request<{ handle: string; customization: HireCustomization }>(
       `${workspaceBase(slug)}/agents/${handle}/brief`,
       { method: "PATCH", body: JSON.stringify(customization) },
+    ),
+  archiveAgent: (slug: string, handle: string) =>
+    request<{ handle: string; current_status: string }>(
+      `${workspaceBase(slug)}/agents/${handle}/archive`,
+      { method: "POST" },
     ),
   createTemplateFromAgent: (
     slug: string,

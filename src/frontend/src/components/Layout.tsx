@@ -1,35 +1,54 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useParams } from "react-router-dom";
+import { PidginLogo } from "./PidginLogo";
 import { useApp } from "../context/AppContext";
 
 type LayoutProps = {
-  title?: string;
   showNav?: boolean;
 };
 
-export function Layout({ title = "Pidgin", showNav = true }: LayoutProps) {
+export function Layout({ showNav = true }: LayoutProps) {
   const { workspace, user } = useApp();
+  const { workspaceSlug = workspace?.slug ?? "" } = useParams();
+  const base = workspaceSlug ? `/${workspaceSlug}` : "";
 
   return (
     <div className="layout">
       <aside className="sidebar">
-        <div>
-          <h1>Pidgin</h1>
-          <div className="muted">{workspace?.display_name ?? "AI workforce"}</div>
-          {user ? <div className="muted user-line">{user.name || user.email}</div> : null}
+        <div className="sidebar-header">
+          <PidginLogo />
+          <div>
+            <p className="sidebar-brand">Pidgin</p>
+            {workspace ? (
+              <div className="sidebar-workspace">{workspace.display_name}</div>
+            ) : (
+              <div className="sidebar-workspace">AI workforce</div>
+            )}
+          </div>
         </div>
+
         {showNav && workspace ? (
           <nav>
-            <NavLink to="" end>
-              Team
-            </NavLink>
-            <NavLink to="hire">Hire a role</NavLink>
-            <NavLink to="templates">Your templates</NavLink>
-            <NavLink to="debug">Diagnostics</NavLink>
+            <div className="sidebar-section">
+              <p className="sidebar-section-label">Workspace</p>
+              <NavLink to={base} end>
+                Team
+              </NavLink>
+            </div>
+            <div className="sidebar-section">
+              <p className="sidebar-section-label">Workforce</p>
+              <NavLink to={`${base}/hire`}>Hire a role</NavLink>
+              <NavLink to={`${base}/templates`}>Your templates</NavLink>
+            </div>
+            <div className="sidebar-section">
+              <p className="sidebar-section-label">System</p>
+              <NavLink to={`${base}/debug`}>Diagnostics</NavLink>
+            </div>
           </nav>
         ) : null}
+
+        {user ? <div className="user-line">{user.name || user.email}</div> : null}
       </aside>
       <main className="main">
-        <h2 style={{ marginTop: 0 }}>{title}</h2>
         <Outlet />
       </main>
     </div>

@@ -42,6 +42,7 @@ For UI or hire-flow changes, **manually verify in a real browser** using Cursor'
 - Python 3.12+; Pydantic v2; FastAPI; React + Vite
 - pytest for backend; map tests to US-* where applicable
 - One phase task per PR/commit message
+- **UI styling:** follow [specs/UI_DESIGN_GUIDE.md](../../specs/UI_DESIGN_GUIDE.md) — dark Linear-inspired tokens in `src/frontend/src/index.css`; no ad-hoc colors
 
 ## How you work
 

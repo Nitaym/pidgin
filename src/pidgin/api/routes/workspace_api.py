@@ -27,6 +27,7 @@ from pidgin.recipes.catalog import (
 )
 from pidgin.services import inject_test_event
 from pidgin.services.admin import process_pending_events
+from pidgin.services.agent_lifecycle import ArchiveError, archive_agent
 from pidgin.services.brief import (
     BriefError,
     create_template_from_agent,
@@ -161,6 +162,37 @@ def api_hire(workspace_slug: str, request: Request, body: HireBody | None = None
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/agents/{handle}")
+def api_get_agent(workspace_slug: str, handle: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    agent = get_agent_by_handle(session.conn, handle)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {
+        "id": agent["id"],
+        "display_name": agent["display_name"],
+        "role_title": agent["role_title"],
+        "handle": agent["handle"],
+        "current_status": agent["current_status"],
+        "created_at": agent["created_at"],
+    }
+
+
+@router.post("/agents/{handle}/archive")
+def api_archive_agent(workspace_slug: str, handle: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return archive_agent(
+            session.conn,
+            handle=handle,
+            actor_principal_id=get_or_create_operator_principal(session.conn),
+        )
+    except ArchiveError as exc:
+        detail = str(exc)
+        status = 404 if "not found" in detail.lower() else 400
+        raise HTTPException(status_code=status, detail=detail) from exc
+
+
 @router.get("/agents/{handle}/brief")
 def api_get_agent_brief(workspace_slug: str, handle: str, request: Request) -> dict:
     session = require_workspace_session(request, workspace_slug)
@@ -169,7 +201,12 @@ def api_get_agent_brief(workspace_slug: str, handle: str, request: Request) -> d
         raise HTTPException(status_code=404, detail="Agent not found")
     customization = HireCustomization.from_json(agent.get("hire_customization_json"))
     return {
+        "id": agent["id"],
         "handle": handle,
+        "display_name": agent["display_name"],
+        "role_title": agent["role_title"],
+        "current_status": agent["current_status"],
+        "created_at": agent["created_at"],
         "customization": customization.model_dump() if customization else None,
     }
 

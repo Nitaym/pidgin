@@ -32,15 +32,69 @@ def get_agent_by_handle(conn: sqlite3.Connection, handle: str) -> dict[str, Any]
     return dict(row) if row else None
 
 
-def list_agents(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    rows = conn.execute(
-        """
+def list_agents(
+    conn: sqlite3.Connection,
+    *,
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
+    query = """
         SELECT id, display_name, role_title, handle, current_status, created_at
         FROM ai_employees
-        ORDER BY created_at ASC
-        """
-    ).fetchall()
+    """
+    if not include_archived:
+        query += " WHERE current_status != 'offboarded'"
+    query += " ORDER BY created_at ASC"
+    rows = conn.execute(query).fetchall()
     return [dict(row) for row in rows]
+
+
+def transition_employee_status(
+    conn: sqlite3.Connection,
+    *,
+    employee_id: str,
+    to_status: str,
+    actor_principal_id: str,
+    reason: str,
+) -> str:
+    row = conn.execute(
+        "SELECT current_status FROM ai_employees WHERE id = ?",
+        (employee_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"Employee not found: {employee_id}")
+
+    from_status = row["current_status"]
+    if from_status == to_status:
+        return from_status
+
+    now = utc_now_iso()
+    conn.execute(
+        """
+        INSERT INTO ai_employees_status_log (
+          id, ai_employee_id, from_status, to_status,
+          actor_principal_id, reason, occurred_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            new_ulid(),
+            employee_id,
+            from_status,
+            to_status,
+            actor_principal_id,
+            reason,
+            now,
+        ),
+    )
+    conn.execute(
+        """
+        UPDATE ai_employees
+        SET current_status = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (to_status, now, employee_id),
+    )
+    conn.commit()
+    return to_status
 
 
 def insert_recipe_snapshot(

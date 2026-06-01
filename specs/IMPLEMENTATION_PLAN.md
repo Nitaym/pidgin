@@ -256,6 +256,35 @@ uv run pidgin-admin --home ~/.pidgin
 
 **Depends on:** Phase 1 (hired agent with handle + permissions).
 
+**Integrations:** Phase 2I runs in parallel once 2.2–2.4 land. See [CONNECTORS_SPEC.md](CONNECTORS_SPEC.md). Agent skill: `.cursor/skills/add-pidgin-connector/SKILL.md`.
+
+---
+
+### Phase 2I — Integrations platform + connectors
+
+**Goal:** Full-stack integrations — registry, OAuth + manual auth, Integrations UI, then external connectors in priority order. An agent without integrations is not shippable for product demos.
+
+**Spec:** [CONNECTORS_SPEC.md](CONNECTORS_SPEC.md). Product model: [INTEGRATION_WOFKLOW.md](INTEGRATION_WOFKLOW.md).
+
+| ID | Task | Primary files | Done when |
+|---|---|---|---|
+| 2I.1 | Connector framework | `src/pidgin/connectors/base.py`, `resources.py`, `registry.py` | `ConnectorProtocol`; URI parser; registry resolve |
+| 2I.2 | Installations service + API | `services/integrations.py`, `api/routes/integrations.py` | CRUD `connector_installations`; catalog endpoint |
+| 2I.3 | OAuth + manual auth | `api/routes/integrations.py`, per-type `oauth.py` | Start/callback OAuth; manual POST; masked GET |
+| 2I.4 | **Integrations UI** | `src/frontend/pages/IntegrationsPage.tsx`, `Layout.tsx` | `/{workspace}/settings/integrations`; connect/disconnect/health per type |
+| 2I.5 | Webhook ingress router | `api/routes/hooks.py` | Verified webhook → `inbound_events` |
+| 2I.6 | Refactor `pidgin_chat` | `connectors/pidgin_chat/`, `services/chat.py` | Chat uses connector egress; same UX |
+| 2I.7 | **Slack** | `connectors/slack/` | OAuth + manual dev path; Events API ingress; `say`/`read`; UI card |
+| 2I.8 | **Gmail** | `connectors/gmail/` | OAuth + manual dev path; inbound email; `read`/`draft`; UI card |
+| 2I.9 | **Google Drive** | `connectors/google_drive/` | OAuth + service-account manual; `read`; UI card |
+| 2I.10 | **Google Meet** | `connectors/google_meet/` | OAuth only; read calendar/Meet events; UI card |
+| 2I.11 | **Zoom** | `connectors/zoom/` | OAuth + server-to-server manual; read meetings; UI card |
+| 2I.12 | Connector tests | `tests/unit/connectors/`, `tests/integration/connectors/` | Each shipped type has unit + ingress integration test |
+
+**Depends on:** Phase 2.2–2.4 (event loop + action dispatcher). External `execute`/send hard-depends Phase 3 approvals — read + ingress may ship earlier.
+
+**Build order (locked):** `pidgin_chat` → Slack → Gmail → Drive → Google Meet → Zoom.
+
 ---
 
 ### Phase 3 — Approvals + Pulse slice
@@ -281,7 +310,7 @@ uv run pidgin-admin --home ~/.pidgin
 | ID | Task | Notes |
 |---|---|---|
 | 4.1 | Interview/onboarding harness | Needs `INTERVIEW_SPEC.md`; admin-driven scenarios |
-| 4.2 | First external connector | Slack or email per [INTEGRATION_WOFKLOW.md](INTEGRATION_WOFKLOW.md) |
+| 4.2 | ~~First external connector~~ | Moved to Phase 2I ([CONNECTORS_SPEC.md](CONNECTORS_SPEC.md)) |
 | 4.3 | Real LLM gateway | Anthropic/OpenAI; keys via env |
 | 4.4 | End-user chat UI | Separate from admin diagnostics shell |
 | 4.5 | Company operator setup wizard | Hierarchy recipe from marketplace |
@@ -305,10 +334,13 @@ flowchart TD
   P1B --> P1B3[Phase 1B3 Post-hire edit]
   P1B --> P1C[Phase 1C HR assist]
   P1B --> P2
+  P2 --> P2I[Phase 2I Integrations]
   P2 --> P3
+  P2I --> P3
   P3 --> P4
 
   RS[RECIPES_SPEC.md] -.-> P1
+  CS[CONNECTORS_SPEC.md] -.-> P2I
   IS[INTERVIEW_SPEC.md] -.-> P4
 ```
 
@@ -474,7 +506,9 @@ After Phase 0 admin shell is green:
 | CLI | Ship in MVP vs remove scaffold | **Not in MVP** — admin + API only |
 | End-user frontend | React vs HTMX | Defer; admin is HTMX/Jinja for now |
 | Session security | Cookie vs header password | Dev cookie; production needs hardening |
-| First external connector | Slack vs email vs Pidgin-native | Pidgin-native first (Phase 2) |
+| Integration build order | Which connector first | **Locked:** Slack → Gmail → Drive → Meet → Zoom after `pidgin_chat` ([CONNECTORS_SPEC.md](CONNECTORS_SPEC.md)) |
+| Integration auth | OAuth only vs manual only | **Both** — OAuth primary; manual dev/fallback per connector type in CONNECTORS_SPEC §3 |
+| Integrations UI | Admin-only vs full React | **Full UI** at `/{workspace}/settings/integrations` (Phase 2I.4) |
 
 ---
 
@@ -491,6 +525,7 @@ After Phase 0 admin shell is green:
 | [MVP_USER_STORIES.md](MVP_USER_STORIES.md) | Acceptance criteria US-1–US-11 |
 | [HIRE_UX.md](HIRE_UX.md) | Hire wizard, templates, HR assist UX vocabulary |
 | [RECIPES_SPEC.md](RECIPES_SPEC.md) | Bundled role recipe JSON schema |
+| [CONNECTORS_SPEC.md](CONNECTORS_SPEC.md) | Connector contract, auth, API, UI, build order |
 
 ---
 

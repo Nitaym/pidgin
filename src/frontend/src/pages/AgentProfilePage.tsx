@@ -2,9 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Agent } from "../api/client";
 import { BriefForm } from "../components/BriefForm";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { HrAssistPanel } from "../components/HrAssistPanel";
 import { useApp } from "../context/AppContext";
 import { emptyCustomization, type HireCustomization } from "../types/hire";
+
+function agentStatusLabel(status: string): string {
+  return status === "offboarded" ? "archived" : status;
+}
 
 export function AgentProfilePage() {
   const { handle = "" } = useParams();
@@ -22,15 +27,36 @@ export function AgentProfilePage() {
   const [busy, setBusy] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [showCreateTemplate, setShowCreateTemplate] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!slug || !handle) return;
-    const [agents, brief] = await Promise.all([
-      api.listAgents(slug),
-      api.getAgentBrief(slug, handle),
-    ]);
-    const row = agents.find((a) => a.handle === handle) ?? null;
-    setAgent(row);
+    const brief = await api.getAgentBrief(slug, handle);
+
+    if (brief.display_name) {
+      setAgent({
+        id: brief.id,
+        display_name: brief.display_name,
+        role_title: brief.role_title,
+        handle: brief.handle,
+        current_status: brief.current_status,
+        created_at: brief.created_at,
+      });
+    } else {
+      const agents = await api.listAgents(slug);
+      const row = agents.find((a) => a.handle === handle);
+      if (!row) {
+        try {
+          setAgent(await api.getAgent(slug, handle));
+        } catch {
+          throw new Error("Agent not found");
+        }
+      } else {
+        setAgent(row);
+      }
+    }
+
     const custom = brief.customization ?? emptyCustomization();
     setCustomization(custom);
     setSavedCustomization(custom);
@@ -74,6 +100,39 @@ export function AgentProfilePage() {
     }
   }
 
+  async function handleArchive() {
+    if (!slug || !handle) return;
+    setBusy(true);
+    setArchiveError(null);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await api.archiveAgent(slug, handle);
+      setAgent((prev) =>
+        prev ? { ...prev, current_status: result.current_status } : prev,
+      );
+      setShowArchiveConfirm(false);
+      setArchiveError(null);
+      navigate(`/${slug}/`, { replace: true });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "Archive failed";
+      setArchiveError(detail);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openArchiveConfirm() {
+    setArchiveError(null);
+    setShowArchiveConfirm(true);
+  }
+
+  function closeArchiveConfirm() {
+    if (busy) return;
+    setArchiveError(null);
+    setShowArchiveConfirm(false);
+  }
+
   if (!agent) {
     return (
       <div className="stack">
@@ -82,6 +141,7 @@ export function AgentProfilePage() {
     );
   }
 
+  const archived = agent.current_status === "offboarded";
   const dirty = JSON.stringify(customization) !== JSON.stringify(savedCustomization);
 
   return (
@@ -93,28 +153,65 @@ export function AgentProfilePage() {
       <div className="hero panel stack">
         <h3 style={{ margin: 0 }}>{agent.display_name}</h3>
         <p className="muted" style={{ margin: 0 }}>
-          {agent.role_title} · @{agent.handle} · {agent.current_status}
+          {agent.role_title} · @{agent.handle} · {agentStatusLabel(agent.current_status)}
         </p>
       </div>
 
+      {archived ? (
+        <div className="warning">
+          This agent is archived. They no longer appear on your team or respond in rooms.
+        </div>
+      ) : null}
+
       {error ? <div className="error">{error}</div> : null}
       {message ? <div className="success">{message}</div> : null}
+
+      <ConfirmModal
+        open={showArchiveConfirm}
+        title="Archive this agent?"
+        busy={busy}
+        error={archiveError}
+        confirmLabel={busy ? "Archiving…" : "Archive agent"}
+        onClose={closeArchiveConfirm}
+        onConfirm={() => void handleArchive()}
+      >
+        <p style={{ margin: 0 }}>
+          {agent.display_name} will be removed from your team and will no longer respond in rooms.
+          Their brief, history, and audit trail are kept on disk.
+        </p>
+        <p style={{ margin: 0 }}>This cannot be undone from the UI.</p>
+      </ConfirmModal>
 
       <div className="split-layout">
         <div className="panel stack">
           <h4 style={{ margin: 0 }}>Role brief</h4>
           <BriefForm value={customization} onChange={setCustomization} />
-          <div className="row">
-            <button type="button" disabled={busy || !dirty} onClick={() => void handleSaveBrief()}>
+          <div className="row profile-actions">
+            <button
+              type="button"
+              disabled={busy || !dirty || archived}
+              onClick={() => void handleSaveBrief()}
+            >
               Save brief
             </button>
             <button
               type="button"
               className="secondary"
+              disabled={archived}
               onClick={() => setShowCreateTemplate((v) => !v)}
             >
               Create template from this agent
             </button>
+            {!archived ? (
+              <button
+                type="button"
+                className="danger profile-actions-danger"
+                disabled={busy}
+                onClick={openArchiveConfirm}
+              >
+                Archive agent
+              </button>
+            ) : null}
           </div>
           {showCreateTemplate ? (
             <form className="stack" onSubmit={(e) => void handleCreateTemplate(e)}>
@@ -134,13 +231,15 @@ export function AgentProfilePage() {
           ) : null}
         </div>
 
-        <HrAssistPanel
-          slug={slug}
-          contextType="agent"
-          contextId={agent.id}
-          customization={customization}
-          onApplyCustomization={setCustomization}
-        />
+        {!archived ? (
+          <HrAssistPanel
+            slug={slug}
+            contextType="agent"
+            contextId={agent.id}
+            customization={customization}
+            onApplyCustomization={setCustomization}
+          />
+        ) : null}
       </div>
     </div>
   );

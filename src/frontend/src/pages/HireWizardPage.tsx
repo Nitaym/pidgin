@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { BriefForm } from "../components/BriefForm";
@@ -9,6 +9,7 @@ import {
   type HireCustomization,
   type SelectedTemplate,
 } from "../types/hire";
+import { randomAmericanFirstName } from "../utils/agentNameGenerator";
 
 function suggestHandle(displayName: string): string {
   return displayName
@@ -22,7 +23,7 @@ export function HireWizardPage() {
   const { workspace } = useApp();
   const slug = workspace?.slug ?? "";
 
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState<1 | 2>(1);
   const [templates, setTemplates] = useState<Awaited<
     ReturnType<typeof api.listRoleTemplates>
   > | null>(null);
@@ -33,8 +34,17 @@ export function HireWizardPage() {
   const [handleEdited, setHandleEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const displayNameSeeded = useRef(false);
 
   const hireContextId = useMemo(() => `hire-${Date.now()}`, []);
+
+  const chooseRandomDisplayName = useCallback(() => {
+    const name = randomAmericanFirstName();
+    setDisplayName(name);
+    if (!handleEdited) {
+      setHandle(suggestHandle(name));
+    }
+  }, [handleEdited]);
 
   const loadTemplates = useCallback(async () => {
     if (!slug) return;
@@ -51,18 +61,32 @@ export function HireWizardPage() {
     }
   }, [displayName, handleEdited]);
 
+  useEffect(() => {
+    if (step === 2 && !displayNameSeeded.current) {
+      displayNameSeeded.current = true;
+      chooseRandomDisplayName();
+    }
+  }, [step, chooseRandomDisplayName]);
+
+  function goToDetails(next: SelectedTemplate, customizationNext: HireCustomization) {
+    setSelected(next);
+    setCustomization(customizationNext);
+    setStep(2);
+  }
+
   async function selectBundled(templateId: string, name: string) {
     setBusy(true);
     setError(null);
     try {
       const detail = await api.getBundledTemplate(slug, templateId);
-      setSelected({ source: "bundled", templateId, name, version: detail.version });
-      setCustomization({
-        job_requirements: detail.default_job_requirements,
-        ideal_candidate: detail.default_ideal_candidate,
-        your_take: "",
-      });
-      setStep(2);
+      goToDetails(
+        { source: "bundled", templateId, name, version: detail.version },
+        {
+          job_requirements: detail.default_job_requirements,
+          ideal_candidate: detail.default_ideal_candidate,
+          your_take: "",
+        },
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load template");
     } finally {
@@ -75,9 +99,10 @@ export function HireWizardPage() {
     setError(null);
     try {
       const detail = await api.getWorkspaceTemplate(slug, templateSlug);
-      setSelected({ source: "workspace", slug: templateSlug, name, version });
-      setCustomization(detail.customization);
-      setStep(2);
+      goToDetails(
+        { source: "workspace", slug: templateSlug, name, version },
+        detail.customization,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load template");
     } finally {
@@ -94,14 +119,15 @@ export function HireWizardPage() {
         duplicate_from_recipe_id: templateId,
       });
       await loadTemplates();
-      setSelected({
-        source: "workspace",
-        slug: created.slug,
-        name: created.name,
-        version: created.current_version,
-      });
-      setCustomization(created.customization);
-      setStep(2);
+      goToDetails(
+        {
+          source: "workspace",
+          slug: created.slug,
+          name: created.name,
+          version: created.current_version,
+        },
+        created.customization,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Duplicate failed");
     } finally {
@@ -109,10 +135,8 @@ export function HireWizardPage() {
     }
   }
 
-  function startBlank() {
-    setSelected({ source: "blank", name: "Custom role" });
-    setCustomization(emptyCustomization());
-    setStep(2);
+  function startFresh() {
+    goToDetails({ source: "blank", name: "Start fresh" }, emptyCustomization());
   }
 
   async function handleHire() {
@@ -157,165 +181,169 @@ export function HireWizardPage() {
 
   const templateLabel =
     selected?.source === "bundled"
-      ? `Pidgin role template: ${selected.name} v${selected.version}`
+      ? `${selected.name} v${selected.version}`
       : selected?.source === "workspace"
-        ? `Your role template: ${selected.name} v${selected.version}`
+        ? `${selected.name} v${selected.version}`
         : selected?.source === "blank"
-          ? "Blank custom role"
+          ? "Start fresh"
           : "";
+
+  const canHire = Boolean(selected && displayName.trim());
 
   return (
     <div className="stack">
-      <div className="row">
-        <Link to=".." className="muted">
+      <div className="page-header">
+        <div>
+          <p className="eyebrow" style={{ margin: "0 0 4px" }}>
+            {step === 1 ? "Step 1 of 2 · Choose a template" : "Step 2 of 2 · Agent details"}
+          </p>
+          <h2>Hire a role</h2>
+        </div>
+        <Link to=".." className="ghost">
           ← Team
         </Link>
       </div>
 
-      <div className="panel stack">
-        <p className="eyebrow">Hire a role · Step {step} of 4</p>
-        <h3 style={{ margin: 0 }}>Hire a role</h3>
-        {error ? <div className="error">{error}</div> : null}
+      {error ? <div className="error">{error}</div> : null}
 
-        {step === 1 ? (
-          <div className="stack">
-            <section className="stack">
-              <h4 style={{ margin: 0 }}>Pidgin role templates</h4>
+      {step === 1 ? (
+        <div className="stack">
+          <section className="brief-section">
+            <h3 className="brief-section-title">Pidgin role templates</h3>
+            <p className="muted field-hint">
+              Pick a starting point for this hire. You can edit everything on the next screen.
+            </p>
+            <div className="template-grid">
+              {(templates?.bundled ?? []).map((t) => (
+                <div key={t.template_id} className="template-card panel stack">
+                  <strong>{t.name}</strong>
+                  <span className="muted">{t.role_title}</span>
+                  <span className="muted">v{t.version}</span>
+                  {t.description ? <span className="muted">{t.description}</span> : null}
+                  <div className="row">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void selectBundled(t.template_id, t.name)}
+                    >
+                      Use this template
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() => void duplicateBundled(t.template_id, t.name)}
+                    >
+                      Duplicate
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {(templates?.workspace ?? []).length > 0 ? (
+            <section className="brief-section">
+              <h3 className="brief-section-title">Your role templates</h3>
               <div className="template-grid">
-                {(templates?.bundled ?? []).map((t) => (
-                  <div key={t.template_id} className="template-card panel stack">
+                {templates?.workspace.map((t) => (
+                  <div key={t.slug} className="template-card panel stack">
                     <strong>{t.name}</strong>
-                    <span className="muted">{t.role_title}</span>
-                    <span className="muted">v{t.version}</span>
-                    <div className="row">
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void selectBundled(t.template_id, t.name)}
-                      >
-                        Use this template
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={busy}
-                        onClick={() => void duplicateBundled(t.template_id, t.name)}
-                      >
-                        Duplicate
-                      </button>
-                    </div>
+                    <span className="muted">v{t.current_version}</span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void selectWorkspace(t.slug, t.name, t.current_version)}
+                    >
+                      Use this template
+                    </button>
                   </div>
                 ))}
               </div>
             </section>
+          ) : null}
 
-            <section className="stack">
-              <h4 style={{ margin: 0 }}>Your role templates</h4>
-              {(templates?.workspace ?? []).length === 0 ? (
-                <p className="muted">None yet — duplicate a Pidgin template or create from an agent.</p>
-              ) : (
-                <div className="template-grid">
-                  {templates?.workspace.map((t) => (
-                    <div key={t.slug} className="template-card panel stack">
-                      <strong>{t.name}</strong>
-                      <span className="muted">v{t.current_version}</span>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => void selectWorkspace(t.slug, t.name, t.current_version)}
-                      >
-                        Use this template
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <button type="button" className="secondary" disabled={busy} onClick={startBlank}>
-              Create blank template
+          <section className="brief-section">
+            <h3 className="brief-section-title">Start fresh</h3>
+            <p className="muted field-hint">
+              No template defaults — write the role brief from scratch.
+            </p>
+            <button type="button" className="secondary" disabled={busy} onClick={startFresh}>
+              Start fresh
             </button>
-          </div>
-        ) : null}
+          </section>
+        </div>
+      ) : null}
 
-        {step === 2 ? (
-          <div className="split-layout">
-            <BriefForm value={customization} onChange={setCustomization} />
-            <HrAssistPanel
-              slug={slug}
-              contextType="hire"
-              contextId={hireContextId}
-              customization={customization}
-              onApplyCustomization={setCustomization}
-            />
-          </div>
-        ) : null}
-
-        {step === 3 ? (
-          <div className="stack">
-            <label className="field">
-              Agent display name
-              <input
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="Jane"
-                required
-              />
-            </label>
-            <label className="field">
-              Handle
-              <input
-                value={handle}
-                onChange={(e) => {
-                  setHandleEdited(true);
-                  setHandle(e.target.value);
-                }}
-                placeholder="jane"
-              />
-            </label>
-            <p className="muted field-hint">Manager defaults to you (workspace operator).</p>
-          </div>
-        ) : null}
-
-        {step === 4 ? (
-          <div className="stack">
-            <p className="muted">{templateLabel}</p>
-            <dl className="review-list">
-              <dt>Display name</dt>
-              <dd>{displayName}</dd>
-              <dt>Handle</dt>
-              <dd>@{handle}</dd>
-              <dt>Mission</dt>
-              <dd>{customization.job_requirements.mission || "—"}</dd>
-              <dt>Tone</dt>
-              <dd>{customization.ideal_candidate.tone || "—"}</dd>
-              <dt>Your take</dt>
-              <dd>{customization.your_take || "—"}</dd>
-            </dl>
-          </div>
-        ) : null}
-
-        {step > 1 ? (
-          <div className="row">
-            <button type="button" className="secondary" onClick={() => setStep((s) => s - 1)}>
-              Back
-            </button>
-            {step < 4 ? (
+      {step === 2 ? (
+        <div className="split-layout hire-page">
+          <div className="stack hire-page-main">
+            <p className="review-template">
+              Based on: <strong>{templateLabel}</strong>
+              {" · "}
               <button
                 type="button"
-                onClick={() => setStep((s) => s + 1)}
-                disabled={step === 3 && !displayName.trim()}
+                className="ghost"
+                disabled={busy}
+                onClick={() => setStep(1)}
               >
-                Continue
+                Change template
               </button>
-            ) : (
-              <button type="button" disabled={busy} onClick={() => void handleHire()}>
+            </p>
+
+            <section className="brief-section">
+              <h3 className="brief-section-title">Identity</h3>
+              <div className="field">
+                <label htmlFor="hire-display-name">Display name</label>
+                <div className="field-inline">
+                  <input
+                    id="hire-display-name"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Jane"
+                    required
+                  />
+                  <button type="button" className="secondary" onClick={chooseRandomDisplayName}>
+                    Choose random name
+                  </button>
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="hire-handle">Handle</label>
+                <input
+                  id="hire-handle"
+                  value={handle}
+                  onChange={(e) => {
+                    setHandleEdited(true);
+                    setHandle(e.target.value);
+                  }}
+                  placeholder="jane"
+                />
+              </div>
+              <p className="muted field-hint">Manager defaults to you (workspace operator).</p>
+            </section>
+
+            <BriefForm value={customization} onChange={setCustomization} />
+
+            <div className="row hire-page-actions">
+              <button type="button" className="secondary" disabled={busy} onClick={() => setStep(1)}>
+                Back
+              </button>
+              <button type="button" disabled={busy || !canHire} onClick={() => void handleHire()}>
                 {busy ? "Hiring…" : "Hire and continue"}
               </button>
-            )}
+            </div>
           </div>
-        ) : null}
-      </div>
+
+          <HrAssistPanel
+            slug={slug}
+            contextType="hire"
+            contextId={hireContextId}
+            customization={customization}
+            onApplyCustomization={setCustomization}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

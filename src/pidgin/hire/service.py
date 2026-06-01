@@ -68,6 +68,7 @@ def _ensure_support_singleton(conn: sqlite3.Connection, recipe_id: str) -> None:
         FROM ai_employees e
         JOIN ai_employee_recipe_snapshots s ON s.id = e.recipe_snapshot_id
         WHERE s.recipe_id = ?
+          AND e.current_status != 'offboarded'
         LIMIT 1
         """,
         (SUPPORT_RECIPE_ID,),

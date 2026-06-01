@@ -52,17 +52,13 @@ function WorkspaceApp() {
 
   return (
     <Routes>
-      <Route element={<Layout title="Team" />}>
+      <Route element={<Layout />}>
         <Route index element={<TeamPage />} />
         <Route path="hire" element={<HireWizardPage />} />
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="templates/:templateSlug" element={<TemplateEditorPage />} />
         <Route path="agents/:handle" element={<AgentProfilePage />} />
-      </Route>
-      <Route element={<Layout title="Chat" />}>
         <Route path="rooms/:roomId/chat" element={<ChatPage />} />
-      </Route>
-      <Route element={<Layout title="Diagnostics" />}>
         <Route path="debug" element={<DebugPage />} />
       </Route>
       <Route path="*" element={<Navigate to="" replace />} />

@@ -375,6 +375,8 @@ metadata() -> { capabilities, rate_limits, ... }
 
 All calls go through the policy gate before the connector module is invoked. **Simulated connectors** for interview/onboarding implement the same contract and are substituted at injection time — same Loop 3 code path, different connector implementations.
 
+Implementation details (auth modes, resource URIs, admin API, UI, build order): [CONNECTORS_SPEC.md](CONNECTORS_SPEC.md).
+
 ### 9.5 Recipe consumption
 
 The runtime fetches recipe bundles from a **separate marketplace app** at hire time, verifies the bundle's sha256, and stores an immutable snapshot in `ai_employee_recipe_snapshots`. After hire, the runtime never reads the marketplace again for that agent.

@@ -54,20 +54,23 @@ export function DebugPage() {
 
   return (
     <div className="stack">
+      <div className="page-header">
+        <h2>Diagnostics</h2>
+        <div className="page-header-actions">
+          <button type="button" onClick={() => void handleInject()}>
+            Inject test event
+          </button>
+          <button type="button" onClick={() => void handleRunOnce()}>
+            Run once
+          </button>
+          <button type="button" className="secondary" onClick={() => void refresh()}>
+            Refresh
+          </button>
+        </div>
+      </div>
+
       {error ? <div className="error">{error}</div> : null}
       {message ? <div className="success">{message}</div> : null}
-
-      <div className="row">
-        <button type="button" onClick={() => void handleInject()}>
-          Inject test event
-        </button>
-        <button type="button" onClick={() => void handleRunOnce()}>
-          Run once
-        </button>
-        <button type="button" className="secondary" onClick={() => void refresh()}>
-          Refresh
-        </button>
-      </div>
 
       <section className="panel">
         <h3>Events</h3>

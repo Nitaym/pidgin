@@ -20,11 +20,10 @@ export function TemplatesPage() {
 
   return (
     <div className="stack">
-      <Link to=".." className="muted">
-        ← Team
-      </Link>
+      <div className="page-header">
+        <h2>Your role templates</h2>
+      </div>
       <div className="panel stack">
-        <h3 style={{ margin: 0 }}>Your role templates</h3>
         {templates.length === 0 ? (
           <p className="muted">
             No workspace templates yet.{" "}

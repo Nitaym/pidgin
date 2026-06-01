@@ -776,4 +776,4 @@ The short product line:
 Pidgin connects once to company tools, then gives every AI agent a governed identity across them.
 ```
 
-Related specs: [AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md), [SCHEMA_SPEC.md](SCHEMA_SPEC.md), [TECH_STACK_SPEC.md](TECH_STACK_SPEC.md).
+Related specs: [AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md), [SCHEMA_SPEC.md](SCHEMA_SPEC.md), [TECH_STACK_SPEC.md](TECH_STACK_SPEC.md), [CONNECTORS_SPEC.md](CONNECTORS_SPEC.md) (implementation contract).

@@ -55,13 +55,17 @@ export function ChatPage() {
 
   return (
     <div className="stack">
-      <p className="muted">
-        <Link to="..">← Back to team</Link>
-      </p>
+      <div className="page-header">
+        <div>
+          <p className="muted" style={{ margin: "0 0 4px" }}>
+            <Link to="..">← Team</Link>
+          </p>
+          <h2>{room.name}</h2>
+        </div>
+      </div>
       {error ? <div className="error">{error}</div> : null}
 
       <section className="panel stack">
-        <h3 style={{ margin: 0 }}>{room.name}</h3>
         <div className="message-list">
           {messages.length === 0 ? (
             <p className="muted">No messages yet. Say hello.</p>
