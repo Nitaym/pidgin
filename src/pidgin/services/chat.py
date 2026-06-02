@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import sqlite3
 
+from pidgin.connectors.pidgin_chat.ingress import enqueue_direct_address
 from pidgin.db.chat import get_or_create_room_conversation, insert_message, list_messages
 from pidgin.db.employees import ensure_operator_principal, get_agent_by_handle
-from pidgin.db import insert_inbound_event
-from pidgin.runtime import run_once
-from pidgin.types import InboundEventCreate, TrustLabel, TriggerType
 
 
 def send_chat_message(
@@ -36,24 +34,16 @@ def send_chat_message(
         body_text=body_text,
     )
 
-    event_id = insert_inbound_event(
+    event_id = enqueue_direct_address(
         conn,
-        InboundEventCreate(
-            trigger_type=TriggerType.DIRECT_ADDRESS,
-            target_ai_employee_id=agent["id"],
-            sender_principal_id=operator_id,
-            trust_label=TrustLabel.INTERNAL_AUTHENTICATED,
-            payload={
-                "conversation_id": conversation_id,
-                "room_id": room_id,
-                "message_id": message_id,
-                "message_text": body_text,
-                "sender_principal_id": operator_id,
-                "sender_display_name": operator_name,
-            },
-        ),
+        target_ai_employee_id=agent["id"],
+        conversation_id=conversation_id,
+        room_id=room_id,
+        message_id=message_id,
+        message_text=body_text,
+        sender_principal_id=operator_id,
+        sender_display_name=operator_name,
     )
-    run_once(conn)
     return message_id, event_id
 
 

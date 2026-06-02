@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from pidgin.api.deps import require_workspace_session
+from pidgin.api.deps import OAUTH_STATE_SESSION_KEY, require_workspace_session
 from pidgin.db.chat import get_or_create_room_conversation, list_messages, list_rooms
 from pidgin.db.diagnostics import get_turn, list_audit_log, list_inbound_events, list_turns
 from pidgin.db.employees import get_agent_by_handle, list_agents
@@ -35,6 +35,15 @@ from pidgin.services.brief import (
     update_agent_brief,
 )
 from pidgin.services.chat import send_chat_message
+from pidgin.services.integrations import (
+    IntegrationError,
+    connect_manual,
+    disconnect,
+    get_integration_catalog,
+    list_integrations,
+    run_health_check,
+    start_oauth,
+)
 from pidgin.templates import (
     TemplateError,
     create_workspace_template,
@@ -98,6 +107,15 @@ class CreateHrAssistSessionBody(BaseModel):
 
 class HrAssistMessageBody(BaseModel):
     body_text: str = Field(min_length=1)
+
+
+class ManualConnectBody(BaseModel):
+    display_name: str = Field(min_length=1)
+    fields: dict[str, str] = Field(default_factory=dict)
+
+
+class OAuthStartBody(BaseModel):
+    display_name: str | None = None
 
 
 @router.get("/agents")
@@ -527,3 +545,85 @@ def api_get_turn(workspace_slug: str, turn_id: str, request: Request) -> dict:
 def api_list_audit(workspace_slug: str, request: Request, limit: int = 100) -> list[dict]:
     session = require_workspace_session(request, workspace_slug)
     return list_audit_log(session.conn, limit=limit)
+
+
+@router.get("/integrations/catalog")
+def api_integration_catalog(workspace_slug: str, request: Request) -> list[dict]:
+    _ = workspace_slug
+    require_workspace_session(request, workspace_slug)
+    return get_integration_catalog()
+
+
+@router.get("/integrations")
+def api_list_integrations(workspace_slug: str, request: Request) -> list[dict]:
+    session = require_workspace_session(request, workspace_slug)
+    return list_integrations(session.conn)
+
+
+@router.post("/integrations/{connector_type}/manual")
+def api_connect_manual(
+    workspace_slug: str,
+    connector_type: str,
+    body: ManualConnectBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return connect_manual(
+            session.conn,
+            connector_type=connector_type,
+            display_name=body.display_name,
+            fields=body.fields,
+        )
+    except IntegrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/integrations/{connector_type}/oauth/start")
+def api_oauth_start(
+    workspace_slug: str,
+    connector_type: str,
+    request: Request,
+    body: OAuthStartBody | None = None,
+) -> dict:
+    require_workspace_session(request, workspace_slug)
+    redirect_base = str(request.base_url).rstrip("/")
+    try:
+        url, oauth_state = start_oauth(
+            connector_type=connector_type,
+            workspace_slug=workspace_slug,
+            redirect_base=redirect_base,
+        )
+    except IntegrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    request.session[OAUTH_STATE_SESSION_KEY] = oauth_state
+    if body and body.display_name:
+        request.session["oauth_display_name"] = body.display_name
+    return {"authorization_url": url}
+
+
+@router.post("/integrations/{installation_id}/health")
+def api_integration_health(
+    workspace_slug: str,
+    installation_id: str,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return run_health_check(session.conn, installation_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/integrations/{installation_id}")
+def api_disconnect_integration(
+    workspace_slug: str,
+    installation_id: str,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        disconnect(session.conn, installation_id)
+    except IntegrationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"deleted": installation_id}

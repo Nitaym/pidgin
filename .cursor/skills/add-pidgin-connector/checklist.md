@@ -37,10 +37,12 @@ Use with [SKILL.md](SKILL.md). Authority: [specs/CONNECTORS_SPEC.md](../../specs
 
 ## Frontend
 
-- Route: `/{workspace}/settings/integrations`
-- Catalog-driven cards from `GET /integrations/catalog`
-- Loading/error states per UI_DESIGN_GUIDE
-- After OAuth redirect, poll or refetch until status `active`
+- Route: `/{workspace}/integrations/{connector_type}` — shared `IntegrationDetailPage`
+- Index: `IntegrationsPage` — catalog grid only; no inline connect UI
+- Add `integrationMeta.ts` entry (tagline, accent, monogram)
+- Reuse hire patterns: `brief-section`, `template-grid`, `eyebrow`, `review-template`
+- OAuth + manual on detail page via tabs when both supported — never collapsible on index
+- After OAuth redirect lands on detail page
 
 ## Tests
 

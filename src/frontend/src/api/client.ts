@@ -117,6 +117,29 @@ export type Message = {
   originating_turn_id: string | null;
 };
 
+export type IntegrationCatalogEntry = {
+  connector_type: string;
+  name: string;
+  description: string;
+  auth_modes: string[];
+  builtin?: boolean;
+  capabilities: string[];
+  oauth_scopes?: string[];
+  manual_fields?: Array<{ key: string; label: string; secret: boolean }>;
+};
+
+export type IntegrationInstallation = {
+  id: string;
+  connector_type: string;
+  display_name: string;
+  status: string;
+  catalog_name?: string;
+  config_json?: Record<string, unknown>;
+  installed_at: string;
+  updated_at: string;
+  last_health_check_at?: string | null;
+};
+
 function workspaceBase(slug: string) {
   return `/${slug}/api`;
 }
@@ -267,6 +290,33 @@ export const api = {
     request<Record<string, unknown>[]>(`${workspaceBase(slug)}/turns`),
   listAudit: (slug: string) =>
     request<Record<string, unknown>[]>(`${workspaceBase(slug)}/audit`),
+  getIntegrationsCatalog: (slug: string) =>
+    request<IntegrationCatalogEntry[]>(`${workspaceBase(slug)}/integrations/catalog`),
+  listIntegrations: (slug: string) =>
+    request<IntegrationInstallation[]>(`${workspaceBase(slug)}/integrations`),
+  connectIntegrationManual: (
+    slug: string,
+    connectorType: string,
+    body: { display_name: string; fields: Record<string, string> },
+  ) =>
+    request<IntegrationInstallation>(
+      `${workspaceBase(slug)}/integrations/${connectorType}/manual`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  startIntegrationOAuth: (slug: string, connectorType: string) =>
+    request<{ authorization_url: string }>(
+      `${workspaceBase(slug)}/integrations/${connectorType}/oauth/start`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
+  checkIntegrationHealth: (slug: string, installationId: string) =>
+    request<{ ok: boolean; message: string }>(
+      `${workspaceBase(slug)}/integrations/${installationId}/health`,
+      { method: "POST" },
+    ),
+  disconnectIntegration: (slug: string, installationId: string) =>
+    request<{ deleted: string }>(`${workspaceBase(slug)}/integrations/${installationId}`, {
+      method: "DELETE",
+    }),
 };
 
 export function googleLoginUrl() {

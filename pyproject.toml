@@ -16,6 +16,7 @@ dependencies = [
     "itsdangerous>=2.2.0",
     "python-multipart>=0.0.12",
     "httpx>=0.28.0",
+    "slack-sdk>=3.33.0",
     "annotated-doc>=0.0.4",
     "anthropic>=0.40.0",
     "openai>=1.55.0",

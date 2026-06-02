@@ -49,3 +49,37 @@ def insert_agent_principal(
         (principal_id, display_name, ai_employee_id, now, now),
     )
     return principal_id
+
+
+def upsert_slack_principal(
+    conn: sqlite3.Connection,
+    *,
+    slack_user_id: str,
+    display_name: str,
+) -> str:
+    row = conn.execute(
+        "SELECT id FROM principals WHERE slack_user_id = ?",
+        (slack_user_id,),
+    ).fetchone()
+    now = utc_now_iso()
+    if row is not None:
+        conn.execute(
+            "UPDATE principals SET display_name = ?, updated_at = ? WHERE id = ?",
+            (display_name, now, row["id"]),
+        )
+        conn.commit()
+        return row["id"]
+
+    principal_id = new_ulid()
+    conn.execute(
+        """
+        INSERT INTO principals (
+          id, type, display_name, email_address, slack_user_id,
+          google_subject_id, ai_employee_id, allowlist_pattern,
+          is_active, metadata_json, created_at, updated_at
+        ) VALUES (?, 'workspace_member', ?, NULL, ?, NULL, NULL, NULL, 1, NULL, ?, ?)
+        """,
+        (principal_id, display_name, slack_user_id, now, now),
+    )
+    conn.commit()
+    return principal_id

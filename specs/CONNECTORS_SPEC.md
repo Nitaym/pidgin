@@ -236,19 +236,37 @@ Webhook routes verify signatures using secrets from `credentials_json` / env.
 
 ## 8. Frontend — Integrations UI
 
-**Route:** `/{workspace}/settings/integrations` (add nav item under workspace settings).
+Follow [UI_DESIGN_GUIDE.md](UI_DESIGN_GUIDE.md) and match the hire wizard visual system (`brief-section`, `template-grid`, `eyebrow`, `hire-page-main`).
 
-Per connector card:
+### Routes
 
-1. **Status** — connected / error / not configured
-2. **Connect** — primary OAuth button when `oauth2` supported
-3. **Advanced** — collapsible manual token paste when `manual` supported (dev warning banner)
-4. **Health** — last check, reconnect
-5. **Disconnect** — confirm modal
+| Route | Component | Purpose |
+| --- | --- | --- |
+| `/{workspace}/integrations` | `IntegrationsPage` | Catalog grid — links only, no inline connect |
+| `/{workspace}/integrations/{connector_type}` | `IntegrationDetailPage` | Dedicated setup page per integration |
 
-No half-implementations: every shipped connector type must have a working connect + disconnect flow in this page before the phase task closes.
+Legacy `/{workspace}/settings/integrations` redirects to `/integrations`.
 
-Follow [UI_DESIGN_GUIDE.md](UI_DESIGN_GUIDE.md). Copy uses "integration" / "connection", not "connector" in user-facing strings.
+### Index page (`IntegrationsPage`)
+
+- Grid of catalog cards (like hire template picker)
+- Each card: brand monogram, description, capability chips, connection status, “Configure →”
+- **No** collapsible panels, **no** inline OAuth/manual forms
+
+### Detail page (`IntegrationDetailPage`)
+
+Shared shell for every `connector_type`. Sections:
+
+1. **Hero** — name, tagline, description, capabilities
+2. **Connect** — OAuth button and/or manual credential fields (always visible)
+   - When both auth modes supported: `.tabs` toggle (OAuth | Manual setup), not an accordion
+3. **Manage** — when connected: status, health check, disconnect
+
+Add per-type copy/colors in `src/frontend/src/utils/integrationMeta.ts`.
+
+OAuth callback redirects to `/{workspace}/integrations/{connector_type}`.
+
+Copy uses "integration" / "connection", not "connector" in user-facing strings.
 
 ---
 

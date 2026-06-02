@@ -5,6 +5,8 @@ import { AgentProfilePage } from "./pages/AgentProfilePage";
 import { ChatPage } from "./pages/ChatPage";
 import { DebugPage } from "./pages/DebugPage";
 import { HireWizardPage } from "./pages/HireWizardPage";
+import { IntegrationDetailPage } from "./pages/IntegrationDetailPage";
+import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { TeamPage } from "./pages/TeamPage";
 import { TemplateEditorPage, TemplatesPage } from "./pages/TemplatesPage";
@@ -60,6 +62,9 @@ function WorkspaceApp() {
         <Route path="agents/:handle" element={<AgentProfilePage />} />
         <Route path="rooms/:roomId/chat" element={<ChatPage />} />
         <Route path="debug" element={<DebugPage />} />
+        <Route path="integrations" element={<IntegrationsPage />} />
+        <Route path="integrations/:connectorType" element={<IntegrationDetailPage />} />
+        <Route path="settings/integrations" element={<Navigate to="../integrations" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="" replace />} />
     </Routes>

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -10,7 +9,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from pidgin.api.routes import auth, workspace_api, workspaces
+import pidgin.connectors  # noqa: F401 — register connector factories
+from pidgin.api.routes import auth, hooks, workspace_api, workspaces
 
 
 def frontend_dist() -> Path:
@@ -50,6 +50,7 @@ def create_app(
     app.include_router(auth.router, prefix="/api")
     app.include_router(workspaces.router)
     app.include_router(workspace_api.router)
+    app.include_router(hooks.router)
 
     @app.get("/health")
     def health() -> dict[str, str]:
