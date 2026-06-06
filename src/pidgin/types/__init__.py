@@ -3,8 +3,8 @@ from pidgin.types.enums import (
     GateOutcome,
     PolicyDecision,
     ProcessingStatus,
-    TrustLabel,
     TriggerType,
+    TrustLabel,
 )
 from pidgin.types.models import (
     GateRequest,

@@ -7,8 +7,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from pidgin.db.employees import ensure_operator_principal
 from pidgin.db import apply_migrations, connect, init_workspace_db
+from pidgin.db.employees import ensure_operator_principal
 from pidgin.util.slug import normalize_slug, slugify
 from pidgin.workspace.manager import create_workspace, ensure_home, registry_path
 

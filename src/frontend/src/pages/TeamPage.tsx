@@ -59,13 +59,23 @@ export function TeamPage() {
         ) : (
           <ul className="list-links">
             {agents.map((agent) => (
-              <li key={agent.id}>
-                <Link to={`agents/${agent.handle}`}>{agent.display_name}</Link>
-                <span className="muted">
-                  {" "}
-                  — {agent.role_title} (@{agent.handle}) ·{" "}
-                  {agent.current_status === "offboarded" ? "archived" : agent.current_status}
-                </span>
+              <li key={agent.id} className="team-agent-row">
+                <div>
+                  <Link to={`agents/${agent.handle}`}>{agent.display_name}</Link>
+                  <span className="muted">
+                    {" "}
+                    — {agent.role_title} (@{agent.handle}) ·{" "}
+                    {agent.current_status === "offboarded" ? "archived" : agent.current_status}
+                  </span>
+                </div>
+                {agent.current_status !== "offboarded" ? (
+                  <Link
+                    to={`agents/${agent.handle}/chat`}
+                    className="btn secondary team-chat-btn"
+                  >
+                    Chat
+                  </Link>
+                ) : null}
               </li>
             ))}
           </ul>

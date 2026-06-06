@@ -15,14 +15,12 @@ def test_hire_and_chat(client: TestClient) -> None:
 
     hire = client.post(f"/{slug}/api/hire")
     assert hire.status_code == 200
-    room_id = hire.json()["room_id"]
-
-    rooms = client.get(f"/{slug}/api/rooms")
-    assert rooms.status_code == 200
-    assert any(r["name"] == "#support" for r in rooms.json())
+    handle = hire.json()["handle"]
+    conversation_id = hire.json()["conversation_id"]
+    assert conversation_id
 
     send = client.post(
-        f"/{slug}/api/rooms/{room_id}/messages",
+        f"/{slug}/api/agents/{handle}/messages",
         json={"body": "Hi, I need help with my order"},
     )
     assert send.status_code == 200

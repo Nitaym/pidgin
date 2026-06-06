@@ -17,8 +17,8 @@ from pidgin.types import (
     PermissionProfile,
     PolicyDecision,
     ProposedAction,
-    TrustLabel,
     TriggerType,
+    TrustLabel,
 )
 from pidgin.util.slug import slugify
 from pidgin.workspace import InvalidPasswordError, create_workspace, open_workspace_path
@@ -61,7 +61,10 @@ def test_migrations_and_event_processing(pidgin_home: Path) -> None:
     processed = run_once(conn)
     assert processed == 1
 
-    row = conn.execute("SELECT processing_status FROM inbound_events WHERE id = ?", (event_id,)).fetchone()
+    row = conn.execute(
+        "SELECT processing_status FROM inbound_events WHERE id = ?",
+        (event_id,),
+    ).fetchone()
     assert row is not None
     assert row["processing_status"] == "done"
 

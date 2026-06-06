@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+log = logging.getLogger(__name__)
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from pidgin.api.deps import OAUTH_STATE_SESSION_KEY, require_workspace_session
-from pidgin.db.chat import get_or_create_room_conversation, list_messages, list_rooms
+from pidgin.api.deps import (
+    OAUTH_STATE_SESSION_KEY,
+    require_workspace_session,
+)
+from pidgin.db import connect
+from pidgin.db.chat import (
+    ensure_agent_conversation,
+    get_agent_conversation,
+    get_or_create_agent_conversation,
+    list_messages,
+)
 from pidgin.db.diagnostics import get_turn, list_audit_log, list_inbound_events, list_turns
 from pidgin.db.employees import get_agent_by_handle, list_agents
 from pidgin.db.principals import get_or_create_operator_principal
@@ -20,11 +34,14 @@ from pidgin.hr_assist import (
 from pidgin.hr_assist import (
     list_messages as list_hr_assist_messages,
 )
+from pidgin.llm.types import StreamEvent
 from pidgin.recipes.catalog import (
     UnknownRecipeError,
     bundled_template_detail,
     list_bundled_template_summaries,
 )
+from pidgin.runtime.streaming import KeyedTurnEventSink, format_sse, turn_event_bus
+from pidgin.runtime.turn_dispatcher import dispatch_turn
 from pidgin.services import inject_test_event
 from pidgin.services.admin import process_pending_events
 from pidgin.services.agent_lifecycle import ArchiveError, archive_agent
@@ -53,6 +70,8 @@ from pidgin.templates import (
     save_workspace_template_version,
 )
 from pidgin.types.customization import HireCustomization, IdealCandidate, JobRequirements
+from pidgin.workspace.factory import build_workspace_context_from_conn
+from pidgin.workspace.manager import WorkspacePaths
 
 router = APIRouter(prefix="/{workspace_slug}/api", tags=["workspace"])
 
@@ -63,7 +82,6 @@ class InjectEventBody(BaseModel):
 
 class SendMessageBody(BaseModel):
     body: str = Field(min_length=1)
-    agent_handle: str = Field(default="support")
 
 
 class HireCustomizationBody(BaseModel):
@@ -121,7 +139,14 @@ class OAuthStartBody(BaseModel):
 @router.get("/agents")
 def api_list_agents(workspace_slug: str, request: Request) -> list[dict]:
     session = require_workspace_session(request, workspace_slug)
-    return list_agents(session.conn)
+    agents = list_agents(session.conn)
+    for agent in agents:
+        conversation = get_agent_conversation(session.conn, agent["handle"])
+        if conversation is not None:
+            agent["conversation_id"] = conversation["id"]
+        else:
+            agent["conversation_id"] = None
+    return agents
 
 
 @router.get("/role-templates")
@@ -193,6 +218,78 @@ def api_get_agent(workspace_slug: str, handle: str, request: Request) -> dict:
         "handle": agent["handle"],
         "current_status": agent["current_status"],
         "created_at": agent["created_at"],
+    }
+
+
+@router.get("/agents/{handle}/conversation")
+def api_get_agent_conversation(workspace_slug: str, handle: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    agent = get_agent_by_handle(session.conn, handle)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent["current_status"] == "offboarded":
+        raise HTTPException(status_code=404, detail="Agent is archived")
+    try:
+        return ensure_agent_conversation(session.conn, handle)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/agents/{handle}/messages")
+def api_agent_messages(workspace_slug: str, handle: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    agent = get_agent_by_handle(session.conn, handle)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    conversation_id = get_or_create_agent_conversation(session.conn, agent["id"])
+    return {
+        "conversation_id": conversation_id,
+        "messages": list_messages(session.conn, conversation_id),
+    }
+
+
+@router.post("/agents/{handle}/messages")
+def api_send_agent_message(
+    workspace_slug: str,
+    handle: str,
+    body: SendMessageBody,
+    request: Request,
+    stream: bool = Query(False),
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    agent = get_agent_by_handle(session.conn, handle)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    log.info(
+        "[chat] send message — handle=%s stream=%s body_len=%d",
+        handle, stream, len(body.body),
+    )
+    try:
+        message_id, event_id, conversation_id = send_chat_message(
+            session.conn,
+            agent_handle=handle,
+            body_text=body.body,
+            run_turn=not stream,
+        )
+    except ValueError as exc:
+        log.error("[chat] send_chat_message failed — handle=%s error=%s", handle, exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    log.info(
+        "[chat] message queued — message_id=%s event_id=%s conversation_id=%s",
+        message_id, event_id, conversation_id,
+    )
+    if stream:
+        return {
+            "message_id": message_id,
+            "event_id": event_id,
+            "conversation_id": conversation_id,
+            "stream_url": f"/{workspace_slug}/api/turns/stream/{event_id}",
+        }
+    return {
+        "message_id": message_id,
+        "event_id": event_id,
+        "conversation_id": conversation_id,
+        "messages": list_messages(session.conn, conversation_id),
     }
 
 
@@ -438,52 +535,63 @@ def api_send_hr_assist_message(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/rooms")
-def api_list_rooms(workspace_slug: str, request: Request) -> list[dict]:
-    session = require_workspace_session(request, workspace_slug)
-    return list_rooms(session.conn)
-
-
-@router.get("/rooms/{room_id}/messages")
-def api_room_messages(workspace_slug: str, room_id: str, request: Request) -> dict:
-    session = require_workspace_session(request, workspace_slug)
-    room = session.conn.execute("SELECT id FROM rooms WHERE id = ?", (room_id,)).fetchone()
-    if room is None:
-        raise HTTPException(status_code=404, detail="Room not found")
-    conversation_id = get_or_create_room_conversation(session.conn, room_id)
-    return {
-        "conversation_id": conversation_id,
-        "messages": list_messages(session.conn, conversation_id),
-    }
-
-
-@router.post("/rooms/{room_id}/messages")
-def api_send_room_message(
-    workspace_slug: str,
-    room_id: str,
-    body: SendMessageBody,
-    request: Request,
-) -> dict:
-    session = require_workspace_session(request, workspace_slug)
-    room = session.conn.execute("SELECT id FROM rooms WHERE id = ?", (room_id,)).fetchone()
-    if room is None:
-        raise HTTPException(status_code=404, detail="Room not found")
+def _dispatch_streaming_turn(workspace_id: str, paths_root: str, event_id: str) -> None:
+    log.info("[stream] starting streaming turn — event_id=%s workspace=%s", event_id, workspace_id)
+    paths = WorkspacePaths(root=Path(paths_root))
+    conn = connect(paths.db_sqlite)
     try:
-        message_id, event_id = send_chat_message(
-            session.conn,
-            room_id=room_id,
-            body_text=body.body,
-            agent_handle=body.agent_handle,
+        ctx = build_workspace_context_from_conn(
+            workspace_id=workspace_id,
+            paths=paths,
+            conn=conn,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    conversation_id = get_or_create_room_conversation(session.conn, room_id)
-    return {
-        "message_id": message_id,
-        "event_id": event_id,
-        "conversation_id": conversation_id,
-        "messages": list_messages(session.conn, conversation_id),
-    }
+        sink = KeyedTurnEventSink(turn_event_bus, event_id)
+        dispatch_turn(ctx, event_id, event_sink=sink)
+        log.info("[stream] streaming turn completed — event_id=%s", event_id)
+    except Exception as exc:
+        log.error(
+            "[stream] streaming turn FAILED — event_id=%s error=%s",
+            event_id,
+            exc,
+            exc_info=True,
+        )
+        # Emit the error over SSE so the UI can display it, then close stream
+        error_sink = KeyedTurnEventSink(turn_event_bus, event_id)
+        error_sink.emit(StreamEvent(type="error", error=str(exc)))
+    finally:
+        turn_event_bus.close(event_id)
+        conn.close()
+        log.debug("[stream] connection closed — event_id=%s", event_id)
+
+
+@router.get("/turns/stream/{stream_key}")
+async def api_turn_stream(workspace_slug: str, stream_key: str, request: Request):
+    session = require_workspace_session(request, workspace_slug)
+    loop = asyncio.get_running_loop()
+    turn_event_bus.bind_loop(loop)
+    queue = turn_event_bus.register(stream_key)
+    dispatch_future = loop.run_in_executor(
+        None,
+        _dispatch_streaming_turn,
+        session.workspace_id,
+        session.paths_root,
+        stream_key,
+    )
+
+    async def event_generator():
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    yield format_sse(StreamEvent(type="invocation_end"))
+                    break
+                yield format_sse(event)
+                if event.type == "invocation_end" and event.response is not None:
+                    break
+        finally:
+            await dispatch_future
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/inject-event")

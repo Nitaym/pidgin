@@ -171,7 +171,7 @@ export function HireWizardPage() {
         };
       }
       const result = await api.hireAgent(slug, body);
-      navigate(`../agents/${result.handle}`, { replace: true });
+      navigate(`../agents/${result.handle}/chat`, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Hire failed");
     } finally {

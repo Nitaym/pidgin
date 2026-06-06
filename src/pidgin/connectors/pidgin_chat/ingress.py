@@ -11,7 +11,6 @@ def build_ingress_payload(
     *,
     connector_installation_id: str | None,
     conversation_id: str,
-    room_id: str,
     message_id: str,
     message_text: str,
     sender_principal_id: str,
@@ -21,13 +20,12 @@ def build_ingress_payload(
     return {
         "connector_type": "pidgin_chat",
         "connector_installation_id": connector_installation_id,
-        "external_channel_id": room_id,
+        "external_channel_id": conversation_id,
         "external_thread_id": conversation_id,
         "message_text": message_text,
         "message_id": message_id,
         "sender_principal_id": sender_principal_id,
         "sender_display_name": sender_display_name,
-        "room_id": room_id,
         "conversation_id": conversation_id,
         "raw_ref": raw_ref or {},
     }
@@ -38,7 +36,6 @@ def enqueue_direct_address(
     *,
     target_ai_employee_id: str,
     conversation_id: str,
-    room_id: str,
     message_id: str,
     message_text: str,
     sender_principal_id: str,
@@ -56,7 +53,6 @@ def enqueue_direct_address(
             payload=build_ingress_payload(
                 connector_installation_id=None,
                 conversation_id=conversation_id,
-                room_id=room_id,
                 message_id=message_id,
                 message_text=message_text,
                 sender_principal_id=sender_principal_id,

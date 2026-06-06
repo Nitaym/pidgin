@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pidgin.util.ids import utc_now_iso
 
-MIGRATION_VERSIONS = ("001_initial", "002_hire_customization")
+MIGRATION_VERSIONS = ("001_initial", "002_hire_customization", "003_remove_rooms")
 SYSTEM_EMPLOYEE_ID = "000000000000000000000000"
 
 
@@ -29,6 +29,14 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
 def apply_migrations(conn: sqlite3.Connection) -> None:
     has_table = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
@@ -46,6 +54,14 @@ def apply_migrations(conn: sqlite3.Connection) -> None:
             ).fetchone()
             if applied is not None:
                 continue
+
+        if version == "003_remove_rooms" and not _table_exists(conn, "rooms"):
+            conn.execute(
+                "INSERT INTO schema_migrations (version, applied_at, checksum) VALUES (?, ?, ?)",
+                (version, utc_now_iso(), digest),
+            )
+            has_table = True
+            continue
 
         conn.executescript(sql)
         conn.execute(

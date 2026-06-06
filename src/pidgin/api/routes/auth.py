@@ -8,10 +8,14 @@ from pidgin.api.deps import (
     OAUTH_STATE_SESSION_KEY,
     clear_google_user,
     get_google_user,
-    require_google_user,
     set_google_user,
 )
-from pidgin.auth.google import GoogleSettings, exchange_code_for_user, google_login_url, new_oauth_state
+from pidgin.auth.google import (
+    GoogleSettings,
+    exchange_code_for_user,
+    google_login_url,
+    new_oauth_state,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

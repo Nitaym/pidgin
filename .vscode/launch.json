@@ -11,6 +11,7 @@
         "127.0.0.1",
         "--port",
         "8765",
+        "--reload",
         "--home",
         "${workspaceFolder}/.pidgin"
       ],
@@ -18,8 +19,11 @@
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "PIDGIN_ALLOW_DEV_AUTH": "1"
+        "PIDGIN_ALLOW_DEV_AUTH": "1",
+        "PIDGIN_HOME": "${workspaceFolder}/.pidgin",
+        "PYTHONPATH": "${workspaceFolder}/src"
       },
+      "subProcess": true,
       "justMyCode": true
     },
     {
@@ -31,6 +35,9 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
       "justMyCode": true
     },
     {
@@ -42,6 +49,9 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src"
+      },
       "justMyCode": true
     }
   ]

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pidgin.db.chat import create_room, ensure_room_member, get_room_by_name
+from pidgin.db.chat import create_agent_conversation
 from pidgin.db.employees import HiredAgent, insert_ai_employee, insert_recipe_snapshot
 from pidgin.db.principals import get_or_create_operator_principal, insert_agent_principal
 from pidgin.recipes.catalog import UnknownRecipeError, bundled_recipe_path, load_bundled_recipe
@@ -19,7 +19,6 @@ from pidgin.workspace.manager import WorkspacePaths
 DEFAULT_SUPPORT_RECIPE = (
     Path(__file__).resolve().parents[3] / "recipes" / "support-agent-v0.1.json"
 )
-DEFAULT_SUPPORT_ROOM = "#support"
 SUPPORT_RECIPE_ID = "support-agent"
 
 
@@ -155,28 +154,14 @@ def _resolve_bundled_hire(
     return recipe_path, recipe, customization
 
 
-def _setup_default_room(
+def _setup_default_conversation(
     conn: sqlite3.Connection,
     *,
     hired: HiredAgent,
     recipe: RoleRecipe,
-) -> tuple[str, str]:
-    room_name = recipe.default_channels[0] if recipe.default_channels else DEFAULT_SUPPORT_ROOM
-    room = get_room_by_name(conn, room_name)
-    if room is None:
-        room_id = create_room(
-            conn,
-            name=room_name,
-            purpose=f"{recipe.display_name} conversations",
-        )
-    else:
-        room_id = room["id"]
-
-    operator_id = get_or_create_operator_principal(conn)
-    ensure_room_member(conn, room_id, operator_id)
-    ensure_room_member(conn, room_id, hired.principal_id)
-    conn.commit()
-    return room_id, room_name
+) -> str:
+    _ = recipe
+    return create_agent_conversation(conn, hired.ai_employee_id)
 
 
 def _resolve_workspace_hire(
@@ -246,13 +231,12 @@ def hire_with_template(
             hire_customization_json=customization.to_json(),
         ),
     )
-    room_id, room_name = _setup_default_room(conn, hired=hired, recipe=recipe)
+    conversation_id = _setup_default_conversation(conn, hired=hired, recipe=recipe)
 
     return {
         "ai_employee_id": hired.ai_employee_id,
         "display_name": display_name,
-        "room_id": room_id,
-        "room_name": room_name,
+        "conversation_id": conversation_id,
         "handle": hired.handle,
         "recipe_id": recipe.recipe_id,
     }

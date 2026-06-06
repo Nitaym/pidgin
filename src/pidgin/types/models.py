@@ -8,8 +8,8 @@ from pidgin.types.enums import (
     ActionType,
     GateOutcome,
     PolicyDecision,
-    TrustLabel,
     TriggerType,
+    TrustLabel,
 )
 
 

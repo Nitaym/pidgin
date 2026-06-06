@@ -65,9 +65,8 @@ export type Agent = {
   handle: string;
   current_status: string;
   created_at: string;
+  conversation_id?: string | null;
 };
-
-export type Room = { id: string; name: string; purpose: string | null; modality: string };
 
 export type HireCustomization = import("../types/hire").HireCustomization;
 
@@ -164,7 +163,10 @@ export const api = {
   listAgents: (slug: string) => request<Agent[]>(`${workspaceBase(slug)}/agents`),
   getAgent: (slug: string, handle: string) =>
     request<Agent>(`${workspaceBase(slug)}/agents/${handle}`),
-  listRooms: (slug: string) => request<Room[]>(`${workspaceBase(slug)}/rooms`),
+  getAgentConversation: (slug: string, handle: string) =>
+    request<{ id: string; ai_employee_id: string; modality: string }>(
+      `${workspaceBase(slug)}/agents/${handle}/conversation`,
+    ),
   listRoleTemplates: (slug: string) =>
     request<RoleTemplatesResponse>(`${workspaceBase(slug)}/role-templates`),
   getBundledTemplate: (slug: string, templateId: string) =>
@@ -213,12 +215,12 @@ export const api = {
       handle?: string;
     },
   ) =>
-    request<{ room_id: string; room_name: string; handle: string; display_name: string }>(
+    request<{ conversation_id: string; handle: string; display_name: string }>(
       `${workspaceBase(slug)}/hire`,
       { method: "POST", body: JSON.stringify(body) },
     ),
   hireSupport: (slug: string) =>
-    request<{ room_id: string; room_name: string; display_name: string }>(
+    request<{ conversation_id: string; display_name: string }>(
       `${workspaceBase(slug)}/hire`,
       { method: "POST" },
     ),
@@ -266,15 +268,28 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ body_text: bodyText }),
     }),
-  getRoomMessages: (slug: string, roomId: string) =>
+  getAgentMessages: (slug: string, handle: string) =>
     request<{ conversation_id: string; messages: Message[] }>(
-      `${workspaceBase(slug)}/rooms/${roomId}/messages`,
+      `${workspaceBase(slug)}/agents/${handle}/messages`,
     ),
-  sendRoomMessage: (slug: string, roomId: string, body: string) =>
-    request<{ messages: Message[] }>(`${workspaceBase(slug)}/rooms/${roomId}/messages`, {
+  sendAgentMessage: (
+    slug: string,
+    handle: string,
+    body: string,
+    stream = false,
+  ) =>
+    request<{
+      messages?: Message[];
+      message_id: string;
+      event_id: string;
+      conversation_id: string;
+      stream_url?: string;
+    }>(`${workspaceBase(slug)}/agents/${handle}/messages?stream=${stream ? "true" : "false"}`, {
       method: "POST",
       body: JSON.stringify({ body }),
     }),
+  getTurn: (slug: string, turnId: string) =>
+    request<Record<string, unknown>>(`${workspaceBase(slug)}/turns/${turnId}`),
   injectEvent: (slug: string, message: string) =>
     request<{ event_id: string }>(`${workspaceBase(slug)}/inject-event`, {
       method: "POST",

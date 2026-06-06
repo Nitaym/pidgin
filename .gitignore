@@ -57,3 +57,4 @@ $RECYCLE.BIN/
 *.lnk
 .pidgin/workspaces
 .pidgin
+.playwright-mcp

@@ -151,15 +151,24 @@ export function AgentProfilePage() {
       </Link>
 
       <div className="hero panel stack">
-        <h3 style={{ margin: 0 }}>{agent.display_name}</h3>
-        <p className="muted" style={{ margin: 0 }}>
-          {agent.role_title} · @{agent.handle} · {agentStatusLabel(agent.current_status)}
-        </p>
+        <div className="row profile-hero">
+          <div>
+            <h3 style={{ margin: 0 }}>{agent.display_name}</h3>
+            <p className="muted" style={{ margin: 0 }}>
+              {agent.role_title} · @{agent.handle} · {agentStatusLabel(agent.current_status)}
+            </p>
+          </div>
+          {!archived ? (
+            <Link to={`chat`} className="btn">
+              Open chat
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       {archived ? (
         <div className="warning">
-          This agent is archived. They no longer appear on your team or respond in rooms.
+          This agent is archived. They no longer appear on your team or respond to messages.
         </div>
       ) : null}
 
@@ -176,7 +185,7 @@ export function AgentProfilePage() {
         onConfirm={() => void handleArchive()}
       >
         <p style={{ margin: 0 }}>
-          {agent.display_name} will be removed from your team and will no longer respond in rooms.
+          {agent.display_name} will be removed from your team and will no longer respond to messages.
           Their brief, history, and audit trail are kept on disk.
         </p>
         <p style={{ margin: 0 }}>This cannot be undone from the UI.</p>

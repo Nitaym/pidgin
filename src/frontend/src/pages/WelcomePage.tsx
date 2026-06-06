@@ -58,7 +58,7 @@ export function WelcomePage() {
           <div className="stack">
             <ul className="wizard-list">
               <li>Hire agents from proven role templates</li>
-              <li>Chat in team rooms like #support</li>
+              <li>Chat directly with your AI team</li>
               <li>Review turns and audit logs as you grow</li>
             </ul>
             <button type="button" onClick={() => setStep(2)}>

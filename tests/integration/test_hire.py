@@ -68,7 +68,7 @@ def test_hire_support_agent(pidgin_home: Path, recipe_path: Path) -> None:
     assert paths.agent_memory_dir("support").is_dir()
 
 
-def test_hire_support_agent_creates_room(pidgin_home: Path, recipe_path: Path) -> None:
+def test_hire_support_agent_creates_conversation(pidgin_home: Path, recipe_path: Path) -> None:
     paths = create_workspace("Acme", "pw", slugify("Acme"), home=pidgin_home)
     auth = json.loads(paths.auth_json.read_text(encoding="utf-8"))
     conn = connect(paths.db_sqlite)
@@ -76,12 +76,15 @@ def test_hire_support_agent_creates_room(pidgin_home: Path, recipe_path: Path) -
     init_workspace_db(conn, auth["workspace_id"], "Acme")
 
     result = hire_support_agent(conn, paths_root=paths.root, recipe_path=recipe_path)
-    assert result["room_name"] == "#support"
+    assert result["conversation_id"]
     assert result["handle"] == "support"
 
-    room = conn.execute("SELECT name FROM rooms WHERE id = ?", (result["room_id"],)).fetchone()
-    assert room is not None
-    assert room["name"] == "#support"
+    conversation = conn.execute(
+        "SELECT ai_employee_id FROM conversations WHERE id = ?",
+        (result["conversation_id"],),
+    ).fetchone()
+    assert conversation is not None
+    assert conversation["ai_employee_id"] == result["ai_employee_id"]
 
 
 def test_resolve_permission_profile_from_recipe(recipe_path: Path) -> None:

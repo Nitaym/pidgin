@@ -7,7 +7,7 @@ from pathlib import Path
 
 import bcrypt
 
-from pidgin.util.ids import new_ulid, utc_now_iso
+from pidgin.util.ids import new_ulid
 
 
 class WorkspaceError(Exception):
@@ -140,7 +140,9 @@ def create_workspace_layout(root: Path) -> WorkspacePaths:
     return paths
 
 
-def create_workspace(display_name: str, password: str, slug: str, home: Path | None = None) -> WorkspacePaths:
+def create_workspace(
+    display_name: str, password: str, slug: str, home: Path | None = None
+) -> WorkspacePaths:
     ensure_home(home)
     workspace_id = new_ulid()
     root = workspaces_root(home) / workspace_id
@@ -185,7 +187,9 @@ def resolve_workspace_paths(workspace_id: str, home: Path | None = None) -> Work
     return paths
 
 
-def open_workspace_path(workspace_id: str, password: str, home: Path | None = None) -> WorkspacePaths:
+def open_workspace_path(
+    workspace_id: str, password: str, home: Path | None = None
+) -> WorkspacePaths:
     reg = json.loads(registry_path(home).read_text(encoding="utf-8"))
     entry = next((w for w in reg.get("workspaces", []) if w["id"] == workspace_id), None)
     if entry is None:

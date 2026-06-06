@@ -2,13 +2,14 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useApp } from "./context/AppContext";
 import { AgentProfilePage } from "./pages/AgentProfilePage";
-import { ChatPage } from "./pages/ChatPage";
+import { AgentChatPage } from "./pages/AgentChatPage";
 import { DebugPage } from "./pages/DebugPage";
 import { HireWizardPage } from "./pages/HireWizardPage";
 import { IntegrationDetailPage } from "./pages/IntegrationDetailPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { TeamPage } from "./pages/TeamPage";
+import { TurnDetailPage } from "./pages/TurnDetailPage";
 import { TemplateEditorPage, TemplatesPage } from "./pages/TemplatesPage";
 import { WelcomePage } from "./pages/WelcomePage";
 
@@ -60,8 +61,9 @@ function WorkspaceApp() {
         <Route path="templates" element={<TemplatesPage />} />
         <Route path="templates/:templateSlug" element={<TemplateEditorPage />} />
         <Route path="agents/:handle" element={<AgentProfilePage />} />
-        <Route path="rooms/:roomId/chat" element={<ChatPage />} />
+        <Route path="agents/:handle/chat" element={<AgentChatPage />} />
         <Route path="debug" element={<DebugPage />} />
+        <Route path="debug/turns/:turnId" element={<TurnDetailPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="integrations/:connectorType" element={<IntegrationDetailPage />} />
         <Route path="settings/integrations" element={<Navigate to="../integrations" replace />} />

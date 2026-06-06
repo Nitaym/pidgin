@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -11,6 +12,23 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import pidgin.connectors  # noqa: F401 — register connector factories
 from pidgin.api.routes import auth, hooks, workspace_api, workspaces
+
+# Configure logging early — runs in every worker process (including --reload workers)
+def _ensure_logging() -> None:
+    level_name = os.getenv("PIDGIN_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    root = logging.getLogger()
+    if not root.handlers:  # don't reconfigure if already set up by __main__
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+            datefmt="%H:%M:%S",
+        )
+    logging.getLogger("pidgin").setLevel(level)
+    if level > logging.DEBUG:
+        logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+_ensure_logging()
 
 
 def frontend_dist() -> Path:
@@ -98,6 +116,13 @@ def create_app(
             )
 
     return app
+
+
+def create_app_from_env() -> FastAPI:
+    """Factory entry for uvicorn --reload (reads PIDGIN_HOME from the environment)."""
+    home_raw = os.getenv("PIDGIN_HOME", "").strip()
+    home = Path(home_raw).expanduser() if home_raw else None
+    return create_app(pidgin_home=home)
 
 
 app = create_app()

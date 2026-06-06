@@ -278,7 +278,7 @@ def test_us10_create_template_from_agent_with_lineage(
     assert any(t["slug"] == "alex-template" for t in listed["workspace"])
 
 
-def test_us6_hire_creates_draft_agent_room_and_memory(
+def test_us6_hire_creates_draft_agent_conversation_and_memory(
     client: TestClient,
     slug: str,
     pidgin_home: Path,
@@ -294,8 +294,7 @@ def test_us6_hire_creates_draft_agent_room_and_memory(
     )
     assert hire.status_code == 200
     body = hire.json()
-    assert body["room_name"] == "#support"  # EA has no default_channels; falls back
-    assert body["room_id"]
+    assert body["conversation_id"]
 
     agents = client.get(f"/{slug}/api/agents").json()
     agent = next(a for a in agents if a["handle"] == "jordan")

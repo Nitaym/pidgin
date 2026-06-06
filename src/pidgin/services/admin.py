@@ -4,7 +4,7 @@ import sqlite3
 
 from pidgin.db import insert_inbound_event
 from pidgin.runtime import run_once
-from pidgin.types import InboundEventCreate, TrustLabel, TriggerType
+from pidgin.types import InboundEventCreate, TriggerType, TrustLabel
 
 
 def inject_test_event(

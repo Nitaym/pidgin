@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useParams } from "react-router-dom";
 import { PidginLogo } from "./PidginLogo";
+import { SidebarChat } from "./SidebarChat";
 import { useApp } from "../context/AppContext";
 
 type LayoutProps = {
@@ -39,6 +40,7 @@ export function Layout({ showNav = true }: LayoutProps) {
               <NavLink to={`${base}/hire`}>Hire a role</NavLink>
               <NavLink to={`${base}/templates`}>Your templates</NavLink>
             </div>
+            <SidebarChat slug={workspace.slug} base={base} />
             <div className="sidebar-section">
               <p className="sidebar-section-label">System</p>
               <NavLink to={`${base}/integrations`}>Integrations</NavLink>

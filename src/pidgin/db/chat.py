@@ -6,74 +6,77 @@ from typing import Any
 from pidgin.util.ids import new_ulid, utc_now_iso
 
 
-def get_room_by_name(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
-    row = conn.execute("SELECT * FROM rooms WHERE name = ?", (name,)).fetchone()
-    return dict(row) if row else None
+def get_agent_conversation(conn: sqlite3.Connection, handle: str) -> dict[str, Any] | None:
+    from pidgin.db.employees import get_agent_by_handle
 
-
-def create_room(
-    conn: sqlite3.Connection,
-    *,
-    name: str,
-    purpose: str | None = None,
-    visibility: str = "public",
-) -> str:
-    room_id = new_ulid()
-    now = utc_now_iso()
-    conn.execute(
-        """
-        INSERT INTO rooms (
-          id, name, purpose, modality, visibility, created_at, updated_at
-        ) VALUES (?, ?, ?, 'pidgin_chat', ?, ?, ?)
-        """,
-        (room_id, name, purpose, visibility, now, now),
-    )
-    conn.commit()
-    return room_id
-
-
-def ensure_room_member(conn: sqlite3.Connection, room_id: str, principal_id: str) -> None:
-    existing = conn.execute(
-        "SELECT id FROM room_members WHERE room_id = ? AND principal_id = ?",
-        (room_id, principal_id),
-    ).fetchone()
-    if existing is not None:
-        return
-    now = utc_now_iso()
-    conn.execute(
-        """
-        INSERT INTO room_members (id, room_id, principal_id, joined_at)
-        VALUES (?, ?, ?, ?)
-        """,
-        (new_ulid(), room_id, principal_id, now),
-    )
-    conn.commit()
-
-
-def get_or_create_room_conversation(conn: sqlite3.Connection, room_id: str) -> str:
+    agent = get_agent_by_handle(conn, handle)
+    if agent is None:
+        return None
     row = conn.execute(
         """
-        SELECT id FROM conversations
-        WHERE room_id = ? AND modality = 'pidgin_chat'
-        ORDER BY created_at LIMIT 1
+        SELECT id, ai_employee_id, modality
+        FROM conversations
+        WHERE ai_employee_id = ? AND modality = 'pidgin_chat'
+        ORDER BY created_at ASC
+        LIMIT 1
         """,
-        (room_id,),
+        (agent["id"],),
     ).fetchone()
-    if row is not None:
-        return row["id"]
+    if row is None:
+        return None
+    return {
+        "id": row["id"],
+        "ai_employee_id": row["ai_employee_id"],
+        "modality": row["modality"],
+    }
 
+
+def ensure_agent_conversation(conn: sqlite3.Connection, handle: str) -> dict[str, Any]:
+    existing = get_agent_conversation(conn, handle)
+    if existing is not None:
+        return existing
+
+    from pidgin.db.employees import get_agent_by_handle
+
+    agent = get_agent_by_handle(conn, handle)
+    if agent is None:
+        raise ValueError(f"No agent with handle @{handle}")
+
+    conversation_id = create_agent_conversation(conn, agent["id"])
+    return {
+        "id": conversation_id,
+        "ai_employee_id": agent["id"],
+        "modality": "pidgin_chat",
+    }
+
+
+def create_agent_conversation(conn: sqlite3.Connection, ai_employee_id: str) -> str:
     conversation_id = new_ulid()
     now = utc_now_iso()
     conn.execute(
         """
         INSERT INTO conversations (
-          id, room_id, modality, started_at, created_at, updated_at
+          id, ai_employee_id, modality, started_at, created_at, updated_at
         ) VALUES (?, ?, 'pidgin_chat', ?, ?, ?)
         """,
-        (conversation_id, room_id, now, now, now),
+        (conversation_id, ai_employee_id, now, now, now),
     )
     conn.commit()
     return conversation_id
+
+
+def get_or_create_agent_conversation(conn: sqlite3.Connection, ai_employee_id: str) -> str:
+    row = conn.execute(
+        """
+        SELECT id FROM conversations
+        WHERE ai_employee_id = ? AND modality = 'pidgin_chat'
+        ORDER BY created_at LIMIT 1
+        """,
+        (ai_employee_id,),
+    ).fetchone()
+    if row is not None:
+        return row["id"]
+    return create_agent_conversation(conn, ai_employee_id)
 
 
 def insert_message(
@@ -121,12 +124,5 @@ def list_messages(conn: sqlite3.Connection, conversation_id: str, limit: int = 1
         LIMIT ?
         """,
         (conversation_id, limit),
-    ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def list_rooms(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute(
-        "SELECT id, name, purpose, modality FROM rooms ORDER BY name ASC"
     ).fetchall()
     return [dict(row) for row in rows]

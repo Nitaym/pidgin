@@ -3,17 +3,17 @@ from __future__ import annotations
 import sqlite3
 
 from pidgin.connectors.pidgin_chat.ingress import enqueue_direct_address
-from pidgin.db.chat import get_or_create_room_conversation, insert_message, list_messages
+from pidgin.db.chat import get_or_create_agent_conversation, insert_message, list_messages
 from pidgin.db.employees import ensure_operator_principal, get_agent_by_handle
 
 
 def send_chat_message(
     conn: sqlite3.Connection,
     *,
-    room_id: str,
+    agent_handle: str,
     body_text: str,
-    agent_handle: str = "support",
-) -> tuple[str, str]:
+    run_turn: bool = True,
+) -> tuple[str, str, str]:
     agent = get_agent_by_handle(conn, agent_handle)
     if agent is None:
         raise ValueError(f"No agent hired with handle @{agent_handle}")
@@ -25,7 +25,7 @@ def send_chat_message(
     ).fetchone()
     operator_name = operator["display_name"] if operator else "You"
 
-    conversation_id = get_or_create_room_conversation(conn, room_id)
+    conversation_id = get_or_create_agent_conversation(conn, agent["id"])
     message_id = insert_message(
         conn,
         conversation_id=conversation_id,
@@ -38,13 +38,13 @@ def send_chat_message(
         conn,
         target_ai_employee_id=agent["id"],
         conversation_id=conversation_id,
-        room_id=room_id,
         message_id=message_id,
         message_text=body_text,
         sender_principal_id=operator_id,
         sender_display_name=operator_name,
+        run_turn=run_turn,
     )
-    return message_id, event_id
+    return message_id, event_id, conversation_id
 
 
 def get_conversation_messages(conn: sqlite3.Connection, conversation_id: str) -> list[dict]:

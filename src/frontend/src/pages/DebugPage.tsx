@@ -109,7 +109,9 @@ export function DebugPage() {
           <tbody>
             {turns.map((row) => (
               <tr key={String(row.id)}>
-                <td>{String(row.id).slice(0, 8)}…</td>
+                <td>
+                  <a href={`/${slug}/debug/turns/${row.id}`}>{String(row.id).slice(0, 8)}…</a>
+                </td>
                 <td>{String(row.current_status)}</td>
                 <td>{String(row.started_at)}</td>
               </tr>

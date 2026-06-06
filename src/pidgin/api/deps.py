@@ -76,6 +76,20 @@ def clear_google_user(request: Request) -> None:
     request.session.pop(GOOGLE_USER_SESSION_KEY, None)
 
 
+def workspace_context_from_session(session: WorkspaceSession):
+    from pathlib import Path
+
+    from pidgin.workspace.factory import build_workspace_context_from_conn
+    from pidgin.workspace.manager import WorkspacePaths
+
+    paths = WorkspacePaths(root=Path(session.paths_root))
+    return build_workspace_context_from_conn(
+        workspace_id=session.workspace_id,
+        paths=paths,
+        conn=session.conn,
+    )
+
+
 def open_workspace_session(
     request: Request,
     workspace: WorkspaceSummary,

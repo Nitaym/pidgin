@@ -1,4 +1,4 @@
--- Pidgin initial schema (26 tables)
+-- Pidgin initial schema (24 tables)
 -- FK constraints omitted in MVP migration to avoid circular dependency issues at CREATE time.
 -- Application layer enforces referential integrity. See specs/SCHEMA_SPEC.md.
 
@@ -34,18 +34,6 @@ CREATE TABLE connector_installations (
   updated_at       TEXT NOT NULL,
   last_health_check_at TEXT,
   UNIQUE (connector_type, display_name)
-);
-
-CREATE TABLE rooms (
-  id                 TEXT PRIMARY KEY,
-  name               TEXT NOT NULL UNIQUE,
-  purpose            TEXT,
-  modality           TEXT NOT NULL CHECK (modality IN ('pidgin_chat', 'slack', 'email_thread', 'jira', 'other')),
-  external_system_id TEXT,
-  visibility         TEXT NOT NULL CHECK (visibility IN ('public', 'private', 'dm')),
-  created_at         TEXT NOT NULL,
-  updated_at         TEXT NOT NULL,
-  UNIQUE (modality, external_system_id)
 );
 
 CREATE TABLE principals (
@@ -165,7 +153,7 @@ CREATE INDEX idx_tasks_status_log_task ON tasks_status_log(task_id, occurred_at)
 
 CREATE TABLE conversations (
   id                 TEXT PRIMARY KEY,
-  room_id            TEXT,
+  ai_employee_id     TEXT,
   modality           TEXT NOT NULL,
   external_thread_id TEXT,
   linked_task_id     TEXT,
@@ -174,18 +162,7 @@ CREATE TABLE conversations (
   updated_at         TEXT NOT NULL,
   UNIQUE (modality, external_thread_id)
 );
-CREATE INDEX idx_conversations_room ON conversations(room_id);
-
-CREATE TABLE room_members (
-  id                          TEXT PRIMARY KEY,
-  room_id                     TEXT NOT NULL,
-  principal_id                TEXT NOT NULL,
-  channel_activity_subscribed INTEGER NOT NULL DEFAULT 0,
-  muted                       INTEGER NOT NULL DEFAULT 0,
-  joined_at                   TEXT NOT NULL,
-  UNIQUE (room_id, principal_id)
-);
-CREATE INDEX idx_room_members_principal ON room_members(principal_id);
+CREATE INDEX idx_conversations_agent ON conversations(ai_employee_id);
 
 CREATE TABLE inbound_events (
   id                    TEXT PRIMARY KEY,

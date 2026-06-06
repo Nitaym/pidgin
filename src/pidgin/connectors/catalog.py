@@ -6,7 +6,7 @@ INTEGRATION_CATALOG: list[dict[str, Any]] = [
     {
         "connector_type": "pidgin_chat",
         "name": "Pidgin chat",
-        "description": "Built-in workspace chat rooms.",
+        "description": "Built-in workspace direct messages with agents.",
         "auth_modes": ["none"],
         "builtin": True,
         "capabilities": ["ingress", "read", "say"],
