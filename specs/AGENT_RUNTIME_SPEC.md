@@ -206,6 +206,8 @@ The `recall` action:
 
 No embeddings, no vector DB, no chunk tables. Upgrade search on the file layer when volume demands it.
 
+Journals grow without bound; **memory cleaning is required** over the agent lifecycle. Mechanism is not defined in MVP — see [MEMORY_SPEC.md](MEMORY_SPEC.md).
+
 ---
 
 ## 6. Self-Prompting

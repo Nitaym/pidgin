@@ -509,6 +509,7 @@ After Phase 0 admin shell is green:
 | Integration build order | Which connector first | **Locked:** Slack → Gmail → Drive → Meet → Zoom after `pidgin_chat` ([CONNECTORS_SPEC.md](CONNECTORS_SPEC.md)) |
 | Integration auth | OAuth only vs manual only | **Both** — OAuth primary; manual dev/fallback per connector type in CONNECTORS_SPEC §3 |
 | Integrations UI | Admin-only vs full React | **Full UI** at `/{workspace}/settings/integrations` (Phase 2I.4) |
+| Memory cleaning | Agent self-maintenance, summarize-and-replace, retention, manual trim, archive tiers | **Required** — mechanism TBD; see [MEMORY_SPEC.md](MEMORY_SPEC.md) |
 
 ---
 
@@ -520,6 +521,7 @@ After Phase 0 admin shell is green:
 | [PRODUCT_SPEC.md](PRODUCT_SPEC.md) | Product vision, user flows, MVP scope |
 | [AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md) | Triggers, actions, turn lifecycle, gate placement, diagnostics |
 | [SCHEMA_SPEC.md](SCHEMA_SPEC.md) | Table definitions, file layout |
+| [MEMORY_SPEC.md](MEMORY_SPEC.md) | Journal lifecycle, cleaning requirement, deferred options |
 | [SECURITY_SPEC.md](SECURITY_SPEC.md) | Trust labels, invocation policy |
 | [TECH_STACK_SPEC.md](TECH_STACK_SPEC.md) | Libraries, deliberate omissions |
 | [MVP_USER_STORIES.md](MVP_USER_STORIES.md) | Acceptance criteria US-1–US-11 |

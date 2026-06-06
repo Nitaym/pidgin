@@ -12,6 +12,7 @@ Documentation for the Pidgin AI workforce platform. Read top-down: product visio
 | [CONNECTORS_SPEC.md](CONNECTORS_SPEC.md) | Connector contract, auth modes, API, UI, build order |
 | [AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md) | 8 triggers, 14 actions, turns, gate, process model |
 | [SCHEMA_SPEC.md](SCHEMA_SPEC.md) | 26 DB tables, file-based memory, workspace layout |
+| [MEMORY_SPEC.md](MEMORY_SPEC.md) | Agent journal lifecycle; cleaning required; options TBD |
 | [TECH_STACK_SPEC.md](TECH_STACK_SPEC.md) | Python MVP stack, libraries, deliberate omissions |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | Phased build plan, current status, agent handoff |
 | [MVP_USER_STORIES.md](MVP_USER_STORIES.md) | Acceptance criteria for Phase 0–2 |
