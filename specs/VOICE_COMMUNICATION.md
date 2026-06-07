@@ -37,4 +37,7 @@ Our options are these:
 [4]: https://developers.google.com/workspace/meet/media-api/guides/overview?utm_source=chatgpt.com "Meet Media API overview"
 
 
-
+Options:
+Deepgram - Not great on quality
+ElevenLabs - actually great! Saw some post regarding latency when scaling up
+OpenAI voice - 

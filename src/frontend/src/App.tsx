@@ -8,6 +8,7 @@ import { HireWizardPage } from "./pages/HireWizardPage";
 import { IntegrationDetailPage } from "./pages/IntegrationDetailPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { LoginPage } from "./pages/LoginPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { TeamPage } from "./pages/TeamPage";
 import { TurnDetailPage } from "./pages/TurnDetailPage";
 import { TemplateEditorPage, TemplatesPage } from "./pages/TemplatesPage";
@@ -66,6 +67,7 @@ function WorkspaceApp() {
         <Route path="debug/turns/:turnId" element={<TurnDetailPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="integrations/:connectorType" element={<IntegrationDetailPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/integrations" element={<Navigate to="../integrations" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="" replace />} />

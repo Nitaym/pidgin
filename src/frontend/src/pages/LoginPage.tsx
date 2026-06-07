@@ -6,6 +6,7 @@ export function LoginPage() {
   const [searchParams] = useSearchParams();
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [devEnabled, setDevEnabled] = useState(false);
+  const [backendDown, setBackendDown] = useState(false);
   const [error, setError] = useState<string | null>(
     searchParams.get("error") ? "Google sign-in was cancelled or failed." : null,
   );
@@ -17,7 +18,7 @@ export function LoginPage() {
         setGoogleEnabled(config.google_enabled);
         setDevEnabled(config.dev_login_enabled);
       })
-      .catch(() => undefined);
+      .catch(() => setBackendDown(true));
   }, []);
 
   async function handleDevLogin() {
@@ -40,7 +41,13 @@ export function LoginPage() {
 
         {error ? <div className="error">{error}</div> : null}
 
-        {googleEnabled ? (
+        {backendDown ? (
+          <div className="error" style={{ textAlign: "center" }}>
+            <strong>Backend is not running.</strong>
+            <br />
+            <span style={{ fontSize: 13 }}>Start the server and refresh the page.</span>
+          </div>
+        ) : googleEnabled ? (
           <a className="btn google" href={googleLoginUrl()}>
             Continue with Google
           </a>

@@ -45,6 +45,7 @@ export function Layout({ showNav = true }: LayoutProps) {
               <p className="sidebar-section-label">System</p>
               <NavLink to={`${base}/integrations`}>Integrations</NavLink>
               <NavLink to={`${base}/debug`}>Diagnostics</NavLink>
+              <NavLink to={`${base}/settings`}>Settings</NavLink>
             </div>
           </nav>
         ) : null}

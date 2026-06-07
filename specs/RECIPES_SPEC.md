@@ -162,3 +162,10 @@ The full canonical JSON is stored in `ai_employee_recipe_snapshots.bundle_json`.
 | Initial employee status | `draft` until interview completes |
 | Upgrade flow | New snapshot + pointer update (Phase 4+) |
 | Hire pre-fill | `default_job_requirements` / `default_ideal_candidate` optional; recipes writer adds when updating bundled templates (PID-8) |
+
+## 9. MVP Positions
+1. HR
+2. Executive Assistant
+3. R&D Ops
+4. Project Manager (Inbound)
+5. Project Manager (Inbound / Outbound)

@@ -20,6 +20,7 @@ dependencies = [
     "annotated-doc>=0.0.4",
     "anthropic>=0.40.0",
     "openai>=1.55.0",
+    "websockets>=13.0",
 ]
 
 [project.optional-dependencies]

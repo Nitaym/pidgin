@@ -12,6 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import pidgin.connectors  # noqa: F401 — register connector factories
 from pidgin.api.routes import auth, hooks, workspace_api, workspaces
+from pidgin.voice import routes as voice_routes
 
 # Configure logging early — runs in every worker process (including --reload workers)
 def _ensure_logging() -> None:
@@ -69,6 +70,7 @@ def create_app(
     app.include_router(workspaces.router)
     app.include_router(workspace_api.router)
     app.include_router(hooks.router)
+    app.include_router(voice_routes.router)
 
     @app.get("/health")
     def health() -> dict[str, str]:

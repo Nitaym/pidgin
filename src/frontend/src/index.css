@@ -801,6 +801,162 @@ button.danger:disabled {
   color: var(--text-tertiary);
 }
 
+/* Voice toggle button (in compose bar) */
+.chat-voice-toggle {
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.chat-voice-toggle:hover {
+  transform: scale(1.08);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+/* Voice panel — replaces compose bar */
+.voice-panel {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 24px 12px;
+  position: relative;
+}
+
+.voice-panel-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.voice-waveform {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 40px;
+}
+
+.voice-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  height: 8px;
+  transition: background 0.2s;
+}
+
+.voice-bar--active {
+  background: var(--accent);
+  animation: voice-wave 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes voice-wave {
+  from { height: 4px; }
+  to   { height: 36px; }
+}
+
+.voice-mic-btn {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 40%, transparent);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.voice-mic-btn:hover:not(:disabled) {
+  transform: scale(1.07);
+}
+
+.voice-mic-btn--recording {
+  background: #dc2626;
+  box-shadow: 0 4px 20px rgba(220,38,38,0.45);
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+.voice-mic-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes voice-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+
+.voice-status {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.voice-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: center;
+}
+
+.voice-device-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+}
+
+.voice-device-select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 3px 6px;
+  max-width: 160px;
+  cursor: pointer;
+  outline: none;
+}
+
+.voice-device-select:focus {
+  border-color: var(--accent);
+}
+
+.voice-exit-btn {
+  position: absolute;
+  bottom: 10px;
+  left: 16px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.voice-exit-btn:hover {
+  color: var(--text-secondary);
+}
+
 .chat-send-btn {
   flex-shrink: 0;
   width: 34px;
