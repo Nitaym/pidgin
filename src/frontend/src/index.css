@@ -1789,3 +1789,42 @@ button.danger {
   border-color: color-mix(in srgb, var(--accent-red, #f87171) 50%, var(--border));
   color: var(--accent-red, #f87171);
 }
+
+/* Spinner — used for voice warmup and other inline loading states */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: -0.15em;
+}
+
+.spinner--lg {
+  width: 1.6em;
+  height: 1.6em;
+  border-width: 3px;
+}
+
+/* Timeline bar that is still in progress — gentle pulse + moving stripes */
+@keyframes bar-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.95; }
+}
+
+.bar--running {
+  animation: bar-pulse 1s ease-in-out infinite;
+  background-image: linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.25) 25%, transparent 25%,
+    transparent 50%, rgba(255, 255, 255, 0.25) 50%,
+    rgba(255, 255, 255, 0.25) 75%, transparent 75%, transparent
+  );
+  background-size: 1rem 1rem;
+}

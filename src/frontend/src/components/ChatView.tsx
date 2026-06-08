@@ -52,6 +52,7 @@ export function ChatView({
   const [voiceMode, setVoiceMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendingRef = useRef(false); // synchronous guard against double-send
 
   useEffect(() => {
     async function load() {
@@ -81,7 +82,10 @@ export function ChatView({
   }
 
   const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || !slug || streaming) return;
+    // sendingRef is synchronous — guards against two transcripts arriving
+    // back-to-back before the `streaming` state has propagated.
+    if (!text.trim() || !slug || sendingRef.current) return;
+    sendingRef.current = true;
     setError(null);
     setStreaming(true);
     setBody("");
@@ -114,12 +118,16 @@ export function ChatView({
           };
           if (parsed.type === "text_delta" && parsed.delta) {
             fullResponse += parsed.delta;
+            // Pipeline TTS: speak each sentence as soon as it streams in,
+            // rather than waiting for the full response.
+            if (voiceMode) feedText(parsed.delta);
             setDraft((prev) =>
               prev ? { ...prev, text: prev.text + parsed.delta } : prev,
             );
           }
           if (parsed.type === "error") {
             source.close();
+            sendingRef.current = false;
             setDraft(null);
             setStreaming(false);
             setError(parsed.message || "The agent encountered an error");
@@ -128,16 +136,18 @@ export function ChatView({
           if (parsed.type === "invocation_end") {
             completed = true;
             source.close();
+            sendingRef.current = false;
             setDraft(null);
             void api.getAgentMessages(slug, agentHandle).then((fresh) => {
               setMessages(fresh.messages);
             });
             setStreaming(false);
-            if (voiceMode && fullResponse) synthesize(fullResponse);
+            if (voiceMode) finishSpeaking(); // flush any trailing partial sentence
           }
         };
         source.onerror = () => {
           source.close();
+          sendingRef.current = false;
           setDraft(null);
           setStreaming(false);
           if (!completed) {
@@ -145,11 +155,13 @@ export function ChatView({
           }
         };
       } else if (data.messages) {
+        sendingRef.current = false;
         setMessages(data.messages);
         setDraft(null);
         setStreaming(false);
       }
     } catch (err) {
+      sendingRef.current = false;
       setDraft(null);
       setStreaming(false);
       setError(err instanceof Error ? err.message : "Send failed");
@@ -170,7 +182,7 @@ export function ChatView({
 
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const { mics, speakers, micId, setMicId, speakerId, setSpeakerId, refresh: refreshDevices } = useAudioDevices();
-  const { state: voiceState, startRecording, stopRecording, synthesize } = useVoiceSession({
+  const { state: voiceState, warming, warmup, startRecording, stopRecording, feedText, finishSpeaking, disconnect } = useVoiceSession({
     onTranscript: (text) => { void sendMessage(text); },
     onError: (msg) => setVoiceError(msg),
     micDeviceId: micId,
@@ -178,6 +190,14 @@ export function ChatView({
   });
   const isRecording = voiceState === "recording";
   const voiceBusy = voiceState === "processing" || voiceState === "speaking";
+
+  // Enter voice mode: warm the connection first, then start listening so the
+  // user never pays connection/handshake latency in the hot path.
+  const enterVoiceMode = useCallback(async () => {
+    setVoiceMode(true);
+    const ok = await warmup();
+    if (ok) void startRecording();
+  }, [warmup, startRecording]);
 
   const agentInitial = (agentDisplayName ?? agentHandle).charAt(0).toUpperCase();
   const displayName = agentDisplayName ?? `@${agentHandle}`;
@@ -262,16 +282,16 @@ export function ChatView({
               <button
                 type="button"
                 className={`voice-mic-btn${isRecording ? " voice-mic-btn--recording" : ""}`}
-                disabled={voiceBusy}
+                disabled={voiceBusy || warming}
                 aria-label={isRecording ? "Stop" : "Speak"}
                 onClick={() => { if (isRecording) stopRecording(); else void startRecording(); }}
               >
-                <MicIcon />
+                {warming ? <span className="spinner spinner--lg" /> : <MicIcon />}
               </button>
               <p className="voice-status">
                 {voiceError
                   ? <span style={{ color: "#dc2626" }}>{voiceError}</span>
-                  : isRecording ? "Listening…" : voiceState === "processing" ? "Transcribing…" : voiceState === "speaking" ? "Speaking…" : "Tap to speak"}
+                  : warming ? "Warming up…" : isRecording ? "Listening…" : voiceState === "processing" ? "Transcribing…" : voiceState === "speaking" ? "Speaking…" : "Tap to speak"}
               </p>
             </div>
             <div className="voice-devices">
@@ -307,7 +327,7 @@ export function ChatView({
             <button
               type="button"
               className="voice-exit-btn"
-              onClick={() => { stopRecording(); setVoiceMode(false); }}
+              onClick={() => { disconnect(); setVoiceMode(false); }}
               aria-label="Back to text"
             >
               ✕ text
@@ -330,7 +350,7 @@ export function ChatView({
               className="chat-voice-toggle"
               aria-label="Switch to voice"
               title="Voice conversation"
-              onClick={() => { setVoiceMode(true); void startRecording(); }}
+              onClick={() => { void enterVoiceMode(); }}
             >
               <MicIcon />
             </button>

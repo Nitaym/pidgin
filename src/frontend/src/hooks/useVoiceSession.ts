@@ -2,11 +2,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type VoiceState = "idle" | "recording" | "processing" | "speaking" | "error";
 
+/** Timing marks emitted across a voice turn, all via performance.now() (ms). */
+export type TimingMark =
+  | "recordingStart"   // microphone capture started (timeline origin)
+  | "speechEnd"        // end_of_utterance sent (user stopped speaking)
+  | "transcript"       // final transcript received
+  | "synthesizeStart"  // synthesize() called
+  | "ttsFirstByte"     // first audio chunk received
+  | "audioDone"        // all audio received
+  | "playbackStart";   // browser actually started playing audio
+
 export interface VoiceSessionOptions {
   onTranscript: (text: string) => void;
   onTranscriptDelta?: (delta: string) => void;
   onAudioDone?: () => void;
   onError?: (message: string) => void;
+  /** Fires at each stage boundary so callers can measure latency. */
+  onTimingMark?: (mark: TimingMark, t: number) => void;
   micDeviceId?: string;
   speakerDeviceId?: string;
   /** ms of silence before auto-submitting — Whisper mode only */
@@ -15,11 +27,13 @@ export interface VoiceSessionOptions {
 
 export function useVoiceSession(options: VoiceSessionOptions) {
   const {
-    onTranscript, onTranscriptDelta, onAudioDone, onError,
+    onTranscript, onTranscriptDelta, onAudioDone, onError, onTimingMark,
     micDeviceId, speakerDeviceId, silenceMs = 700,
   } = options;
 
   const [state, setState] = useState<VoiceState>("idle");
+  const [ready, setReady] = useState(false);
+  const [warming, setWarming] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRef = useRef<MediaRecorder | null>(null);
   const pcmRef = useRef<ScriptProcessorNode | null>(null);
@@ -33,54 +47,124 @@ export function useVoiceSession(options: VoiceSessionOptions) {
   const onTranscriptDeltaRef = useRef(onTranscriptDelta);
   const onErrorRef = useRef(onError);
   const onAudioDoneRef = useRef(onAudioDone);
+  const onTimingMarkRef = useRef(onTimingMark);
   useEffect(() => { onTranscriptRef.current = onTranscript; }, [onTranscript]);
   useEffect(() => { onTranscriptDeltaRef.current = onTranscriptDelta; }, [onTranscriptDelta]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
   useEffect(() => { onAudioDoneRef.current = onAudioDone; }, [onAudioDone]);
+  useEffect(() => { onTimingMarkRef.current = onTimingMark; }, [onTimingMark]);
+
+  const mark = useCallback((m: TimingMark) => {
+    onTimingMarkRef.current?.(m, performance.now());
+  }, []);
 
   const sttMode = () => localStorage.getItem("voice_stt") ?? "openai";
   const isRealtime = () => sttMode() === "openai_realtime";
   const isWebSpeech = () => sttMode() === "web_speech";
 
   // ---------------------------------------------------------------------------
-  // Backend WS — single connection for both STT relay and TTS
+  // TTS turn state — pipelined sentence streaming.
+  //
+  // A "speaking turn" can be fed text incrementally (feedText) while the LLM is
+  // still generating. Each completed sentence is synthesized immediately, and
+  // the resulting audio clips are played back-to-back via a queue so first
+  // audio is heard long before the full response is ready.
+  //
+  // Timing marks are turn-level: synthesizeStart/ttsFirstByte fire on the FIRST
+  // sentence (what the listener actually waits for); audioDone fires once every
+  // sentence's audio has been received.
   // ---------------------------------------------------------------------------
 
-  const audioChunksRef = useRef<Uint8Array[]>([]);
+  const ttsFirstByteSeenRef = useRef(false);     // first audio chunk of the turn
+  const synthStartMarkedRef = useRef(false);     // synthesizeStart marked this turn
+  const playbackStartMarkedRef = useRef(false);  // playbackStart marked this turn
+  const turnActiveRef = useRef(false);
+  const turnEndedRef = useRef(false);            // caller signalled: no more text
+  const firstFlushedRef = useRef(false);         // first clause of the turn sent
+  const pendingSynthRef = useRef(0);             // synth requests awaiting audio_done
+  const textBufRef = useRef("");                 // un-flushed transcript tail
+  const sentenceChunksRef = useRef<Uint8Array[]>([]); // audio of the current sentence
+  const playQueueRef = useRef<{ url: string; audio: HTMLAudioElement }[]>([]);
+  const playingRef = useRef(false);
+
+  // All audio received AND the caller has finished feeding text.
+  const finalizeIfDone = useCallback(() => {
+    if (!turnEndedRef.current || pendingSynthRef.current > 0) return;
+    if (playingRef.current || playQueueRef.current.length > 0) return;
+    // Nothing left to receive or play — the turn is complete.
+    turnActiveRef.current = false;
+    setState(isRealtime() || isWebSpeech() ? "recording" : "idle");
+    onAudioDoneRef.current?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const playNext = useCallback(() => {
+    if (playingRef.current) return;
+    const next = playQueueRef.current.shift();
+    if (!next) { finalizeIfDone(); return; }
+    playingRef.current = true;
+    if (!playbackStartMarkedRef.current) {
+      playbackStartMarkedRef.current = true;
+      next.audio.onplaying = () => mark("playbackStart");
+    }
+    next.audio.onended = () => {
+      URL.revokeObjectURL(next.url);
+      playingRef.current = false;
+      playNext();
+    };
+    next.audio.onerror = () => {
+      URL.revokeObjectURL(next.url);
+      playingRef.current = false;
+      playNext();
+    };
+    void next.audio.play();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mark, finalizeIfDone]);
+
+  const enqueueAudio = useCallback((blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    if (speakerIdRef.current && speakerIdRef.current !== "default" && "setSinkId" in audio) {
+      (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
+        .setSinkId(speakerIdRef.current).catch(() => {});
+    }
+    playQueueRef.current.push({ url, audio });
+    playNext();
+  }, [playNext]);
 
   const handleMessage = useCallback((raw: string) => {
     const msg = JSON.parse(raw) as {
       type: string; text?: string; data?: string; message?: string;
     };
     if (msg.type === "transcript" && msg.text) {
+      mark("transcript");
       if (!isRealtime() && !isWebSpeech()) setState("idle");
       onTranscriptRef.current(msg.text);
     } else if (msg.type === "transcript_delta" && msg.text) {
       onTranscriptDeltaRef.current?.(msg.text);
     } else if (msg.type === "audio_chunk" && msg.data) {
-      // Buffer chunks — partial MP3 fragments don't play cleanly on their own
+      // Buffer chunks per sentence — partial MP3 fragments don't decode alone
+      if (!ttsFirstByteSeenRef.current) {
+        ttsFirstByteSeenRef.current = true;
+        mark("ttsFirstByte");
+      }
       const binary = atob(msg.data);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      audioChunksRef.current.push(bytes);
+      sentenceChunksRef.current.push(bytes);
       setState("speaking");
     } else if (msg.type === "audio_done") {
-      // Play the complete buffered audio
-      if (audioChunksRef.current.length > 0) {
-        const blob = new Blob(audioChunksRef.current, { type: "audio/mpeg" });
-        audioChunksRef.current = [];
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        if (speakerIdRef.current && speakerIdRef.current !== "default" && "setSinkId" in audio) {
-          (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
-            .setSinkId(speakerIdRef.current).catch(() => {});
-        }
-        audio.onended = () => URL.revokeObjectURL(url);
-        void audio.play();
+      // One sentence finished — enqueue its audio and play in order
+      if (sentenceChunksRef.current.length > 0) {
+        const blob = new Blob(sentenceChunksRef.current, { type: "audio/mpeg" });
+        sentenceChunksRef.current = [];
+        enqueueAudio(blob);
       }
-      audioChunksRef.current = [];
-      setState(isRealtime() || isWebSpeech() ? "recording" : "idle");
-      onAudioDoneRef.current?.();
+      pendingSynthRef.current = Math.max(0, pendingSynthRef.current - 1);
+      if (turnEndedRef.current && pendingSynthRef.current === 0) {
+        mark("audioDone"); // all audio for the turn has now been received
+      }
+      finalizeIfDone();
     } else if (msg.type === "error") {
       setState("error");
       onErrorRef.current?.(msg.message ?? "Unknown voice error");
@@ -95,12 +179,34 @@ export function useVoiceSession(options: VoiceSessionOptions) {
       const stt = localStorage.getItem("voice_stt") ?? "openai";
       const tts = localStorage.getItem("voice_tts") ?? "elevenlabs";
       const ws = new WebSocket(`${proto}://${location.host}/api/voice/ws?stt=${stt}&tts=${tts}`);
-      ws.onopen = () => { wsRef.current = ws; resolve(ws); };
+      ws.onopen = () => { wsRef.current = ws; setReady(true); resolve(ws); };
       ws.onerror = () => reject(new Error("WebSocket connection failed — is the backend running?"));
       ws.onmessage = (ev) => handleMessage(ev.data as string);
-      ws.onclose = () => { wsRef.current = null; };
+      ws.onclose = () => { wsRef.current = null; setReady(false); };
     });
   }, [handleMessage]);
+
+  // ---------------------------------------------------------------------------
+  // Warmup — open the WS (and, for realtime, kick off the backend→OpenAI
+  // handshake + TTS provider init) ahead of time so the listen path is instant.
+  // ---------------------------------------------------------------------------
+
+  const warmup = useCallback(async (): Promise<boolean> => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) return true;
+    setWarming(true);
+    try {
+      const ws = await connect();
+      // Round-trip a ping so we know the backend is actually responsive,
+      // not just that the socket opened.
+      ws.send(JSON.stringify({ type: "ping" }));
+      return true;
+    } catch (err) {
+      onErrorRef.current?.((err as Error).message);
+      return false;
+    } finally {
+      setWarming(false);
+    }
+  }, [connect]);
 
   // ---------------------------------------------------------------------------
   // Recording helpers
@@ -116,11 +222,12 @@ export function useVoiceSession(options: VoiceSessionOptions) {
   }, []);
 
   const sendEndOfUtterance = useCallback(() => {
+    mark("speechEnd");
     wsRef.current?.send(JSON.stringify({ type: "end_of_utterance" }));
     vadRef.current?.stop();
     vadRef.current = null;
     setState("processing");
-  }, []);
+  }, [mark]);
 
   // ---------------------------------------------------------------------------
   // Public API
@@ -128,6 +235,7 @@ export function useVoiceSession(options: VoiceSessionOptions) {
 
   const startRecording = useCallback(async () => {
     try {
+      mark("recordingStart");
       const ws = await connect();
 
       if (isWebSpeech()) {
@@ -266,15 +374,90 @@ export function useVoiceSession(options: VoiceSessionOptions) {
     sendEndOfUtterance();
   }, [sendEndOfUtterance, stopPcmCapture]);
 
-  const synthesize = useCallback(async (text: string) => {
+  // Stop any in-flight playback and drop the queue.
+  const stopPlayback = useCallback(() => {
+    for (const item of playQueueRef.current) {
+      item.audio.onended = null;
+      item.audio.onerror = null;
+      try { item.audio.pause(); } catch { /* ignore */ }
+      URL.revokeObjectURL(item.url);
+    }
+    playQueueRef.current = [];
+    playingRef.current = false;
+  }, []);
+
+  // Begin a fresh speaking turn (reset all turn-level state).
+  const beginTurn = useCallback(() => {
+    stopPlayback();
+    turnActiveRef.current = true;
+    turnEndedRef.current = false;
+    firstFlushedRef.current = false;
+    synthStartMarkedRef.current = false;
+    ttsFirstByteSeenRef.current = false;
+    playbackStartMarkedRef.current = false;
+    pendingSynthRef.current = 0;
+    textBufRef.current = "";
+    sentenceChunksRef.current = [];
+  }, [stopPlayback]);
+
+  // Send one sentence/segment to the backend for synthesis.
+  const sendSynthesis = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
     try {
       const ws = await connect();
-      ws.send(JSON.stringify({ type: "synthesize", text }));
+      if (!synthStartMarkedRef.current) {
+        synthStartMarkedRef.current = true;
+        mark("synthesizeStart");
+      }
+      pendingSynthRef.current += 1;
+      ws.send(JSON.stringify({ type: "synthesize", text: trimmed }));
       setState("speaking");
     } catch (err) {
       onErrorRef.current?.((err as Error).message);
     }
-  }, [connect]);
+  }, [connect, mark]);
+
+  // Feed streaming text (e.g. LLM deltas). Complete sentences are synthesized
+  // as soon as they appear; the tail is buffered until more text arrives.
+  const feedText = useCallback((delta: string) => {
+    if (!turnActiveRef.current) beginTurn();
+    textBufRef.current += delta;
+    // For the very first segment of a turn, break on the first clause boundary
+    // (comma/colon/semicolon as well as sentence enders) so first audio starts
+    // as early as possible. After that, break on full sentences for natural
+    // prosody. Newlines always break.
+    for (;;) {
+      const boundary = firstFlushedRef.current
+        ? /[.!?](?=\s)|\n/
+        : /[.!?,:;](?=\s)|\n/;
+      const m = textBufRef.current.match(boundary);
+      if (!m || m.index === undefined) break;
+      const end = m.index + 1;
+      const segment = textBufRef.current.slice(0, end);
+      textBufRef.current = textBufRef.current.slice(end);
+      firstFlushedRef.current = true; // synchronous, so the next loop uses sentences
+      void sendSynthesis(segment);
+    }
+  }, [beginTurn, sendSynthesis]);
+
+  // No more text is coming — flush the remaining tail and close out the turn.
+  const finishSpeaking = useCallback(() => {
+    if (!turnActiveRef.current) return;
+    if (textBufRef.current.trim()) {
+      void sendSynthesis(textBufRef.current);
+    }
+    textBufRef.current = "";
+    turnEndedRef.current = true;
+    finalizeIfDone(); // handles the "nothing to speak" case
+  }, [sendSynthesis, finalizeIfDone]);
+
+  // One-shot synthesis (e.g. a fixed string, no streaming).
+  const synthesize = useCallback((text: string) => {
+    beginTurn();
+    void sendSynthesis(text);
+    turnEndedRef.current = true;
+  }, [beginTurn, sendSynthesis]);
 
   const disconnect = useCallback(() => {
     vadRef.current?.stop();
@@ -285,16 +468,24 @@ export function useVoiceSession(options: VoiceSessionOptions) {
       srRef.current = null;
     }
     stopPcmCapture();
+    stopPlayback();
+    turnActiveRef.current = false;
     wsRef.current?.close();
     wsRef.current = null;
+    setReady(false);
     mediaRef.current?.stop();
     mediaRef.current = null;
     setState("idle");
-  }, [stopPcmCapture]);
+  }, [stopPcmCapture, stopPlayback]);
 
   useEffect(() => () => { disconnect(); }, [disconnect]);
 
-  return { state, startRecording, stopRecording, synthesize, disconnect };
+  return {
+    state, ready, warming, warmup,
+    startRecording, stopRecording,
+    synthesize, feedText, finishSpeaking,
+    disconnect,
+  };
 }
 
 // ---------------------------------------------------------------------------
