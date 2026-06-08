@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "office-ui",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "prototypes/office-ui", "-p", "5500", "--no-clipboard"],
+      "port": 5500
+    }
+  ]
+}

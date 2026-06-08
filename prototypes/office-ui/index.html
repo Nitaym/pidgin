@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pidgin — Office</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="game">
+  <div id="wall">
+    <div class="wall-pillar" style="left:calc(33% - 11px)"></div>
+    <div class="wall-pillar" style="left:calc(67% - 11px)"></div>
+  </div>
+  <div id="floor"></div>
+
+  <!-- Room dividers -->
+  <div class="rdiv top" style="left:calc(33% - 11px)"></div>
+  <div class="rdiv top" style="left:calc(67% - 11px)"></div>
+  <div class="rdiv bot" style="left:calc(33% - 11px)"></div>
+  <div class="rdiv bot" style="left:calc(67% - 11px)"></div>
+
+  <!-- LOUNGE -->
+  <div class="wdeco fireplace" style="left:calc(16.5% - 44px)">
+    <div class="fp-opening"><div class="fp-fire"><div class="flame fl-big"></div><div class="flame fl-mid"></div><div class="flame fl-tip"></div></div></div>
+  </div>
+  <div style="position:absolute;left:calc(16.5% - 140px);top:155px;width:280px;height:320px;pointer-events:none;z-index:1;background:radial-gradient(ellipse at 50% 0%,rgba(255,110,0,.13) 0%,transparent 65%);"></div>
+  <div class="wdeco bookshelf" style="left:calc(33% - 142px);top:30px;width:68px;height:72px;">
+    <div class="shelf-row"><div class="book" style="background:#8b2020"></div><div class="book" style="background:#2060a0"></div><div class="book" style="background:#207040"></div><div class="book" style="background:#806020"></div></div>
+    <div class="shelf-row"><div class="book" style="background:#602080"></div><div class="book" style="background:#205080"></div><div class="book" style="background:#606020"></div><div class="book" style="background:#8b4020"></div></div>
+  </div>
+  <div class="rug" style="left:calc(16.5% - 90px);top:52%;width:180px;height:130px;background:#b83828;border:8px solid #7a1e10;outline:3px solid #b83828;"></div>
+  <div class="plant" style="left:14px;top:170px;"><div class="plant-emoji">🌿</div><div class="plant-pot"></div></div>
+  <div class="plant" style="left:14px;bottom:40px;"><div class="plant-emoji">🪴</div><div class="plant-pot"></div></div>
+
+  <!-- MAIN OFFICE -->
+  <div class="wdeco bookshelf" style="left:calc(50% - 152px)">
+    <div class="shelf-row"><div class="book" style="background:#8b2020"></div><div class="book" style="background:#2060a0"></div><div class="book" style="background:#207040"></div><div class="book" style="background:#806020"></div><div class="book" style="background:#602080"></div><div class="book" style="background:#205080"></div></div>
+    <div class="shelf-row"><div class="book" style="background:#606020"></div><div class="book" style="background:#8b4020"></div><div class="book" style="background:#204060"></div><div class="book" style="background:#802040"></div><div class="book" style="background:#208040"></div><div class="book" style="background:#805020"></div></div>
+    <div class="shelf-row"><div class="book" style="background:#402080"></div><div class="book" style="background:#806040"></div><div class="book" style="background:#408020"></div><div class="book" style="background:#804020"></div><div class="book" style="background:#206080"></div><div class="book" style="background:#408060"></div></div>
+  </div>
+  <div class="wdeco window-frame" style="left:calc(50% - 47px)"></div>
+  <div class="wdeco bookshelf" style="left:calc(50% + 56px)">
+    <div class="shelf-row"><div class="book" style="background:#205080"></div><div class="book" style="background:#8b3030"></div><div class="book" style="background:#406020"></div><div class="book" style="background:#704020"></div><div class="book" style="background:#204070"></div><div class="book" style="background:#703020"></div></div>
+    <div class="shelf-row"><div class="book" style="background:#802040"></div><div class="book" style="background:#405020"></div><div class="book" style="background:#204080"></div><div class="book" style="background:#806040"></div><div class="book" style="background:#208050"></div><div class="book" style="background:#602040"></div></div>
+    <div class="shelf-row"><div class="book" style="background:#206040"></div><div class="book" style="background:#704060"></div><div class="book" style="background:#802080"></div><div class="book" style="background:#205060"></div><div class="book" style="background:#806020"></div><div class="book" style="background:#408040"></div></div>
+  </div>
+  <div class="rug" style="left:calc(50% - 145px);top:50%;width:290px;height:180px;background:#9b2c20;border:10px solid #6a1a10;outline:3px solid #9b2c20;"></div>
+  <div class="plant" style="right:calc(33% + 14px);top:170px;"><div class="plant-emoji">🌱</div><div class="plant-pot"></div></div>
+
+  <!-- STRATEGY -->
+  <div class="wdeco painting mountain" style="left:calc(83.5% - 88px);top:22px;">🏔</div>
+  <div class="wdeco bookshelf" style="right:42px;top:24px;">
+    <div class="shelf-row"><div class="book" style="background:#205080"></div><div class="book" style="background:#8b3030"></div><div class="book" style="background:#406020"></div><div class="book" style="background:#704020"></div><div class="book" style="background:#204070"></div><div class="book" style="background:#703020"></div></div>
+    <div class="shelf-row"><div class="book" style="background:#802040"></div><div class="book" style="background:#405020"></div><div class="book" style="background:#204080"></div><div class="book" style="background:#806040"></div><div class="book" style="background:#208050"></div><div class="book" style="background:#602040"></div></div>
+    <div class="shelf-row"><div class="book" style="background:#206040"></div><div class="book" style="background:#704060"></div><div class="book" style="background:#802080"></div><div class="book" style="background:#205060"></div><div class="book" style="background:#806020"></div><div class="book" style="background:#408040"></div></div>
+  </div>
+  <div class="rug" style="left:calc(83.5% - 100px);top:52%;width:200px;height:140px;background:#283870;border:8px solid #182050;outline:3px solid #283870;"></div>
+  <div class="plant" style="right:14px;top:170px;"><div class="plant-emoji">🌿</div><div class="plant-pot"></div></div>
+  <div class="plant" style="right:14px;bottom:40px;"><div class="plant-emoji">🎋</div><div class="plant-pot"></div></div>
+
+  <!-- Dynamic objects (agents + decorations) -->
+  <div id="objects"></div>
+
+  <!-- Reset (top-left) -->
+  <button class="game-btn" id="reset-btn">⟲ RESET</button>
+
+  <!-- Missing features (top-right) -->
+  <button class="game-btn" id="features-btn">✦ FEATURES</button>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-box">
+      <div class="hud-time" id="hud-time">--:--</div>
+      <div class="hud-date" id="hud-date">...</div>
+      <div class="hud-agents" id="hud-agents">0 agents</div>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom toolbar -->
+<div id="bottom-btns">
+  <button class="game-btn" id="deco-btn">+ DECOR</button>
+  <button class="game-btn" id="hire-btn">+ HIRE</button>
+</div>
+
+<!-- Decoration picker (populated by JS) -->
+<div id="deco-picker"></div>
+
+<!-- Dialogue box -->
+<div id="dialogue">
+  <div id="dlg-portrait">
+    <div class="port-avatar" id="dlg-avatar"></div>
+    <div class="port-name" id="dlg-name">—</div>
+    <div class="port-role" id="dlg-role">—</div>
+  </div>
+  <div id="dlg-body">
+    <div id="dlg-msgs"></div>
+    <div id="dlg-input-row">
+      <textarea id="dlg-input" rows="1" placeholder="> say something..."></textarea>
+      <button id="dlg-send">SEND</button>
+      <button id="dlg-close">✕</button>
+    </div>
+  </div>
+</div>
+
+<!-- Agent context menu -->
+<div id="ctx" class="ctx-menu">
+  <div class="ctx-head" id="ctx-title">AGENT</div>
+  <div class="ctx-item" id="ctx-talk">💬 Talk</div>
+  <div class="ctx-item" id="ctx-customize">🎨 Customize</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" id="ctx-fire">🔥 Fire</div>
+</div>
+
+<!-- Decoration context menu -->
+<div id="ctx-deco" class="ctx-menu">
+  <div class="ctx-head">DECORATION</div>
+  <div class="ctx-item" id="ctx-deco-edit">✏️ Edit text</div>
+  <div class="ctx-sep" id="ctx-deco-sep"></div>
+  <div class="ctx-item danger" id="ctx-deco-remove">🗑 Remove</div>
+</div>
+
+<!-- Sign text editor -->
+<div class="overlay" id="sign-overlay">
+  <div class="modal" id="sign-modal">
+    <h2>▶ SIGN TEXT</h2>
+    <p class="sign-hint">Name the room however you like.</p>
+    <input id="sign-input" maxlength="22" placeholder="Room name…" autocomplete="off" />
+    <div class="mactions">
+      <button class="btn btn-ghost" id="sign-cancel">Cancel</button>
+      <button class="btn btn-grn"   id="sign-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fire confirm -->
+<div class="overlay" id="fire-overlay">
+  <div class="modal" id="fire-modal">
+    <h2>▶ FIRE AGENT?</h2>
+    <p>Let go of <strong id="fire-name">—</strong>?<br>All messages will be lost.</p>
+    <div class="mactions">
+      <button class="btn btn-ghost" id="fire-cancel">Cancel</button>
+      <button class="btn btn-red"   id="fire-confirm">Fire</button>
+    </div>
+  </div>
+</div>
+
+<!-- Missing features editor -->
+<div class="overlay" id="features-overlay">
+  <div class="modal" id="features-modal">
+    <h2>✦ MISSING FEATURES</h2>
+    <p class="features-hint">Editable notes — saved to <code>MISSING_FEATURES.md</code> on the backend.</p>
+    <textarea id="features-text" spellcheck="false"></textarea>
+    <div class="mactions">
+      <button class="btn btn-ghost" id="features-cancel">Close</button>
+      <button class="btn btn-grn"   id="features-save">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Reset confirm -->
+<div class="overlay" id="reset-overlay">
+  <div class="modal" id="reset-modal">
+    <h2>▶ RESET OFFICE?</h2>
+    <p>This clears all robots and decorations and restores the starting office.<br>This can't be undone.</p>
+    <div class="mactions">
+      <button class="btn btn-ghost" id="reset-cancel">Cancel</button>
+      <button class="btn btn-red"   id="reset-confirm">Reset</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
