@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { api, type Message } from "../api/client";
-import { useVoiceSession } from "../hooks/useVoiceSession";
+import { useVoiceSession, type TimingMark } from "../hooks/useVoiceSession";
 import { useAudioDevices } from "../hooks/useAudioDevices";
+import { VoiceDiagnosticsPanel, type MarkMap, type LlmMarks } from "./VoiceDiagnosticsPanel";
 
 function MicIcon({ size = 22 }: { size?: number }) {
   return (
@@ -54,6 +55,18 @@ export function ChatView({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendingRef = useRef(false); // synchronous guard against double-send
 
+  // ── Diagnostics view ──
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [marks, setMarks] = useState<MarkMap>({});
+  const [llm, setLlm] = useState<LlmMarks>({});
+  const [diagTurnId, setDiagTurnId] = useState<string | undefined>(undefined);
+  const [lastUserText, setLastUserText] = useState("");
+  const onTimingMark = useCallback((m: TimingMark, t: number) => {
+    // recordingStart begins a fresh turn — reset the marks/LLM timings.
+    if (m === "recordingStart") { setMarks({ recordingStart: t }); setLlm({}); }
+    else setMarks((prev) => ({ ...prev, [m]: t }));
+  }, []);
+
   useEffect(() => {
     async function load() {
       if (!slug || !agentHandle) return;
@@ -86,6 +99,8 @@ export function ChatView({
     // back-to-back before the `streaming` state has propagated.
     if (!text.trim() || !slug || sendingRef.current) return;
     sendingRef.current = true;
+    setLastUserText(text);
+    setLlm({ start: performance.now() });
     setError(null);
     setStreaming(true);
     setBody("");
@@ -115,9 +130,11 @@ export function ChatView({
             type: string;
             delta?: string;
             message?: string;
+            turn_id?: string;
           };
           if (parsed.type === "text_delta" && parsed.delta) {
             fullResponse += parsed.delta;
+            setLlm((p) => (p.firstByte === undefined ? { ...p, firstByte: performance.now() } : p));
             // Pipeline TTS: speak each sentence as soon as it streams in,
             // rather than waiting for the full response.
             if (voiceMode) feedText(parsed.delta);
@@ -137,6 +154,8 @@ export function ChatView({
             completed = true;
             source.close();
             sendingRef.current = false;
+            setLlm((p) => ({ ...p, done: performance.now() }));
+            if (parsed.turn_id) setDiagTurnId(parsed.turn_id);
             setDraft(null);
             void api.getAgentMessages(slug, agentHandle).then((fresh) => {
               setMessages(fresh.messages);
@@ -185,8 +204,10 @@ export function ChatView({
   const { state: voiceState, warming, warmup, startRecording, stopRecording, feedText, finishSpeaking, disconnect } = useVoiceSession({
     onTranscript: (text) => { void sendMessage(text); },
     onError: (msg) => setVoiceError(msg),
+    onTimingMark,
     micDeviceId: micId,
     speakerDeviceId: speakerId,
+    continuous: voiceMode, // hands-free: auto-resume listening after each agent reply
   });
   const isRecording = voiceState === "recording";
   const voiceBusy = voiceState === "processing" || voiceState === "speaking";
@@ -221,6 +242,16 @@ export function ChatView({
             <div className="chat-agent-sub">Direct message</div>
           </div>
         </div>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => setShowDiagnostics((v) => !v)}
+          aria-pressed={showDiagnostics}
+          title="Toggle voice/LLM diagnostics"
+          style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 13 }}
+        >
+          {showDiagnostics ? "Hide diagnostics" : "📊 Diagnostics"}
+        </button>
       </div>
 
       <div className="chat-messages">
@@ -269,6 +300,31 @@ export function ChatView({
         {error && <div className="chat-error">{error}</div>}
         <div ref={messagesEndRef} />
       </div>
+
+      {showDiagnostics && (
+        <div
+          className="panel"
+          style={{
+            margin: "0 16px 12px", padding: "12px 16px", maxHeight: "40vh",
+            overflow: "auto", borderRadius: 8,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <strong style={{ fontSize: 14 }}>Voice pipeline diagnostics</strong>
+            <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>
+              {voiceState === "idle" ? "idle" : voiceState}
+            </span>
+          </div>
+          <VoiceDiagnosticsPanel
+            marks={marks}
+            llm={llm}
+            live={voiceState !== "idle" && voiceState !== "error"}
+            slug={slug}
+            turnId={diagTurnId}
+            userText={lastUserText}
+          />
+        </div>
+      )}
 
       <div className="chat-footer">
         {voiceMode ? (

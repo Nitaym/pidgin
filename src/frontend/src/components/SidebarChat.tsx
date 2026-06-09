@@ -16,8 +16,10 @@ export function SidebarChat({ slug, base: _base }: SidebarChatProps) {
     void api.listAgents(slug).then(setAgents).catch(() => setAgents([]));
   }, [slug]);
 
+  // Show every active agent — a freshly hired one has no conversation_id yet;
+  // the conversation is created on the first message.
   const chatAgents = agents.filter(
-    (agent) => agent.current_status !== "offboarded" && agent.conversation_id,
+    (agent) => agent.current_status !== "offboarded",
   );
 
   if (chatAgents.length === 0) return null;

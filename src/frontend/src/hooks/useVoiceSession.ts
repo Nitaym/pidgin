@@ -23,12 +23,14 @@ export interface VoiceSessionOptions {
   speakerDeviceId?: string;
   /** ms of silence before auto-submitting — Whisper mode only */
   silenceMs?: number;
+  /** Hands-free conversation: auto-resume listening after the agent finishes speaking. */
+  continuous?: boolean;
 }
 
 export function useVoiceSession(options: VoiceSessionOptions) {
   const {
     onTranscript, onTranscriptDelta, onAudioDone, onError, onTimingMark,
-    micDeviceId, speakerDeviceId, silenceMs = 700,
+    micDeviceId, speakerDeviceId, silenceMs = 700, continuous = false,
   } = options;
 
   const [state, setState] = useState<VoiceState>("idle");
@@ -48,11 +50,19 @@ export function useVoiceSession(options: VoiceSessionOptions) {
   const onErrorRef = useRef(onError);
   const onAudioDoneRef = useRef(onAudioDone);
   const onTimingMarkRef = useRef(onTimingMark);
+  const continuousRef = useRef(continuous);
   useEffect(() => { onTranscriptRef.current = onTranscript; }, [onTranscript]);
   useEffect(() => { onTranscriptDeltaRef.current = onTranscriptDelta; }, [onTranscriptDelta]);
   useEffect(() => { onErrorRef.current = onError; }, [onError]);
   useEffect(() => { onAudioDoneRef.current = onAudioDone; }, [onAudioDone]);
   useEffect(() => { onTimingMarkRef.current = onTimingMark; }, [onTimingMark]);
+  useEffect(() => { continuousRef.current = continuous; }, [continuous]);
+
+  // Synchronous gate: exactly one transcript is accepted per recording session.
+  // Blocks duplicate/echo transcripts and stray events while thinking/speaking.
+  const acceptingTranscriptRef = useRef(false);
+  // Set after startRecording defines it, so finalizeIfDone can auto-resume.
+  const startRecordingRef = useRef<() => void>(() => {});
 
   const mark = useCallback((m: TimingMark) => {
     onTimingMarkRef.current?.(m, performance.now());
@@ -93,8 +103,13 @@ export function useVoiceSession(options: VoiceSessionOptions) {
     if (playingRef.current || playQueueRef.current.length > 0) return;
     // Nothing left to receive or play — the turn is complete.
     turnActiveRef.current = false;
-    setState(isRealtime() || isWebSpeech() ? "recording" : "idle");
     onAudioDoneRef.current?.();
+    if (continuousRef.current) {
+      // Hands-free: start listening again for the next turn.
+      startRecordingRef.current();
+    } else {
+      setState("idle");
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -137,8 +152,12 @@ export function useVoiceSession(options: VoiceSessionOptions) {
       type: string; text?: string; data?: string; message?: string;
     };
     if (msg.type === "transcript" && msg.text) {
+      // One transcript per recording session — drop duplicates/echo.
+      if (!acceptingTranscriptRef.current) return;
+      acceptingTranscriptRef.current = false;
       mark("transcript");
-      if (!isRealtime() && !isWebSpeech()) setState("idle");
+      teardownCapture();       // silence the mic while the agent thinks + speaks
+      setState("processing");
       onTranscriptRef.current(msg.text);
     } else if (msg.type === "transcript_delta" && msg.text) {
       onTranscriptDeltaRef.current?.(msg.text);
@@ -221,6 +240,29 @@ export function useVoiceSession(options: VoiceSessionOptions) {
     }
   }, []);
 
+  // Tear down all mic capture WITHOUT submitting an utterance. Used once a
+  // transcript is in hand, so the mic is silent while the agent thinks/speaks
+  // (prevents the agent's own audio from being re-transcribed as a new turn).
+  const teardownCapture = useCallback(() => {
+    vadRef.current?.stop();
+    vadRef.current = null;
+    if (srRef.current) {
+      srRef.current.onend = null;
+      srRef.current.onresult = null;
+      try { srRef.current.stop(); } catch { /* ignore */ }
+      srRef.current = null;
+    }
+    stopPcmCapture();
+    if (mediaRef.current) {
+      try {
+        mediaRef.current.ondataavailable = null;
+        if (mediaRef.current.state !== "inactive") mediaRef.current.stop();
+        mediaRef.current.stream.getTracks().forEach((t) => t.stop());
+      } catch { /* ignore */ }
+      mediaRef.current = null;
+    }
+  }, [stopPcmCapture]);
+
   const sendEndOfUtterance = useCallback(() => {
     mark("speechEnd");
     wsRef.current?.send(JSON.stringify({ type: "end_of_utterance" }));
@@ -236,13 +278,22 @@ export function useVoiceSession(options: VoiceSessionOptions) {
   const startRecording = useCallback(async () => {
     try {
       mark("recordingStart");
+      acceptingTranscriptRef.current = true; // open the gate for this turn
       const ws = await connect();
 
       if (isWebSpeech()) {
         // Web Speech API — browser-native STT, no audio sent to backend
         const SR = window.SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
         if (!SR) {
-          throw new Error("Web Speech API not supported in this browser. Use Chrome or Edge.");
+          throw new Error("Web Speech API not supported in this browser. Use Chrome or Edge, or switch STT to OpenAI Whisper in Settings.");
+        }
+        // Web Speech only works in a secure context (HTTPS or localhost).
+        // On a plain-http LAN address it fails with "not-allowed".
+        if (!window.isSecureContext && !["localhost", "127.0.0.1"].includes(location.hostname)) {
+          throw new Error(
+            "Web Speech needs HTTPS or localhost — this page is served over an insecure connection. " +
+            "Open the app via https://, or switch STT to OpenAI Whisper in Settings.",
+          );
         }
         const sr = new SR();
         srRef.current = sr;
@@ -256,7 +307,13 @@ export function useVoiceSession(options: VoiceSessionOptions) {
             const result = e.results[i];
             if (result.isFinal) {
               const text = result[0].transcript.trim();
-              if (text) onTranscriptRef.current(text);
+              if (text && acceptingTranscriptRef.current) {
+                acceptingTranscriptRef.current = false;
+                mark("transcript");
+                teardownCapture();
+                setState("processing");
+                onTranscriptRef.current(text);
+              }
             } else {
               interim += result[0].transcript;
             }
@@ -265,14 +322,27 @@ export function useVoiceSession(options: VoiceSessionOptions) {
         };
 
         sr.onerror = (e: SpeechRecognitionErrorEvent) => {
-          if (e.error === "no-speech") return; // ignore silence
+          if (e.error === "no-speech" || e.error === "aborted") return; // benign
+          // Permission/device errors are fatal — close the gate and drop the
+          // recognizer so onend doesn't restart it in a loop.
+          const fatal =
+            e.error === "not-allowed" ||
+            e.error === "service-not-allowed" ||
+            e.error === "audio-capture";
+          if (fatal) {
+            acceptingTranscriptRef.current = false;
+            srRef.current = null;
+          }
           setState("error");
-          onErrorRef.current?.(`Speech recognition error: ${e.error}`);
+          onErrorRef.current?.(speechErrorMessage(e.error));
         };
 
         sr.onend = () => {
-          // Auto-restart if still supposed to be recording
-          if (srRef.current === sr && state === "recording") sr.start();
+          // Browser ended recognition while we're still waiting for the user —
+          // restart it (gate still open, no transcript accepted yet).
+          if (srRef.current === sr && acceptingTranscriptRef.current) {
+            try { sr.start(); } catch { /* already started */ }
+          }
         };
 
         sr.start();
@@ -346,9 +416,12 @@ export function useVoiceSession(options: VoiceSessionOptions) {
       onErrorRef.current?.((err as Error).message);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connect, micDeviceId, silenceMs, sendEndOfUtterance, stopPcmCapture]);
+  }, [connect, micDeviceId, silenceMs, sendEndOfUtterance, stopPcmCapture, teardownCapture, mark]);
+
+  useEffect(() => { startRecordingRef.current = () => { void startRecording(); }; }, [startRecording]);
 
   const stopRecording = useCallback(() => {
+    acceptingTranscriptRef.current = false;
     vadRef.current?.stop();
     vadRef.current = null;
 
@@ -460,6 +533,8 @@ export function useVoiceSession(options: VoiceSessionOptions) {
   }, [beginTurn, sendSynthesis]);
 
   const disconnect = useCallback(() => {
+    acceptingTranscriptRef.current = false;
+    turnEndedRef.current = true; // prevent any pending finalize from auto-resuming
     vadRef.current?.stop();
     vadRef.current = null;
     if (srRef.current) {
@@ -538,6 +613,22 @@ function startVAD(stream: MediaStream, silenceMs: number, onSilence: () => void)
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function speechErrorMessage(code: string): string {
+  switch (code) {
+    case "not-allowed":
+    case "service-not-allowed":
+      return "Microphone access for speech recognition was blocked. Allow the microphone in your " +
+        "browser's site permissions and try again. (Web Speech also requires HTTPS or localhost — " +
+        "if you're on a plain-http address, switch STT to OpenAI Whisper in Settings.)";
+    case "audio-capture":
+      return "No microphone was found. Check that an input device is connected and selected.";
+    case "network":
+      return "Speech recognition network error — the browser's speech service is unreachable.";
+    default:
+      return `Speech recognition error: ${code}`;
+  }
+}
 
 function float32ToInt16(samples: Float32Array): Int16Array {
   const out = new Int16Array(samples.length);

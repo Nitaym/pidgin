@@ -16,8 +16,10 @@ export function ChatModal({ onClose }: ChatModalProps) {
   useEffect(() => {
     if (!slug) return;
     void api.listAgents(slug).then((all) => {
+      // Include freshly hired agents that don't have a conversation yet — it's
+      // created on the first message.
       const chatAgents = all.filter(
-        (a) => a.current_status !== "offboarded" && a.conversation_id,
+        (a) => a.current_status !== "offboarded",
       );
       setAgents(chatAgents);
       if (chatAgents.length > 0) {

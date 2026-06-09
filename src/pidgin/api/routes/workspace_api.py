@@ -40,6 +40,7 @@ from pidgin.recipes.catalog import (
     bundled_template_detail,
     list_bundled_template_summaries,
 )
+from pidgin.runtime.prompt import build_system_prompt
 from pidgin.runtime.streaming import KeyedTurnEventSink, format_sse, turn_event_bus
 from pidgin.runtime.turn_dispatcher import dispatch_turn
 from pidgin.services import inject_test_event
@@ -52,6 +53,13 @@ from pidgin.services.brief import (
     update_agent_brief,
 )
 from pidgin.services.chat import send_chat_message
+from pidgin.services.common_instructions import (
+    DEFAULT_COMMON_INSTRUCTIONS,
+    CommonInstructionsError,
+    common_instructions_text,
+    get_common_instructions,
+    save_common_instructions,
+)
 from pidgin.services.integrations import (
     IntegrationError,
     connect_manual,
@@ -70,6 +78,7 @@ from pidgin.templates import (
     save_workspace_template_version,
 )
 from pidgin.types.customization import HireCustomization, IdealCandidate, JobRequirements
+from pidgin.types.enums import ProcessingStatus
 from pidgin.workspace.factory import build_workspace_context_from_conn
 from pidgin.workspace.manager import WorkspacePaths
 
@@ -116,6 +125,10 @@ class PatchWorkspaceTemplateBody(BaseModel):
 class CreateTemplateFromAgentBody(BaseModel):
     name: str = Field(min_length=1)
     slug: str | None = None
+
+
+class CommonInstructionsBody(BaseModel):
+    body_markdown: str = Field(min_length=1)
 
 
 class CreateHrAssistSessionBody(BaseModel):
@@ -347,6 +360,62 @@ def api_patch_agent_brief(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/common-instructions")
+def api_get_common_instructions(workspace_slug: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    return get_common_instructions(Path(session.paths_root))
+
+
+@router.get("/common-instructions/default")
+def api_get_default_common_instructions(workspace_slug: str, request: Request) -> dict:
+    require_workspace_session(request, workspace_slug)
+    return {"body_markdown": DEFAULT_COMMON_INSTRUCTIONS.strip()}
+
+
+@router.put("/common-instructions")
+def api_save_common_instructions(
+    workspace_slug: str,
+    body: CommonInstructionsBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return save_common_instructions(
+            Path(session.paths_root),
+            body_markdown=body.body_markdown,
+            actor_principal_id=get_or_create_operator_principal(session.conn),
+        )
+    except CommonInstructionsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/agents/{handle}/effective-prompt")
+def api_agent_effective_prompt(workspace_slug: str, handle: str, request: Request) -> dict:
+    """The fully assembled system prompt for an agent — the *sum* of every
+    instruction layer (common + role + per-agent brief) — so the admin
+    configuring it can review the combined result and resolve any conflicts."""
+    session = require_workspace_session(request, workspace_slug)
+    agent_row = get_agent_by_handle(session.conn, handle)
+    if agent_row is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    paths = WorkspacePaths(root=Path(session.paths_root))
+    ctx = build_workspace_context_from_conn(
+        workspace_id=session.workspace_id,
+        paths=paths,
+        conn=session.conn,
+    )
+    agent = ctx.turn_store.load_agent_context(agent_row["id"])
+    common = get_common_instructions(paths.root)
+    system_prompt = build_system_prompt(agent, common_instructions=common["body_markdown"])
+    return {
+        "handle": handle,
+        "display_name": agent.display_name,
+        "role_title": agent.role_title,
+        "common_instructions_version": common["version"],
+        "system_prompt": system_prompt,
+    }
+
+
 @router.post("/agents/{handle}/create-template")
 def api_create_template_from_agent(
     workspace_slug: str,
@@ -540,6 +609,21 @@ def _dispatch_streaming_turn(workspace_id: str, paths_root: str, event_id: str) 
     paths = WorkspacePaths(root=Path(paths_root))
     conn = connect(paths.db_sqlite)
     try:
+        # Atomically claim the event. The browser's EventSource auto-reconnects
+        # when the server closes the stream, which re-hits this endpoint; without
+        # this guard the same event would be dispatched (and answered) twice.
+        claimed = conn.execute(
+            "UPDATE inbound_events SET processing_status = ? "
+            "WHERE id = ? AND processing_status = ?",
+            (ProcessingStatus.DISPATCHING.value, event_id, ProcessingStatus.PENDING.value),
+        )
+        conn.commit()
+        if claimed.rowcount == 0:
+            log.warning(
+                "[stream] event %s already claimed — skipping duplicate dispatch", event_id
+            )
+            return
+
         ctx = build_workspace_context_from_conn(
             workspace_id=workspace_id,
             paths=paths,
