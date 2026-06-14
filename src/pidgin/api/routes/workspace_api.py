@@ -21,7 +21,13 @@ from pidgin.db.chat import (
     get_or_create_agent_conversation,
     list_messages,
 )
-from pidgin.db.diagnostics import get_turn, list_audit_log, list_inbound_events, list_turns
+from pidgin.db.diagnostics import (
+    get_turn,
+    list_audit_log,
+    list_inbound_events,
+    list_model_invocations,
+    list_turns,
+)
 from pidgin.db.employees import get_agent_by_handle, list_agents
 from pidgin.db.principals import get_or_create_operator_principal
 from pidgin.hire import HireError, TemplateHireRequest, hire_support_agent, hire_with_template
@@ -68,6 +74,7 @@ from pidgin.services.integrations import (
     list_integrations,
     run_health_check,
     start_oauth,
+    update_integration_config,
 )
 from pidgin.templates import (
     TemplateError,
@@ -97,6 +104,8 @@ class HireCustomizationBody(BaseModel):
     job_requirements: JobRequirements = Field(default_factory=JobRequirements)
     ideal_candidate: IdealCandidate = Field(default_factory=IdealCandidate)
     your_take: str = ""
+    gender: str = ""
+    voice: str = ""
 
 
 class HireBody(BaseModel):
@@ -147,6 +156,10 @@ class ManualConnectBody(BaseModel):
 
 class OAuthStartBody(BaseModel):
     display_name: str | None = None
+
+
+class IntegrationConfigBody(BaseModel):
+    config: dict[str, str] = Field(default_factory=dict)
 
 
 @router.get("/agents")
@@ -739,6 +752,17 @@ def api_list_audit(workspace_slug: str, request: Request, limit: int = 100) -> l
     return list_audit_log(session.conn, limit=limit)
 
 
+@router.get("/llm-invocations")
+def api_list_llm_invocations(
+    workspace_slug: str,
+    request: Request,
+    limit: int = 50,
+    after: str | None = None,
+) -> list[dict]:
+    session = require_workspace_session(request, workspace_slug)
+    return list_model_invocations(session.conn, limit=min(limit, 200), after=after)
+
+
 @router.get("/integrations/catalog")
 def api_integration_catalog(workspace_slug: str, request: Request) -> list[dict]:
     _ = workspace_slug
@@ -805,6 +829,24 @@ def api_integration_health(
         return run_health_check(session.conn, installation_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/integrations/{installation_id}/config")
+def api_update_integration_config(
+    workspace_slug: str,
+    installation_id: str,
+    body: IntegrationConfigBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return update_integration_config(
+            session.conn,
+            installation_id=installation_id,
+            updates=body.config,
+        )
+    except IntegrationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/integrations/{installation_id}")

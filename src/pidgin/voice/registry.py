@@ -19,12 +19,15 @@ def get_stt(backend: str | None = None) -> STTProvider:
     raise ValueError(f"Unknown STT backend: {name!r}")
 
 
-def get_tts(backend: str | None = None) -> TTSProvider:
+def get_tts(backend: str | None = None, voice: str | None = None) -> TTSProvider:
+    from pidgin.voice.catalog import resolve_voice
+
     name = (backend or os.getenv("PIDGIN_TTS_BACKEND", "elevenlabs")).lower()
+    resolved = resolve_voice(voice, name)
     if name == "elevenlabs":
         from pidgin.voice.providers.elevenlabs_tts import ElevenLabsTTSProvider
-        return ElevenLabsTTSProvider()
+        return ElevenLabsTTSProvider(voice_id=resolved)
     if name == "openai":
         from pidgin.voice.providers.openai_tts import OpenAITTSProvider
-        return OpenAITTSProvider()
+        return OpenAITTSProvider(voice=resolved or "alloy")
     raise ValueError(f"Unknown TTS backend: {name!r}")

@@ -21,6 +21,27 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
             "required": ["text"],
         },
     ),
+    "post": ToolSpec(
+        name="post",
+        description=(
+            "Proactively send a message to a person or channel, independent of "
+            "the current conversation. Use this to reach out — e.g. DM someone "
+            "on Slack or post to a channel. Target forms: a resource URI "
+            "(slack:channel/C0123, slack:user/U0123), an email address, or a "
+            "#channel-name."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "target": {
+                    "type": "string",
+                    "description": "Destination: resource URI, email address, or #channel-name",
+                },
+                "text": {"type": "string", "description": "Message body"},
+            },
+            "required": ["target", "text"],
+        },
+    ),
     "read": ToolSpec(
         name="read",
         description="Read content from a connector resource URI.",
@@ -30,6 +51,29 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
                 "resource_uri": {"type": "string", "description": "Pidgin resource URI"},
             },
             "required": ["resource_uri"],
+        },
+    ),
+    "schedule_self": ToolSpec(
+        name="schedule_self",
+        description=(
+            "Schedule a future wake-up for yourself to follow up on something. "
+            "When it fires you receive a timer event with your reason and can "
+            "act on it (e.g. post a message to someone)."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "delay_minutes": {
+                    "type": "number",
+                    "description": "How many minutes from now to fire",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "What to do when the timer fires — be specific, "
+                    "future-you only sees this text",
+                },
+            },
+            "required": ["delay_minutes", "reason"],
         },
     ),
     "remember": ToolSpec(

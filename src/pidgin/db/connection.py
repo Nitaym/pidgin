@@ -6,7 +6,12 @@ from pathlib import Path
 
 from pidgin.util.ids import utc_now_iso
 
-MIGRATION_VERSIONS = ("001_initial", "002_hire_customization", "003_remove_rooms")
+MIGRATION_VERSIONS = (
+    "001_initial",
+    "002_hire_customization",
+    "003_remove_rooms",
+    "004_slack_messaging",
+)
 SYSTEM_EMPLOYEE_ID = "000000000000000000000000"
 
 
@@ -26,6 +31,9 @@ def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    # The background worker and request handlers each hold their own connection
+    # to the same file; wait on a writer's lock instead of failing immediately.
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 

@@ -6,7 +6,7 @@
   "description": "MVP stub recipe for first hire path.",
   "permissions": {
     "can_read": ["read", "recall"],
-    "can_write": ["say", "post", "remember", "draft", "open_task"],
+    "can_write": ["say", "post", "remember", "draft", "open_task", "schedule_self"],
     "requires_approval": ["execute", "escalate"],
     "blocked": []
   },

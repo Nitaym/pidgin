@@ -14,12 +14,18 @@ export type HireCustomization = {
   job_requirements: JobRequirements;
   ideal_candidate: IdealCandidate;
   your_take: string;
+  /** "" (unspecified), "female", or "male" */
+  gender?: "" | "female" | "male";
+  /** Voice preset key (see utils/voicePresets); "" → auto-pick by gender */
+  voice?: string;
 };
 
 export const emptyCustomization = (): HireCustomization => ({
   job_requirements: { mission: "", responsibilities: [], out_of_scope: [] },
   ideal_candidate: { tone: "", decision_framework: "", escalation_rules: "" },
   your_take: "",
+  gender: "",
+  voice: "",
 });
 
 export type TemplateSummary = {

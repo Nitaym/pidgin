@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -24,12 +25,35 @@ from pidgin.workspace import resolve_workspace_paths
 router = APIRouter(tags=["hooks"])
 
 
+def _verify_or_401(request: Request, body: bytes, signing_secret: str | None) -> None:
+    if not signing_secret:
+        # Verification is mandatory — a missing secret is a config error, not
+        # a reason to accept unsigned payloads.
+        raise HTTPException(
+            status_code=401,
+            detail="Slack signing secret not configured (set SLACK_SIGNING_SECRET)",
+        )
+    if not verify_slack_signature(
+        signing_secret=signing_secret,
+        timestamp=request.headers.get("X-Slack-Request-Timestamp", ""),
+        body=body,
+        signature=request.headers.get("X-Slack-Signature", ""),
+    ):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+
 @router.post("/hooks/slack/events")
 async def slack_events_hook(request: Request) -> Response:
     body = await request.body()
     payload = json.loads(body.decode("utf-8"))
 
     if payload.get("type") == "url_verification":
+        # Fired by Slack during app setup, possibly before any installation
+        # exists. Verify with the app-level secret when present; echoing the
+        # challenge has no side effects, so don't require an installation.
+        env_secret = os.getenv("SLACK_SIGNING_SECRET")
+        if env_secret:
+            _verify_or_401(request, body, env_secret)
         return Response(content=payload.get("challenge", ""), media_type="text/plain")
 
     team_id = str(payload.get("team_id") or payload.get("team") or "")
@@ -50,20 +74,18 @@ async def slack_events_hook(request: Request) -> Response:
         raise HTTPException(status_code=404, detail="Slack not connected")
 
     installation = dict(installation_row)
-    signing_secret = get_signing_secret(installation)
-    if signing_secret:
-        timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
-        signature = request.headers.get("X-Slack-Signature", "")
-        if not verify_slack_signature(
-            signing_secret=signing_secret,
-            timestamp=timestamp,
-            body=body,
-            signature=signature,
-        ):
-            raise HTTPException(status_code=401, detail="Invalid Slack signature")
+    _verify_or_401(request, body, get_signing_secret(installation))
 
     event = payload.get("event") or {}
-    handle_slack_event(conn, installation, event)
+    # Persist only — the background worker runs the turn so we ack inside
+    # Slack's 3s window. The envelope event_id dedups Slack's retries.
+    handle_slack_event(
+        conn,
+        installation,
+        event,
+        external_event_id=str(payload.get("event_id") or "") or None,
+        run_turn=False,
+    )
     return Response(status_code=200)
 
 

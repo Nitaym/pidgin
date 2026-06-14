@@ -9,7 +9,11 @@ import {
   type HireCustomization,
   type SelectedTemplate,
 } from "../types/hire";
-import { randomAmericanFirstName } from "../utils/agentNameGenerator";
+import {
+  nameMatchesGender,
+  randomFirstName,
+  type AgentGender,
+} from "../utils/agentNameGenerator";
 
 function suggestHandle(displayName: string): string {
   return displayName
@@ -35,16 +39,37 @@ export function HireWizardPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const displayNameSeeded = useRef(false);
+  const lastAutoName = useRef("");
 
   const hireContextId = useMemo(() => `hire-${Date.now()}`, []);
 
-  const chooseRandomDisplayName = useCallback(() => {
-    const name = randomAmericanFirstName();
+  const chooseRandomDisplayName = useCallback((gender?: AgentGender) => {
+    const name = randomFirstName(gender ?? (customization.gender as AgentGender) ?? "");
+    lastAutoName.current = name;
     setDisplayName(name);
     if (!handleEdited) {
       setHandle(suggestHandle(name));
     }
-  }, [handleEdited]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handleEdited, customization.gender]);
+
+  // When the gender changes, keep the suggested name in agreement with it.
+  // Only auto-replace names we generated (or that clearly mismatch) — never
+  // a name the user typed that isn't in our lists.
+  const handleCustomizationChange = useCallback((next: HireCustomization) => {
+    const prevGender = (customization.gender ?? "") as AgentGender;
+    const nextGender = (next.gender ?? "") as AgentGender;
+    setCustomization(next);
+    if (nextGender !== prevGender) {
+      const wasAuto = displayName === lastAutoName.current;
+      if (!displayName || wasAuto || !nameMatchesGender(displayName, nextGender)) {
+        const name = randomFirstName(nextGender);
+        lastAutoName.current = name;
+        setDisplayName(name);
+        if (!handleEdited) setHandle(suggestHandle(name));
+      }
+    }
+  }, [customization.gender, displayName, handleEdited]);
 
   const loadTemplates = useCallback(async () => {
     if (!slug) return;
@@ -303,7 +328,7 @@ export function HireWizardPage() {
                     placeholder="Jane"
                     required
                   />
-                  <button type="button" className="secondary" onClick={chooseRandomDisplayName}>
+                  <button type="button" className="secondary" onClick={() => chooseRandomDisplayName()}>
                     Choose random name
                   </button>
                 </div>
@@ -323,7 +348,7 @@ export function HireWizardPage() {
               <p className="muted field-hint">Manager defaults to you (workspace operator).</p>
             </section>
 
-            <BriefForm value={customization} onChange={setCustomization} />
+            <BriefForm value={customization} onChange={handleCustomizationChange} />
 
             <div className="row hire-page-actions">
               <button type="button" className="secondary" disabled={busy} onClick={() => setStep(1)}>

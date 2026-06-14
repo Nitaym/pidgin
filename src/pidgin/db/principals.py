@@ -51,6 +51,14 @@ def insert_agent_principal(
     return principal_id
 
 
+def get_principal_by_email(conn: sqlite3.Connection, email: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM principals WHERE email_address = ? AND is_active = 1",
+        (email,),
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def upsert_slack_principal(
     conn: sqlite3.Connection,
     *,

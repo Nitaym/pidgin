@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -12,6 +14,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 import pidgin.connectors  # noqa: F401 — register connector factories
 from pidgin.api.routes import auth, hooks, workspace_api, workspaces
+from pidgin.runtime.worker import BackgroundWorker
 from pidgin.voice import routes as voice_routes
 
 # Configure logging early — runs in every worker process (including --reload workers)
@@ -49,7 +52,22 @@ def create_app(
             "true",
             "yes",
         }
-    app = FastAPI(title="Pidgin", description="AI workforce workspace API + UI")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        raw_home = app.state.pidgin_home
+        worker = BackgroundWorker(Path(raw_home) if raw_home else None)
+        app.state.worker = worker
+        worker.start()
+        try:
+            yield
+        finally:
+            worker.stop()
+
+    app = FastAPI(
+        title="Pidgin",
+        description="AI workforce workspace API + UI",
+        lifespan=lifespan,
+    )
     app.state.pidgin_home = str(pidgin_home) if pidgin_home else None
     app.state.allow_dev_auth = allow_dev_auth
     app.add_middleware(SessionMiddleware, secret_key=secret_key)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 
 from pidgin.llm.config import effective_model_ref
@@ -105,10 +106,15 @@ class TurnExecutor:
 
         while sequence < max_invocations:
             sequence += 1
-            log.info("[turn] LLM invocation #%d — turn_id=%s model=%s", sequence, turn.id, model_ref.model_id)
+            invocation_id = new_ulid()
+            short_ref = f"req-{invocation_id[-6:].lower()}"
+            log.info(
+                "[turn] LLM invocation #%d — turn_id=%s model=%s ref=%s",
+                sequence, turn.id, model_ref.model_id, short_ref,
+            )
 
             request = ModelRequest(
-                messages=messages,
+                messages=_stamp_debug_ref(messages, short_ref),
                 tools=tool_specs,
                 model_ref=model_ref,
             )
@@ -137,7 +143,6 @@ class TurnExecutor:
                 response.error_text or "none",
             )
 
-            invocation_id = new_ulid()
             ctx.turn_store.insert_invocation(
                 ModelInvocationRecord(
                     id=invocation_id,
@@ -226,13 +231,18 @@ class TurnExecutor:
                     break
                 if gate_result.outcome == GateOutcome.REFUSED:
                     log.info("[turn] action REFUSED — turn_id=%s action=%s", turn.id, action.action_type.value)
-                    tool_results.append(f"Refused: {gate_result.policy_decision.value}")
+                    tool_results.append(
+                        _label_tool_result(
+                            action.action_type.value,
+                            f"Refused: {gate_result.policy_decision.value}",
+                        )
+                    )
                     continue
                 if gate_result.outcome == GateOutcome.EXECUTED:
                     log.debug("[turn] executing action — turn_id=%s action=%s", turn.id, action.action_type.value)
                     result = execute_action(action_ctx, action)
                     log.debug("[turn] action result — turn_id=%s result=%r", turn.id, result[:200] if result else result)
-                    tool_results.append(result)
+                    tool_results.append(_label_tool_result(action.action_type.value, result))
                     if action.action_type == ActionType.SAY:
                         end_turn = True
 
@@ -247,7 +257,7 @@ class TurnExecutor:
                 messages.append(
                     ChatMessage(
                         role="user",
-                        content="Tool results:\n" + "\n".join(tool_results),
+                        content="Tool results:\n\n" + "\n\n".join(tool_results),
                     )
                 )
 
@@ -295,6 +305,44 @@ def _invoke(
         log.warning("[invoke] no invocation_end from stream, falling back to complete() — turn_id=%s", turn_id)
         return provider.complete(request)
     return final
+
+
+def _label_tool_result(tool_name: str, result: str) -> str:
+    """Tag a tool's output with the tool that produced it.
+
+    Without this the runtime joins every tool output into one unlabeled blob, so
+    a model that called several tools in one response can't tell which result
+    belongs to which call. The label also makes the result legible in the LLM
+    inspector.
+    """
+    return f"## {tool_name} result:\n{result}"
+
+
+def _stamp_debug_ref(messages: list[ChatMessage], short_ref: str) -> list[ChatMessage]:
+    """Tag the request with a short ref and ask the model to echo it.
+
+    The ref is the tail of the invocation record id, so a "[req-xxxxxx]" prefix
+    arriving in Slack/chat points at the exact model_invocations row that
+    produced it — duplicate refs mean one response was delivered twice,
+    distinct refs for the same reply mean the turn itself ran twice.
+    Disable with PIDGIN_LLM_DEBUG_REF=0 once done debugging.
+    """
+    if os.getenv("PIDGIN_LLM_DEBUG_REF", "1").lower() in {"0", "false", "no"}:
+        return list(messages)
+    if not messages or messages[0].role != "system":
+        return list(messages)
+    head = messages[0]
+    stamped = head.model_copy(
+        update={
+            "content": (
+                f"{head.content}\n\n---\n"
+                f"**Debug request ref:** {short_ref}\n"
+                f'Start the text of every reply you produce in this response '
+                f'(including the text param of say/post actions) with "[{short_ref}] ".'
+            )
+        }
+    )
+    return [stamped, *messages[1:]]
 
 
 def _technical_actor(event: InboundEventRecord) -> str:

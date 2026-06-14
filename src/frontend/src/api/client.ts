@@ -139,6 +139,52 @@ export type IntegrationInstallation = {
   last_health_check_at?: string | null;
 };
 
+export type LlmChatMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  tool_call_id?: string | null;
+  name?: string | null;
+};
+
+export type LlmToolSpec = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+export type LlmResponse = {
+  assistant_text?: string | null;
+  actions?: Array<{ action_type: string; params: Record<string, unknown> }>;
+  stop_reason?: string;
+  usage?: { input_tokens: number; output_tokens: number };
+  raw_response?: Record<string, unknown>;
+  error_text?: string | null;
+};
+
+export type LlmInvocation = {
+  id: string;
+  turn_id: string;
+  sequence_in_turn: number;
+  provider: string;
+  model_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd_micros: number | null;
+  latency_ms: number | null;
+  error_text: string | null;
+  invoked_at: string;
+  ai_employee_id: string | null;
+  conversation_id: string | null;
+  turn_status: string | null;
+  trigger_type: string | null;
+  agent_display_name: string | null;
+  agent_handle: string | null;
+  source: string;
+  request_messages: LlmChatMessage[];
+  request_tools: LlmToolSpec[];
+  response: LlmResponse | null;
+};
+
 function workspaceBase(slug: string) {
   return `/${slug}/api`;
 }
@@ -305,6 +351,15 @@ export const api = {
     request<Record<string, unknown>[]>(`${workspaceBase(slug)}/turns`),
   listAudit: (slug: string) =>
     request<Record<string, unknown>[]>(`${workspaceBase(slug)}/audit`),
+  listLlmInvocations: (slug: string, opts: { limit?: number; after?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set("limit", String(opts.limit));
+    if (opts.after) params.set("after", opts.after);
+    const query = params.toString();
+    return request<LlmInvocation[]>(
+      `${workspaceBase(slug)}/llm-invocations${query ? `?${query}` : ""}`,
+    );
+  },
   getIntegrationsCatalog: (slug: string) =>
     request<IntegrationCatalogEntry[]>(`${workspaceBase(slug)}/integrations/catalog`),
   listIntegrations: (slug: string) =>
@@ -332,6 +387,15 @@ export const api = {
     request<{ deleted: string }>(`${workspaceBase(slug)}/integrations/${installationId}`, {
       method: "DELETE",
     }),
+  updateIntegrationConfig: (
+    slug: string,
+    installationId: string,
+    config: Record<string, string>,
+  ) =>
+    request<IntegrationInstallation>(
+      `${workspaceBase(slug)}/integrations/${installationId}/config`,
+      { method: "PATCH", body: JSON.stringify({ config }) },
+    ),
 };
 
 export function googleLoginUrl() {

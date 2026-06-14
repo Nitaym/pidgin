@@ -51,7 +51,8 @@ def dispatch_pending_turns(
     event_sink: TurnEventSink | None = None,
 ) -> int:
     events = ctx.turn_store.fetch_pending_events(limit=batch_size)
-    log.info("[dispatcher] processing %d pending event(s)", len(events))
+    if events:
+        log.info("[dispatcher] processing %d pending event(s)", len(events))
     for event in events:
         dispatch_turn(ctx, event, event_sink=event_sink)
     return len(events)

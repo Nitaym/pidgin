@@ -47,6 +47,36 @@ class SlackConnector:
             capabilities=("ingress", "read", "say", "post"),
         )
 
+    def _resolve_user_id(self, client: Any, user_ref: str) -> str:
+        """Accept a Slack user id (U.../W...) or an email address."""
+        if "@" in user_ref:
+            result = client.users_lookupByEmail(email=user_ref)
+            user = result.get("user") or {}
+            user_id = str(user.get("id") or "")
+            if not user_id:
+                raise ValueError(f"No Slack user found for email {user_ref}")
+            return user_id
+        return user_ref
+
+    def _resolve_channel_id(self, client: Any, channel_ref: str) -> str:
+        """Accept a channel id (C...) or a #name to look up."""
+        if not channel_ref.startswith("#"):
+            return channel_ref
+        name = channel_ref.lstrip("#")
+        cursor = None
+        while True:
+            kwargs: dict[str, Any] = {"limit": 200, "types": "public_channel,private_channel"}
+            if cursor:
+                kwargs["cursor"] = cursor
+            result = client.conversations_list(**kwargs)
+            for channel in result.get("channels") or []:
+                if channel.get("name") == name:
+                    return str(channel["id"])
+            cursor = (result.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                break
+        raise ValueError(f"No Slack channel named #{name}")
+
     def read(
         self,
         conn: sqlite3.Connection,
@@ -85,15 +115,30 @@ class SlackConnector:
             raise ValueError("Slack message requires payload.text")
 
         client = self._client()
-        channel = resource.resource_id if resource.kind == "channel" else resource.resource_id
-        kwargs: dict[str, Any] = {"channel": channel, "text": payload.text}
-        if resource.kind == "thread" and ":" in resource.resource_id:
+        if resource.kind == "user":
+            # DM: open (or reuse) the IM conversation with the user.
+            user_id = self._resolve_user_id(client, resource.resource_id)
+            opened = client.conversations_open(users=user_id)
+            channel = str((opened.get("channel") or {}).get("id") or "")
+            if not channel:
+                raise ValueError(f"Could not open Slack DM with {resource.resource_id}")
+            kwargs: dict[str, Any] = {"channel": channel, "text": payload.text}
+        elif resource.kind == "thread" and ":" in resource.resource_id:
             ch, _, thread_ts = resource.resource_id.partition(":")
             kwargs = {"channel": ch, "text": payload.text, "thread_ts": thread_ts}
+        elif resource.kind == "channel":
+            channel = self._resolve_channel_id(client, resource.resource_id)
+            kwargs = {"channel": channel, "text": payload.text}
+        else:
+            raise ValueError(f"slack write unsupported kind: {resource.kind}")
 
         response = client.chat_postMessage(**kwargs)
         ts = response.get("ts", "")
         return WriteResult(handle=str(ts), external_ref={"channel": kwargs["channel"], "ts": ts})
+
+    def resolve_team_id(self) -> str:
+        auth = self._client().auth_test()
+        return str(auth.get("team_id") or "")
 
     def health_check(self, conn: sqlite3.Connection) -> HealthStatus:
         _ = conn

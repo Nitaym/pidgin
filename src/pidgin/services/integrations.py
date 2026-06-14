@@ -69,6 +69,8 @@ def connect_manual(
         display_name=display_name,
         credentials_json=credentials,
     )
+    if connector_type == "slack":
+        _store_slack_team_id(conn, installation_id)
     health = run_health_check(conn, installation_id)
     detail = get_installation(conn, installation_id)
     if detail is None:
@@ -145,6 +147,20 @@ async def complete_oauth(
     raise IntegrationError(f"OAuth callback not implemented for {connector_type}")
 
 
+def _store_slack_team_id(conn: sqlite3.Connection, installation_id: str) -> None:
+    """Manual installs don't include a team_id; resolve it via auth_test so
+    webhook routing (find_by_type_and_team) can match strictly."""
+    from pidgin.db.connectors import update_installation_config
+
+    try:
+        connector = load_connector(conn, installation_id)
+        team_id = connector.resolve_team_id()  # type: ignore[attr-defined]
+        if team_id:
+            update_installation_config(conn, installation_id, {"team_id": team_id})
+    except Exception:  # noqa: BLE001 — bad token surfaces via health check instead
+        pass
+
+
 def run_health_check(conn: sqlite3.Connection, installation_id: str) -> dict[str, Any]:
     connector = load_connector(conn, installation_id)
     status = connector.health_check(conn)
@@ -160,3 +176,27 @@ def run_health_check(conn: sqlite3.Connection, installation_id: str) -> dict[str
 def disconnect(conn: sqlite3.Connection, installation_id: str) -> None:
     if not delete_installation(conn, installation_id):
         raise IntegrationError(f"Unknown installation: {installation_id}")
+
+
+# Non-secret, user-editable config keys. Everything else in config_json is
+# system-managed (team_id, last_health_message, ...).
+_EDITABLE_CONFIG_KEYS = {"default_agent_handle"}
+
+
+def update_integration_config(
+    conn: sqlite3.Connection,
+    *,
+    installation_id: str,
+    updates: dict[str, str],
+) -> dict[str, Any]:
+    from pidgin.db.connectors import update_installation_config
+
+    unknown = set(updates) - _EDITABLE_CONFIG_KEYS
+    if unknown:
+        raise IntegrationError(f"Config keys not editable: {', '.join(sorted(unknown))}")
+    detail = get_installation(conn, installation_id)
+    if detail is None:
+        raise IntegrationError(f"Unknown installation: {installation_id}")
+    update_installation_config(conn, installation_id, dict(updates))
+    refreshed = get_installation(conn, installation_id)
+    return refreshed if refreshed is not None else detail

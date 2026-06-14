@@ -81,7 +81,33 @@ def find_by_type_and_team(
         creds = _parse_json(row["credentials_json"])
         if config.get("team_id") == team_id or creds.get("team_id") == team_id:
             return row
-    return rows[0] if rows else None
+    # No fallback on a team_id mismatch — routing another workspace's events
+    # into this installation would cross tenants. Only when the payload has
+    # no team at all is a sole active installation an acceptable answer.
+    if not team_id and len(rows) == 1:
+        return rows[0]
+    return None
+
+
+def update_installation_config(
+    conn: sqlite3.Connection,
+    installation_id: str,
+    updates: dict[str, Any],
+) -> None:
+    """Merge keys into an installation's config_json."""
+    row = conn.execute(
+        "SELECT config_json FROM connector_installations WHERE id = ?",
+        (installation_id,),
+    ).fetchone()
+    if row is None:
+        return
+    config = _parse_json(row["config_json"])
+    config.update(updates)
+    conn.execute(
+        "UPDATE connector_installations SET config_json = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(config), utc_now_iso(), installation_id),
+    )
+    conn.commit()
 
 
 def create_installation(
@@ -139,6 +165,51 @@ def update_installation_status(
         WHERE id = ?
         """,
         (status, now, now, json.dumps(config), installation_id),
+    )
+    conn.commit()
+
+
+def try_record_connector_event(
+    conn: sqlite3.Connection,
+    *,
+    connector_type: str,
+    external_event_id: str,
+    inbound_event_id: str | None = None,
+) -> bool:
+    """Record an external event id for idempotency.
+
+    Returns True when the id is new (caller should process the event) and
+    False when it was already recorded (caller should skip — e.g. a Slack
+    retry of an envelope we already ingested).
+    """
+    try:
+        conn.execute(
+            """
+            INSERT INTO connector_event_dedup (
+              connector_type, external_event_id, inbound_event_id, created_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (connector_type, external_event_id, inbound_event_id, utc_now_iso()),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def link_dedup_inbound_event(
+    conn: sqlite3.Connection,
+    *,
+    connector_type: str,
+    external_event_id: str,
+    inbound_event_id: str,
+) -> None:
+    conn.execute(
+        """
+        UPDATE connector_event_dedup SET inbound_event_id = ?
+        WHERE connector_type = ? AND external_event_id = ?
+        """,
+        (inbound_event_id, connector_type, external_event_id),
     )
     conn.commit()
 

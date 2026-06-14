@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
-import { api, type IntegrationCatalogEntry, type IntegrationInstallation } from "../api/client";
+import {
+  api,
+  type Agent,
+  type IntegrationCatalogEntry,
+  type IntegrationInstallation,
+} from "../api/client";
 import { IntegrationBrand } from "../components/IntegrationBrand";
 import { useApp } from "../context/AppContext";
 import { formatCapability, integrationMeta } from "../utils/integrationMeta";
@@ -20,6 +25,8 @@ export function IntegrationDetailPage() {
   const [displayName, setDisplayName] = useState("");
   const [manualFields, setManualFields] = useState<Record<string, string>>({});
   const [healthMessage, setHealthMessage] = useState<string | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [defaultAgent, setDefaultAgent] = useState("");
 
   const load = useCallback(async () => {
     if (!slug || !connectorType) return;
@@ -36,6 +43,12 @@ export function IntegrationDetailPage() {
     const match =
       installations.find((row) => row.connector_type === connectorType) ?? null;
     setInstallation(match);
+    if (connectorType === "slack") {
+      const config = (match?.config_json ?? {}) as Record<string, unknown>;
+      setDefaultAgent(typeof config.default_agent_handle === "string" ? config.default_agent_handle : "");
+      const agentRows = await api.listAgents(slug);
+      setAgents(agentRows);
+    }
     if (entry) {
       setDisplayName(match?.display_name ?? entry.name);
       const next: Record<string, string> = {};
@@ -129,6 +142,23 @@ export function IntegrationDetailPage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Health check failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDefaultAgentChange(handle: string) {
+    if (!installation) return;
+    setDefaultAgent(handle);
+    setBusy(true);
+    setError(null);
+    try {
+      await api.updateIntegrationConfig(slug, installation.id, {
+        default_agent_handle: handle,
+      });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setBusy(false);
     }
@@ -294,6 +324,27 @@ export function IntegrationDetailPage() {
                 </div>
               ) : null}
             </dl>
+            {connectorType === "slack" ? (
+              <div className="field">
+                <label htmlFor="slack-default-agent">Default agent</label>
+                <select
+                  id="slack-default-agent"
+                  value={defaultAgent}
+                  disabled={busy}
+                  onChange={(e) => void handleDefaultAgentChange(e.target.value)}
+                >
+                  <option value="">— none (require explicit @agent) —</option>
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.handle}>
+                      {agent.display_name} ({agent.handle})
+                    </option>
+                  ))}
+                </select>
+                <p className="muted field-hint" style={{ margin: "4px 0 0" }}>
+                  Messages that don&apos;t name an agent are routed here.
+                </p>
+              </div>
+            ) : null}
             <div className="row hire-page-actions">
               <button type="button" className="secondary" disabled={busy} onClick={() => void handleHealth()}>
                 Run health check

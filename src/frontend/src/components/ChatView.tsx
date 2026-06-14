@@ -5,6 +5,8 @@ import { api, type Message } from "../api/client";
 import { useVoiceSession, type TimingMark } from "../hooks/useVoiceSession";
 import { useAudioDevices } from "../hooks/useAudioDevices";
 import { VoiceDiagnosticsPanel, type MarkMap, type LlmMarks } from "./VoiceDiagnosticsPanel";
+import type { AgentGender } from "../utils/agentNameGenerator";
+import { resolveAgentVoice } from "../utils/voicePresets";
 
 function MicIcon({ size = 22 }: { size?: number }) {
   return (
@@ -81,6 +83,18 @@ export function ChatView({
       }
     }
     void load();
+  }, [slug, agentHandle]);
+
+  // The agent's configured voice (preset key), resolved from its brief.
+  const [agentVoice, setAgentVoice] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (!slug || !agentHandle) return;
+    api.getAgentBrief(slug, agentHandle)
+      .then((brief) => {
+        const c = brief.customization;
+        setAgentVoice(resolveAgentVoice(c?.voice, (c?.gender ?? "") as AgentGender));
+      })
+      .catch(() => setAgentVoice(undefined)); // fall back to provider default
   }, [slug, agentHandle]);
 
   useEffect(() => {
@@ -208,6 +222,7 @@ export function ChatView({
     micDeviceId: micId,
     speakerDeviceId: speakerId,
     continuous: voiceMode, // hands-free: auto-resume listening after each agent reply
+    voice: agentVoice,     // the agent's configured voice preset
   });
   const isRecording = voiceState === "recording";
   const voiceBusy = voiceState === "processing" || voiceState === "speaking";

@@ -7,6 +7,7 @@ import { DebugPage } from "./pages/DebugPage";
 import { HireWizardPage } from "./pages/HireWizardPage";
 import { IntegrationDetailPage } from "./pages/IntegrationDetailPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
+import { LlmInspectorPage } from "./pages/LlmInspectorPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TeamPage } from "./pages/TeamPage";
@@ -64,6 +65,7 @@ function WorkspaceApp() {
         <Route path="agents/:handle" element={<AgentProfilePage />} />
         <Route path="agents/:handle/chat" element={<AgentChatPage />} />
         <Route path="debug" element={<DebugPage />} />
+        <Route path="debug/llm" element={<LlmInspectorPage />} />
         <Route path="debug/turns/:turnId" element={<TurnDetailPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="integrations/:connectorType" element={<IntegrationDetailPage />} />

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from pidgin.gate.policy import gate
@@ -10,16 +11,22 @@ from pidgin.types import GateRequest, ProposedAction
 from pidgin.types.enums import ActionType
 from pidgin.util.ids import new_ulid, utc_now_iso
 
+log = logging.getLogger(__name__)
+
 
 def execute_action(action_ctx: ActionContext, action: ProposedAction) -> str:
     if action.action_type == ActionType.SAY:
         return _execute_say(action_ctx, action)
+    if action.action_type == ActionType.POST:
+        return _execute_post(action_ctx, action)
     if action.action_type == ActionType.READ:
         return _execute_read(action_ctx, action)
     if action.action_type == ActionType.REMEMBER:
         return _execute_remember(action_ctx, action)
     if action.action_type == ActionType.RECALL:
         return _execute_recall(action_ctx, action)
+    if action.action_type == ActionType.SCHEDULE_SELF:
+        return _execute_schedule_self(action_ctx, action)
     return f"Action {action.action_type.value} not implemented in MVP"
 
 
@@ -27,6 +34,43 @@ def _execute_say(action_ctx: ActionContext, action: ProposedAction) -> str:
     text = str(action.params.get("text") or "")
     action_ctx.egress.write(text=text, turn_id=action_ctx.turn.id)
     return f"Sent message ({len(text)} chars)"
+
+
+def _execute_post(action_ctx: ActionContext, action: ProposedAction) -> str:
+    """Target-driven outbound send — unlike say, the agent names the
+    destination (URI / email / #channel) instead of replying in place."""
+    target = str(action.params.get("target") or "")
+    text = str(action.params.get("text") or "")
+    if not target:
+        return "Missing target"
+    if not text:
+        return "Missing text"
+    conn = action_ctx.workspace.db_bridge
+    if conn is None:
+        return "Post requires connector bridge (not configured)"
+    from pidgin.connectors.registry import resolve_resource
+    from pidgin.connectors.targets import resolve_post_target
+    from pidgin.connectors.types import PrincipalContext, WritePayload
+
+    try:
+        resource = resolve_post_target(conn, target)
+        connector = resolve_resource(conn, resource)
+        agent = action_ctx.agent
+        attribution = f"{agent.display_name} · {agent.role_title} via Pidgin\n\n"
+        result = connector.write(
+            conn,
+            resource,
+            WritePayload(text=attribution + text),
+            principal=PrincipalContext(
+                principal_id=agent.agent_principal_id,
+                display_name=agent.display_name,
+                trust_label=action_ctx.event.trust_label,
+            ),
+            mode="execute",
+        )
+        return f"Posted to {resource} (ref={result.external_ref})"
+    except Exception as exc:
+        return f"Post failed: {exc}"
 
 
 def _execute_read(action_ctx: ActionContext, action: ProposedAction) -> str:
@@ -51,6 +95,62 @@ def _execute_read(action_ctx: ActionContext, action: ProposedAction) -> str:
         return f"Read not fully wired for {uri} (connector resolved)"
     except Exception as exc:
         return f"Read failed: {exc}"
+
+
+def _execute_schedule_self(action_ctx: ActionContext, action: ProposedAction) -> str:
+    from datetime import UTC, datetime, timedelta
+
+    from pidgin.db.timers import create_timer, find_pending_timer_near
+
+    try:
+        delay_minutes = float(action.params.get("delay_minutes") or 0)
+    except (TypeError, ValueError):
+        return "Invalid delay_minutes"
+    reason = str(action.params.get("reason") or "").strip()
+    if delay_minutes <= 0:
+        return "delay_minutes must be positive"
+    if not reason:
+        return "Missing reason"
+    conn = action_ctx.workspace.db_bridge
+    if conn is None:
+        return "schedule_self requires database bridge (not configured)"
+
+    fire_at = datetime.now(tz=UTC) + timedelta(minutes=delay_minutes)
+    scheduled_at = fire_at.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    existing = find_pending_timer_near(
+        conn,
+        ai_employee_id=action_ctx.agent.agent_id,
+        originating_turn_id=action_ctx.turn.id,
+        scheduled_at=scheduled_at,
+    )
+    if existing is not None:
+        log.warning(
+            "[schedule_self] DEDUPED duplicate — turn_id=%s delay_min=%s "
+            "target=%s collides_with timer=%s@%s (this is the double-reminder guard firing)",
+            action_ctx.turn.id, delay_minutes, scheduled_at,
+            existing["id"], existing["scheduled_at"],
+        )
+        return (
+            f"Already scheduled: a wake-up for this is set at "
+            f"{existing['scheduled_at']} (timer {existing['id']}). "
+            "Do not schedule it again."
+        )
+    timer_id = create_timer(
+        conn,
+        ai_employee_id=action_ctx.agent.agent_id,
+        scheduled_at=scheduled_at,
+        reason=reason,
+        originating_turn_id=action_ctx.turn.id,
+        inherited_trust_label=action_ctx.event.trust_label.value,
+    )
+    log.info(
+        "[schedule_self] CREATED timer=%s — turn_id=%s delay_min=%s target=%s reason=%r",
+        timer_id, action_ctx.turn.id, delay_minutes, scheduled_at, reason[:60],
+    )
+    return (
+        f"Scheduled wake-up at {scheduled_at} (timer {timer_id}). "
+        "Confirmed — do not call schedule_self again for this follow-up."
+    )
 
 
 def _execute_remember(action_ctx: ActionContext, action: ProposedAction) -> str:

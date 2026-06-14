@@ -25,12 +25,15 @@ export interface VoiceSessionOptions {
   silenceMs?: number;
   /** Hands-free conversation: auto-resume listening after the agent finishes speaking. */
   continuous?: boolean;
+  /** TTS voice preset key (or raw provider voice) — e.g. the agent's configured voice. */
+  voice?: string;
 }
 
 export function useVoiceSession(options: VoiceSessionOptions) {
   const {
     onTranscript, onTranscriptDelta, onAudioDone, onError, onTimingMark,
     micDeviceId, speakerDeviceId, silenceMs = 700, continuous = false,
+    voice,
   } = options;
 
   const [state, setState] = useState<VoiceState>("idle");
@@ -44,6 +47,8 @@ export function useVoiceSession(options: VoiceSessionOptions) {
   const srRef = useRef<SpeechRecognition | null>(null);
   const speakerIdRef = useRef(speakerDeviceId);
   useEffect(() => { speakerIdRef.current = speakerDeviceId; }, [speakerDeviceId]);
+  const voiceRef = useRef(voice);
+  useEffect(() => { voiceRef.current = voice; }, [voice]);
 
   const onTranscriptRef = useRef(onTranscript);
   const onTranscriptDeltaRef = useRef(onTranscriptDelta);
@@ -197,7 +202,8 @@ export function useVoiceSession(options: VoiceSessionOptions) {
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const stt = localStorage.getItem("voice_stt") ?? "openai";
       const tts = localStorage.getItem("voice_tts") ?? "elevenlabs";
-      const ws = new WebSocket(`${proto}://${location.host}/api/voice/ws?stt=${stt}&tts=${tts}`);
+      const voiceParam = voiceRef.current ? `&voice=${encodeURIComponent(voiceRef.current)}` : "";
+      const ws = new WebSocket(`${proto}://${location.host}/api/voice/ws?stt=${stt}&tts=${tts}${voiceParam}`);
       ws.onopen = () => { wsRef.current = ws; setReady(true); resolve(ws); };
       ws.onerror = () => reject(new Error("WebSocket connection failed — is the backend running?"));
       ws.onmessage = (ev) => handleMessage(ev.data as string);

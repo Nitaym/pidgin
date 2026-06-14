@@ -1828,3 +1828,314 @@ button.danger {
   );
   background-size: 1rem 1rem;
 }
+
+/* ── LLM Inspector ── */
+
+.llm-split {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.llm-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  padding-right: var(--space-1);
+}
+
+.llm-list-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.llm-list-item:hover {
+  background: var(--bg-hover);
+}
+
+.llm-list-item.selected {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.llm-list-item.failed {
+  border-color: rgba(229, 72, 77, 0.5);
+}
+
+.llm-list-item-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: ui-monospace, "SF Mono", monospace;
+  color: var(--text-secondary);
+}
+
+.llm-list-item-mid {
+  font-weight: 500;
+}
+
+.llm-list-item-bottom {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.6875rem;
+}
+
+.llm-source-badge {
+  font-size: 0.625rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.llm-source-badge.llm-source-slack {
+  color: #e0a64e;
+  border-color: rgba(224, 166, 78, 0.4);
+  background: rgba(224, 166, 78, 0.1);
+}
+
+.llm-source-badge.llm-source-pidgin_chat {
+  color: var(--accent);
+  border-color: rgba(94, 106, 210, 0.4);
+  background: var(--accent-muted);
+}
+
+.llm-detail-pane {
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: var(--space-4);
+}
+
+.llm-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.llm-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-family: ui-monospace, "SF Mono", monospace;
+}
+
+.llm-detail-meta strong {
+  color: var(--text-primary);
+}
+
+.llm-tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: var(--space-2);
+}
+
+.llm-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.llm-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.llm-tab.active {
+  background: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.llm-message {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.llm-message-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-hover);
+  font-size: 0.6875rem;
+}
+
+.llm-role-badge {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+
+.llm-role-system {
+  color: #b58aef;
+  background: rgba(181, 138, 239, 0.12);
+}
+
+.llm-role-user {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.llm-role-assistant {
+  color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.llm-role-tool {
+  color: #e0a64e;
+  background: rgba(224, 166, 78, 0.1);
+}
+
+.llm-expand-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 0.625rem;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.llm-expand-btn:hover {
+  color: var(--text-primary);
+}
+
+.llm-message-body {
+  margin: 0;
+  padding: var(--space-3);
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
+.llm-raw {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.llm-stop-error {
+  color: var(--danger);
+}
+
+@media (max-width: 900px) {
+  .llm-split {
+    grid-template-columns: 1fr;
+  }
+
+  .llm-list {
+    max-height: 240px;
+  }
+}
+
+.llm-timeline-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.6875rem;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.llm-timeline-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--border-strong);
+}
+
+.llm-message-out {
+  border-color: rgba(94, 106, 210, 0.45);
+  margin-left: var(--space-5);
+}
+
+.llm-tool-name {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 0.75rem;
+  color: var(--text-primary);
+}
+
+.llm-history-collapse {
+  width: 100%;
+  text-align: left;
+  background: var(--bg-hover);
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.llm-history-collapse:hover {
+  color: var(--text-primary);
+  background: var(--bg-active);
+}
+
+.llm-filter-bar {
+  display: flex;
+  gap: var(--space-1);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg-base);
+  z-index: 1;
+}
+
+.llm-filter {
+  flex: 1;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.llm-filter:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.llm-filter.active {
+  background: var(--accent-muted);
+  border-color: var(--accent);
+  color: var(--text-primary);
+}

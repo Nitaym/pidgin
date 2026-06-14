@@ -23,6 +23,10 @@ class HireCustomization(BaseModel):
     job_requirements: JobRequirements = Field(default_factory=JobRequirements)
     ideal_candidate: IdealCandidate = Field(default_factory=IdealCandidate)
     your_take: str = ""
+    # Persona: "" (unspecified), "female", or "male"
+    gender: str = ""
+    # Voice preset key from pidgin.voice.catalog ("" → auto-pick by gender)
+    voice: str = ""
 
     def to_json(self) -> str:
         return json.dumps(self.model_dump(), separators=(",", ":"))

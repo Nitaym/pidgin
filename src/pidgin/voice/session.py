@@ -47,7 +47,9 @@ from pidgin.voice.registry import get_stt, get_tts
 log = logging.getLogger(__name__)
 
 
-async def handle_voice_session(ws: WebSocket, stt: str | None, tts: str | None) -> None:
+async def handle_voice_session(
+    ws: WebSocket, stt: str | None, tts: str | None, voice: str | None = None
+) -> None:
     await ws.accept()
 
     stt_backend = (stt or os.getenv("PIDGIN_STT_BACKEND", "openai")).lower()
@@ -58,7 +60,7 @@ async def handle_voice_session(ws: WebSocket, stt: str | None, tts: str | None) 
 
     # Resolve TTS provider up-front so config errors reach the client
     try:
-        tts_provider = get_tts(tts)
+        tts_provider = get_tts(tts, voice=voice)
     except (KeyError, ValueError) as exc:
         key = str(exc).strip("'")
         await ws.send_text(json.dumps({

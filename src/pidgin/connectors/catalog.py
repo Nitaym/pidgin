@@ -18,7 +18,18 @@ INTEGRATION_CATALOG: list[dict[str, Any]] = [
         "auth_modes": ["oauth2", "manual"],
         "builtin": False,
         "capabilities": ["ingress", "read", "say", "post"],
-        "oauth_scopes": ["app_mentions:read", "chat:write", "im:history", "im:read"],
+        "oauth_scopes": [
+            "app_mentions:read",
+            "chat:write",
+            "im:history",
+            "im:read",
+            # Agent-initiated outbound: DM people, resolve emails, find channels
+            "im:write",
+            "users:read",
+            "users:read.email",
+            "channels:read",
+            "groups:read",
+        ],
         "manual_fields": [
             {"key": "bot_token", "label": "Bot token", "secret": True},
             {"key": "signing_secret", "label": "Signing secret", "secret": True},
