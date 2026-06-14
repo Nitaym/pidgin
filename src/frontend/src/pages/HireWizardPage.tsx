@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { BriefForm } from "../components/BriefForm";
 import { HrAssistPanel } from "../components/HrAssistPanel";
@@ -27,6 +27,8 @@ export function HireWizardPage() {
   const { workspace } = useApp();
   const slug = workspace?.slug ?? "";
 
+  const [searchParams] = useSearchParams();
+  const preselectApplied = useRef(false);
   const [step, setStep] = useState<1 | 2>(1);
   const [templates, setTemplates] = useState<Awaited<
     ReturnType<typeof api.listRoleTemplates>
@@ -38,6 +40,8 @@ export function HireWizardPage() {
   const [handleEdited, setHandleEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
   const displayNameSeeded = useRef(false);
   const lastAutoName = useRef("");
 
@@ -76,6 +80,19 @@ export function HireWizardPage() {
     setTemplates(await api.listRoleTemplates(slug));
   }, [slug]);
 
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (parts: Array<string | undefined>) =>
+    !q || parts.some((p) => (p ?? "").toLowerCase().includes(q));
+
+  const bundledCandidates = (templates?.bundled ?? []).filter(
+    (t) =>
+      (showArchived || !t.archived) &&
+      matchesQuery([t.name, t.role_title, t.description]),
+  );
+  const workspaceCandidates = (templates?.workspace ?? []).filter(
+    (t) => (showArchived || !t.archived) && matchesQuery([t.name]),
+  );
+
   useEffect(() => {
     void loadTemplates().catch((err: Error) => setError(err.message));
   }, [loadTemplates]);
@@ -85,6 +102,26 @@ export function HireWizardPage() {
       setHandle(suggestHandle(displayName));
     }
   }, [displayName, handleEdited]);
+
+  // Deep links from the hire entry page:
+  //  - ?fresh=1     → "Write a profile from scratch" (blank brief, jump to details)
+  //  - ?template=id → a candidate profile's "Hire" button (preselect, jump to details)
+  useEffect(() => {
+    if (preselectApplied.current) return;
+    if (searchParams.get("fresh") === "1") {
+      preselectApplied.current = true;
+      startFresh();
+      return;
+    }
+    if (!templates) return;
+    const templateParam = searchParams.get("template");
+    if (!templateParam) return;
+    const summary = templates.bundled.find((t) => t.template_id === templateParam);
+    if (!summary) return;
+    preselectApplied.current = true;
+    void selectBundled(summary.template_id, summary.name);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, templates]);
 
   useEffect(() => {
     if (step === 2 && !displayNameSeeded.current) {
@@ -216,16 +253,16 @@ export function HireWizardPage() {
   const canHire = Boolean(selected && displayName.trim());
 
   return (
-    <div className="stack">
+    <div className="stack page-enter">
       <div className="page-header">
         <div>
           <p className="eyebrow" style={{ margin: "0 0 4px" }}>
-            {step === 1 ? "Step 1 of 2 · Choose a template" : "Step 2 of 2 · Agent details"}
+            {step === 1 ? "Marketplace · Choose a candidate" : "Agent details"}
           </p>
           <h2>Hire a role</h2>
         </div>
         <Link to=".." className="ghost">
-          ← Team
+          ← Hire options
         </Link>
       </div>
 
@@ -233,54 +270,97 @@ export function HireWizardPage() {
 
       {step === 1 ? (
         <div className="stack">
+          <p className="lead">
+            Browse candidate profiles. Click a candidate to read its full profile, or pick a starting
+            point — you can edit everything on the next screen.
+          </p>
+
+          <div className="marketplace-search-row">
+            <input
+              type="search"
+              className="marketplace-search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search candidate profiles…"
+              aria-label="Search candidate profiles"
+            />
+            <label className="checkbox-inline">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(e) => setShowArchived(e.target.checked)}
+              />
+              Show archived profiles
+            </label>
+          </div>
+
           <section className="brief-section">
-            <h3 className="brief-section-title">Pidgin role templates</h3>
-            <p className="muted field-hint">
-              Pick a starting point for this hire. You can edit everything on the next screen.
-            </p>
-            <div className="template-grid">
-              {(templates?.bundled ?? []).map((t) => (
-                <div key={t.template_id} className="template-card panel stack">
-                  <strong>{t.name}</strong>
-                  <span className="muted">{t.role_title}</span>
-                  <span className="muted">v{t.version}</span>
-                  {t.description ? <span className="muted">{t.description}</span> : null}
-                  <div className="row">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void selectBundled(t.template_id, t.name)}
-                    >
-                      Use this template
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() => void duplicateBundled(t.template_id, t.name)}
-                    >
-                      Duplicate
-                    </button>
+            <h3 className="brief-section-title">Candidate Profiles</h3>
+            {bundledCandidates.length === 0 ? (
+              <p className="muted">No candidate profiles match your search.</p>
+            ) : (
+              <div className="template-grid">
+                {bundledCandidates.map((t) => (
+                  <div
+                    key={t.template_id}
+                    className={`template-card panel stack${t.archived ? " is-archived" : ""}`}
+                  >
+                    <Link to={`candidates/${t.template_id}`} className="template-card-title">
+                      <strong>{t.name}</strong>
+                    </Link>
+                    <span className="muted">
+                      {t.role_title} · v{t.version}
+                      {t.archived ? " · archived" : ""}
+                    </span>
+                    {t.description ? <p className="candidate-desc">{t.description}</p> : null}
+                    <div className="row">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void selectBundled(t.template_id, t.name)}
+                      >
+                        Use this profile
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => void duplicateBundled(t.template_id, t.name)}
+                      >
+                        Duplicate
+                      </button>
+                    </div>
+                    <div className="template-card-foot">
+                      <Link to={`candidates/${t.template_id}`} className="muted">
+                        Read full profile →
+                      </Link>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </section>
 
-          {(templates?.workspace ?? []).length > 0 ? (
+          {workspaceCandidates.length > 0 ? (
             <section className="brief-section">
-              <h3 className="brief-section-title">Your role templates</h3>
+              <h3 className="brief-section-title">Your saved profiles</h3>
               <div className="template-grid">
-                {templates?.workspace.map((t) => (
-                  <div key={t.slug} className="template-card panel stack">
+                {workspaceCandidates.map((t) => (
+                  <div
+                    key={t.slug}
+                    className={`template-card panel stack${t.archived ? " is-archived" : ""}`}
+                  >
                     <strong>{t.name}</strong>
-                    <span className="muted">v{t.current_version}</span>
+                    <span className="muted">
+                      v{t.current_version}
+                      {t.archived ? " · archived" : ""}
+                    </span>
                     <button
                       type="button"
                       disabled={busy}
                       onClick={() => void selectWorkspace(t.slug, t.name, t.current_version)}
                     >
-                      Use this template
+                      Use this profile
                     </button>
                   </div>
                 ))}
@@ -290,9 +370,7 @@ export function HireWizardPage() {
 
           <section className="brief-section">
             <h3 className="brief-section-title">Start fresh</h3>
-            <p className="muted field-hint">
-              No template defaults — write the role brief from scratch.
-            </p>
+            <p className="muted">No profile defaults — write the role brief from scratch.</p>
             <button type="button" className="secondary" disabled={busy} onClick={startFresh}>
               Start fresh
             </button>

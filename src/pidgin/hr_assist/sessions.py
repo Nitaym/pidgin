@@ -3,9 +3,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pidgin.util.ids import new_ulid, utc_now_iso
+
+if TYPE_CHECKING:
+    import sqlite3
+
+    from pidgin.types.customization import HireCustomization
 
 ContextType = Literal["hire", "agent", "template"]
 
@@ -175,14 +180,32 @@ def send_operator_message(
     session_id: str,
     *,
     body_text: str,
+    conn: sqlite3.Connection | None = None,
+    draft_customization: HireCustomization | None = None,
 ) -> dict[str, Any]:
+    history = list_messages(workspace_root, session_id)
     operator_msg = _append_message(
         workspace_root,
         session_id,
         role="operator",
         body_text=body_text,
     )
-    reply_text, suggestion = stub_assist_reply(body_text)
+
+    reply: tuple[str, dict[str, Any] | None] | None = None
+    if conn is not None:
+        from pidgin.hr_assist.coach import generate_coach_reply
+
+        reply = generate_coach_reply(
+            conn,
+            history=history,
+            operator_message=body_text,
+            draft_customization=draft_customization,
+        )
+    if reply is None:
+        reply_text, suggestion = stub_assist_reply(body_text)
+    else:
+        reply_text, suggestion = reply
+
     assist_msg = _append_message(
         workspace_root,
         session_id,

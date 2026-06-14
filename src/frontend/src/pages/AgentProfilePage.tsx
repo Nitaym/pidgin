@@ -88,11 +88,12 @@ export function AgentProfilePage() {
     setBusy(true);
     setError(null);
     try {
-      const created = await api.createTemplateFromAgent(slug, handle, {
+      await api.createTemplateFromAgent(slug, handle, {
         name: templateName.trim(),
       });
       setShowCreateTemplate(false);
-      navigate(`../templates/${created.slug}`);
+      // "Your Templates" page was removed; saved profiles live in the marketplace.
+      navigate(`/${slug}/hire/marketplace`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create template failed");
     } finally {

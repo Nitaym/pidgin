@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, type Agent } from "../api/client";
 import { ChatModal } from "./ChatModal";
+import { onReadChange, unreadCount } from "../utils/chatUnread";
 
 type SidebarChatProps = {
   slug: string;
@@ -10,6 +11,7 @@ type SidebarChatProps = {
 export function SidebarChat({ slug, base: _base }: SidebarChatProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [chatOpen, setChatOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
 
   useEffect(() => {
     if (!slug) return;
@@ -21,6 +23,32 @@ export function SidebarChat({ slug, base: _base }: SidebarChatProps) {
   const chatAgents = agents.filter(
     (agent) => agent.current_status !== "offboarded",
   );
+
+  // Recompute the unread total by inspecting each agent's messages against the
+  // locally-stored last-read marks. Runs when the agent list changes and
+  // whenever a conversation is marked read elsewhere (e.g. the chat modal).
+  const refreshUnread = useCallback(async () => {
+    if (!slug || chatAgents.length === 0) {
+      setUnread(0);
+      return;
+    }
+    const counts = await Promise.all(
+      chatAgents.map(async (agent) => {
+        try {
+          const data = await api.getAgentMessages(slug, agent.handle);
+          return unreadCount(slug, agent.handle, data.messages);
+        } catch {
+          return 0;
+        }
+      }),
+    );
+    setUnread(counts.reduce((a, b) => a + b, 0));
+  }, [slug, chatAgents.map((a) => a.handle).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    void refreshUnread();
+    return onReadChange(() => void refreshUnread());
+  }, [refreshUnread]);
 
   if (chatAgents.length === 0) return null;
 
@@ -36,7 +64,7 @@ export function SidebarChat({ slug, base: _base }: SidebarChatProps) {
             <path d="M14 1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h2v3l3-3h7a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1z" fill="currentColor" opacity=".9"/>
           </svg>
           Messages
-          <span className="sidebar-chat-badge">{chatAgents.length}</span>
+          {unread > 0 && <span className="sidebar-chat-badge">{unread}</span>}
         </button>
       </div>
 

@@ -6,7 +6,14 @@ from pathlib import Path
 import pytest
 
 from pidgin.db import apply_migrations, connect, init_workspace_db
-from pidgin.hire import HireRequest, hire_from_recipe, hire_support_agent
+from pidgin.hire import (
+    HireRequest,
+    get_hr_agent,
+    hire_from_recipe,
+    hire_support_agent,
+    load_seed_manifest,
+    seed_workspace_agents,
+)
 from pidgin.recipes import bundle_sha256, load_role_recipe, resolve_permission_profile
 from pidgin.util.slug import slugify
 from pidgin.workspace import create_workspace
@@ -85,6 +92,38 @@ def test_hire_support_agent_creates_conversation(pidgin_home: Path, recipe_path:
     ).fetchone()
     assert conversation is not None
     assert conversation["ai_employee_id"] == result["ai_employee_id"]
+
+
+def test_seed_manifest_lists_hr_agent() -> None:
+    seeds = load_seed_manifest()
+    by_recipe = {seed.recipe_id: seed for seed in seeds}
+    assert "hr-onboarding" in by_recipe
+    assert by_recipe["hr-onboarding"].handle == "hr"
+
+
+def test_seed_workspace_agents_is_idempotent(pidgin_home: Path) -> None:
+    paths = create_workspace("Acme", "pw", slugify("Acme"), home=pidgin_home)
+    auth = json.loads(paths.auth_json.read_text(encoding="utf-8"))
+    conn = connect(paths.db_sqlite)
+    apply_migrations(conn)
+    init_workspace_db(conn, auth["workspace_id"], "Acme")
+
+    assert get_hr_agent(conn) is None
+
+    hired = seed_workspace_agents(conn, paths_root=paths.root)
+    assert "hr" in hired
+
+    agent = get_hr_agent(conn)
+    assert agent is not None
+    assert agent["handle"] == "hr"
+
+    # Re-running seeding must not duplicate the singleton HR agent.
+    again = seed_workspace_agents(conn, paths_root=paths.root)
+    assert again == []
+    hr_rows = conn.execute(
+        "SELECT id FROM ai_employees WHERE handle = 'hr'"
+    ).fetchall()
+    assert len(hr_rows) == 1
 
 
 def test_resolve_permission_profile_from_recipe(recipe_path: Path) -> None:

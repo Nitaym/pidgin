@@ -71,7 +71,12 @@ export function HrAssistPanel({
     setSending(true);
     setError(null);
     try {
-      const result = await api.sendHrAssistMessage(slug, sessionId, draft.trim());
+      const result = await api.sendHrAssistMessage(
+        slug,
+        sessionId,
+        draft.trim(),
+        customization,
+      );
       setMessages((prev) => [
         ...prev,
         result.operator_message as HrAssistMessage,

@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useParams } from "react-router-dom";
+import { HrChatLauncher } from "./HrChatLauncher";
 import { PidginLogo } from "./PidginLogo";
 import { SidebarChat } from "./SidebarChat";
 import { useApp } from "../context/AppContext";
@@ -38,7 +39,6 @@ export function Layout({ showNav = true }: LayoutProps) {
             <div className="sidebar-section">
               <p className="sidebar-section-label">Workforce</p>
               <NavLink to={`${base}/hire`}>Hire a role</NavLink>
-              <NavLink to={`${base}/templates`}>Your templates</NavLink>
             </div>
             <SidebarChat slug={workspace.slug} base={base} />
             <div className="sidebar-section">
@@ -58,6 +58,7 @@ export function Layout({ showNav = true }: LayoutProps) {
       <main className="main">
         <Outlet />
       </main>
+      {workspace ? <HrChatLauncher /> : null}
     </div>
   );
 }

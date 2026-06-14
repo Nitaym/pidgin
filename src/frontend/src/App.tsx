@@ -3,7 +3,9 @@ import { Layout } from "./components/Layout";
 import { useApp } from "./context/AppContext";
 import { AgentProfilePage } from "./pages/AgentProfilePage";
 import { AgentChatPage } from "./pages/AgentChatPage";
+import { CandidateProfilePage } from "./pages/CandidateProfilePage";
 import { DebugPage } from "./pages/DebugPage";
+import { HireEntryPage } from "./pages/HireEntryPage";
 import { HireWizardPage } from "./pages/HireWizardPage";
 import { IntegrationDetailPage } from "./pages/IntegrationDetailPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
@@ -12,7 +14,6 @@ import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TeamPage } from "./pages/TeamPage";
 import { TurnDetailPage } from "./pages/TurnDetailPage";
-import { TemplateEditorPage, TemplatesPage } from "./pages/TemplatesPage";
 import { WelcomePage } from "./pages/WelcomePage";
 
 function RootRedirect() {
@@ -59,9 +60,9 @@ function WorkspaceApp() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<TeamPage />} />
-        <Route path="hire" element={<HireWizardPage />} />
-        <Route path="templates" element={<TemplatesPage />} />
-        <Route path="templates/:templateSlug" element={<TemplateEditorPage />} />
+        <Route path="hire" element={<HireEntryPage />} />
+        <Route path="hire/marketplace" element={<HireWizardPage />} />
+        <Route path="hire/marketplace/candidates/:templateId" element={<CandidateProfilePage />} />
         <Route path="agents/:handle" element={<AgentProfilePage />} />
         <Route path="agents/:handle/chat" element={<AgentChatPage />} />
         <Route path="debug" element={<DebugPage />} />

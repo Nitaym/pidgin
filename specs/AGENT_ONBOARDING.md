@@ -82,8 +82,13 @@ human-approved.
 ## What ships today vs. needs runtime work
 
 **Ships today (no runtime change):**
-- The **HR/Onboarding steward recipe** (`recipes/hr-onboarding-v0.1.json`) with the interview +
-  curate + propose-only-commit behavior baked into its prompt.
+- The **HR agent** (`recipes/hr-onboarding-v0.1.json`) is **pre-hired at workspace creation** (handle
+  `@hr`). The starting team is **data, not code**: workspace creation reads a seed manifest
+  (`recipes/workspace-seed.json`) and hires each listed recipe. Seeding is idempotent (singleton
+  roles / taken handles are skipped), so the same runner can backfill existing workspaces. The HR
+  agent does two jobs: coaching the owner through hiring (it backs the hire-wizard "Discuss with
+  Pidgin" panel — see [HIRE_UX.md](HIRE_UX.md) §5) and stewarding this onboarding doc, with the
+  interview + curate + propose-only-commit behavior baked into its prompt.
 - Recipe-prompt instruction in every role telling agents to read company context first and to
   propose (not invent) missing facts. Company-context recall already exists in MEMORY_SPEC.
 

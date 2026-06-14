@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "description": "Agents pre-hired into every new workspace on onboarding. Each entry names a bundled recipe and the handle to hire it under. Seeding is idempotent (an already-hired handle or singleton role is skipped), so this can also be run as a backfill on existing workspaces.",
+  "agents": [
+    {
+      "recipe_id": "hr-onboarding",
+      "handle": "hr",
+      "note": "HR lead: coaches hiring in the wizard and stewards the onboarding doc."
+    }
+  ]
+}

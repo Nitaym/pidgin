@@ -4,7 +4,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pidgin.db.chat import create_agent_conversation
 from pidgin.db.employees import HiredAgent, insert_ai_employee, insert_recipe_snapshot
@@ -20,6 +20,13 @@ DEFAULT_SUPPORT_RECIPE = (
     Path(__file__).resolve().parents[3] / "recipes" / "support-agent-v0.1.json"
 )
 SUPPORT_RECIPE_ID = "support-agent"
+HR_RECIPE_ID = "hr-onboarding"
+
+# Roles that may exist at most once per workspace, mapped to a human label for errors.
+SINGLETON_RECIPES: dict[str, str] = {
+    SUPPORT_RECIPE_ID: "Support agent",
+    HR_RECIPE_ID: "HR agent",
+}
 
 
 class HireError(Exception):
@@ -58,8 +65,9 @@ class TemplateHireRequest:
     manager_principal_id: str | None = None
 
 
-def _ensure_support_singleton(conn: sqlite3.Connection, recipe_id: str) -> None:
-    if recipe_id != SUPPORT_RECIPE_ID:
+def _ensure_singleton(conn: sqlite3.Connection, recipe_id: str) -> None:
+    label = SINGLETON_RECIPES.get(recipe_id)
+    if label is None:
         return
     existing = conn.execute(
         """
@@ -70,10 +78,10 @@ def _ensure_support_singleton(conn: sqlite3.Connection, recipe_id: str) -> None:
           AND e.current_status != 'offboarded'
         LIMIT 1
         """,
-        (SUPPORT_RECIPE_ID,),
+        (recipe_id,),
     ).fetchone()
     if existing is not None:
-        raise HireError("Support agent is already hired")
+        raise HireError(f"{label} is already hired")
 
 
 def hire_from_recipe(
@@ -85,7 +93,7 @@ def hire_from_recipe(
         raise HireError(f"Recipe file not found: {request.recipe_path}")
 
     recipe = load_role_recipe(request.recipe_path)
-    _ensure_support_singleton(conn, recipe.recipe_id)
+    _ensure_singleton(conn, recipe.recipe_id)
     handle = request.handle or derive_handle(request.display_name)
 
     existing = conn.execute(
@@ -240,6 +248,26 @@ def hire_with_template(
         "handle": hired.handle,
         "recipe_id": recipe.recipe_id,
     }
+
+
+def get_hr_agent(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """Return the active HR agent row, or None if not hired.
+
+    Looked up by role (recipe_id), not handle, so it stays correct regardless of
+    the handle the seed manifest assigns.
+    """
+    row = conn.execute(
+        """
+        SELECT e.*
+        FROM ai_employees e
+        JOIN ai_employee_recipe_snapshots s ON s.id = e.recipe_snapshot_id
+        WHERE s.recipe_id = ?
+          AND e.current_status != 'offboarded'
+        LIMIT 1
+        """,
+        (HR_RECIPE_ID,),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def hire_support_agent(

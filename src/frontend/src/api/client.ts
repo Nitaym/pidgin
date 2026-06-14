@@ -70,22 +70,35 @@ export type Agent = {
 
 export type HireCustomization = import("../types/hire").HireCustomization;
 
+export type BundledTemplateSummary = {
+  source: "bundled";
+  template_id: string;
+  name: string;
+  role_title: string;
+  version: string;
+  description: string;
+  archived: boolean;
+};
+
+export type WorkspaceTemplateSummary = {
+  source: "workspace";
+  slug: string;
+  name: string;
+  current_version: number;
+  updated_at: string;
+  archived: boolean;
+};
+
 export type RoleTemplatesResponse = {
-  bundled: Array<{
-    source: "bundled";
-    template_id: string;
-    name: string;
-    role_title: string;
-    version: string;
-    description: string;
-  }>;
-  workspace: Array<{
-    source: "workspace";
-    slug: string;
-    name: string;
-    current_version: number;
-    updated_at: string;
-  }>;
+  bundled: BundledTemplateSummary[];
+  workspace: WorkspaceTemplateSummary[];
+};
+
+export type CandidateFinderTurn = { role: "operator" | "assist"; text: string };
+
+export type CandidateFinderResponse = {
+  reply: string;
+  recommended: string[];
 };
 
 export type WorkspaceTemplateDetail = {
@@ -99,13 +112,25 @@ export type WorkspaceTemplateDetail = {
   customization: HireCustomization;
 };
 
+export type TemplatePermissions = {
+  can_read: string[];
+  can_write: string[];
+  requires_approval: string[];
+  blocked: string[];
+};
+
 export type BundledTemplateDetail = {
   source: "bundled";
   template_id: string;
   name: string;
+  role_title: string;
   version: string;
+  description: string;
+  default_channels: string[];
+  permissions: TemplatePermissions;
   default_job_requirements: HireCustomization["job_requirements"];
   default_ideal_candidate: HireCustomization["ideal_candidate"];
+  archived: boolean;
 };
 
 export type Message = {
@@ -215,6 +240,24 @@ export const api = {
     ),
   listRoleTemplates: (slug: string) =>
     request<RoleTemplatesResponse>(`${workspaceBase(slug)}/role-templates`),
+  archiveProfile: (
+    slug: string,
+    source: "bundled" | "workspace",
+    id: string,
+    archived: boolean,
+  ) =>
+    request<{ source: string; id: string; archived: boolean }>(
+      `${workspaceBase(slug)}/role-templates/archive`,
+      {
+        method: "POST",
+        body: JSON.stringify({ source, id, archived }),
+      },
+    ),
+  findCandidate: (slug: string, message: string, history: CandidateFinderTurn[]) =>
+    request<CandidateFinderResponse>(`${workspaceBase(slug)}/role-templates/assist`, {
+      method: "POST",
+      body: JSON.stringify({ message, history }),
+    }),
   getBundledTemplate: (slug: string, templateId: string) =>
     request<BundledTemplateDetail>(
       `${workspaceBase(slug)}/role-templates/bundled/${templateId}`,
@@ -305,14 +348,19 @@ export const api = {
         body: JSON.stringify({ context_type: contextType, context_id: contextId }),
       },
     ),
-  sendHrAssistMessage: (slug: string, sessionId: string, bodyText: string) =>
+  sendHrAssistMessage: (
+    slug: string,
+    sessionId: string,
+    bodyText: string,
+    customization?: HireCustomization,
+  ) =>
     request<{
       operator_message: unknown;
       assist_message: unknown;
       suggestion?: unknown;
     }>(`${workspaceBase(slug)}/hr-assist/sessions/${sessionId}/messages`, {
       method: "POST",
-      body: JSON.stringify({ body_text: bodyText }),
+      body: JSON.stringify({ body_text: bodyText, customization }),
     }),
   getAgentMessages: (slug: string, handle: string) =>
     request<{ conversation_id: string; messages: Message[] }>(

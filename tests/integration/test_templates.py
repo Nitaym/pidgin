@@ -9,6 +9,46 @@ from pidgin.services.workspace import get_singleton_workspace
 from tests.conftest import create_workspace
 
 
+def test_archive_bundled_profile_hides_then_restores(client: TestClient) -> None:
+    slug = create_workspace(client, "Archive Co")
+
+    listed = client.get(f"/{slug}/api/role-templates").json()
+    support = next(t for t in listed["bundled"] if t["template_id"] == "support-agent")
+    assert support["archived"] is False
+
+    archived = client.post(
+        f"/{slug}/api/role-templates/archive",
+        json={"source": "bundled", "id": "support-agent", "archived": True},
+    )
+    assert archived.status_code == 200
+    assert archived.json()["archived"] is True
+
+    after = client.get(f"/{slug}/api/role-templates").json()
+    support_after = next(t for t in after["bundled"] if t["template_id"] == "support-agent")
+    assert support_after["archived"] is True
+
+    client.post(
+        f"/{slug}/api/role-templates/archive",
+        json={"source": "bundled", "id": "support-agent", "archived": False},
+    )
+    restored = client.get(f"/{slug}/api/role-templates").json()
+    support_restored = next(t for t in restored["bundled"] if t["template_id"] == "support-agent")
+    assert support_restored["archived"] is False
+
+
+def test_candidate_finder_recommends_from_keywords(client: TestClient) -> None:
+    slug = create_workspace(client, "Finder Co")
+    response = client.post(
+        f"/{slug}/api/role-templates/assist",
+        json={"message": "I need someone to handle customer support tickets", "history": []},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data["reply"], str) and data["reply"]
+    # Stub backend → keyword match should surface the support candidate.
+    assert "support-agent" in data["recommended"]
+
+
 def test_duplicate_bundled_template_persists_files(client: TestClient, pidgin_home: Path) -> None:
     slug = create_workspace(client, "Template Co")
     response = client.post(

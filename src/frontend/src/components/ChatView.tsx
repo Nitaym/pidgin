@@ -37,6 +37,8 @@ type ChatViewProps = {
   agentDisplayName?: string;
   backLink?: { to: string; label: string } | undefined;
   inModal?: boolean;
+  /** Hide the internal chat header — for embedding under an external header. */
+  compact?: boolean;
 };
 
 export function ChatView({
@@ -45,6 +47,7 @@ export function ChatView({
   agentDisplayName,
   backLink = { to: "..", label: "← Team" },
   inModal = false,
+  compact = false,
 }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [body, setBody] = useState("");
@@ -246,28 +249,30 @@ export function ChatView({
 
   return (
     <div className={`chat-page${inModal ? " chat-page--modal" : ""}`}>
-      <div className="chat-header">
-        {!inModal && backLink && (
-          <Link to={backLink.to} className="chat-back-link">{backLink.label}</Link>
-        )}
-        <div className="chat-header-agent">
-          <div className="chat-agent-avatar">{agentInitial}</div>
-          <div>
-            <div className="chat-agent-name">{displayName}</div>
-            <div className="chat-agent-sub">Direct message</div>
+      {!compact && (
+        <div className="chat-header">
+          {!inModal && backLink && (
+            <Link to={backLink.to} className="chat-back-link">{backLink.label}</Link>
+          )}
+          <div className="chat-header-agent">
+            <div className="chat-agent-avatar">{agentInitial}</div>
+            <div>
+              <div className="chat-agent-name">{displayName}</div>
+              <div className="chat-agent-sub">Direct message</div>
+            </div>
           </div>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setShowDiagnostics((v) => !v)}
+            aria-pressed={showDiagnostics}
+            title="Toggle voice/LLM diagnostics"
+            style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 13 }}
+          >
+            {showDiagnostics ? "Hide diagnostics" : "📊 Diagnostics"}
+          </button>
         </div>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => setShowDiagnostics((v) => !v)}
-          aria-pressed={showDiagnostics}
-          title="Toggle voice/LLM diagnostics"
-          style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 13 }}
-        >
-          {showDiagnostics ? "Hide diagnostics" : "📊 Diagnostics"}
-        </button>
-      </div>
+      )}
 
       <div className="chat-messages">
         {!hasMessages ? (

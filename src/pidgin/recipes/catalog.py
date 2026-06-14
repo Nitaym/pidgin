@@ -12,6 +12,7 @@ RECIPES_DIR = Path(__file__).resolve().parents[3] / "recipes"
 BUNDLED_RECIPE_FILES: dict[str, str] = {
     "support-agent": "support-agent-v0.1.json",
     "executive-assistant": "executive-assistant-v0.1.json",
+    "marketing-agent": "marketing-agent-v0.1.json",
     "marketing-content-writer": "marketing-content-writer-v0.1.json",
     "marketing-campaign-manager": "marketing-campaign-manager-v0.1.json",
     "marketing-social-manager": "marketing-social-manager-v0.1.json",

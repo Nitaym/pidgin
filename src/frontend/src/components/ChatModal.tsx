@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, type Agent } from "../api/client";
 import { ChatView } from "./ChatView";
 import { useApp } from "../context/AppContext";
+import { markRead } from "../utils/chatUnread";
 
 type ChatModalProps = {
   onClose: () => void;
@@ -35,6 +36,14 @@ export function ChatModal({ onClose }: ChatModalProps) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // Viewing a conversation marks it read. The cleanup re-marks on
+  // close/switch so replies that arrived while it was open are covered too.
+  useEffect(() => {
+    if (!slug || !selectedHandle) return;
+    markRead(slug, selectedHandle);
+    return () => markRead(slug, selectedHandle);
+  }, [slug, selectedHandle]);
 
   const selectedAgent = agents.find((a) => a.handle === selectedHandle) ?? null;
 

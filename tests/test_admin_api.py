@@ -71,9 +71,12 @@ def test_admin_human_test_loop(client: TestClient) -> None:
 def test_api_create_and_agents(client: TestClient) -> None:
     slug = create_workspace(client, "UI Co")
 
+    # Every workspace ships with the HR agent pre-hired (it coaches hiring and
+    # stewards onboarding docs), so a fresh team is not empty.
     agents = client.get(f"/{slug}/api/agents")
     assert agents.status_code == 200
-    assert agents.json() == []
+    handles = {agent["handle"] for agent in agents.json()}
+    assert handles == {"hr"}
 
 
 def test_workspace_requires_auth(client: TestClient) -> None:

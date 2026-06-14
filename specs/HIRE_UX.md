@@ -10,8 +10,8 @@ Product-owned UX spec for the hire sequence. Internal engineering may still use 
 
 | Internal | UI label |
 |----------|----------|
-| Role recipe (bundled) | **Pidgin role template** |
-| Workspace-saved template | **Your role template** |
+| Role recipe (bundled) | **Candidate profile** (page header "Hire a role"; section "Candidate Profiles") |
+| Workspace-saved template | **Your saved profile** |
 | Recipe library | **Hire a role** |
 | Job definition fields | **Job requirements** |
 | Prompt / behavioral fields | **Ideal candidate profile** |
@@ -69,10 +69,21 @@ flowchart TD
 
 Steps 2–3 include the **Pidgin HR assist** chat panel (§5).
 
-**Step 1 — Pick template**
+**Step 1 — Pick a candidate (the marketplace)**
 
-- Grid: Pidgin role templates + Your role templates
-- Actions: **Use this template** | **Create blank template** (→ step 2 empty) | **Duplicate** (workspace templates only)
+- Sections: **Candidate Profiles** (bundled) + **Your saved profiles** (workspace).
+- Toolbar above the grid: **search** (filters by name / role / description), **Show archived
+  profiles** toggle, and a **candidate-finder chat** ("Ask HR to help you find the right candidate")
+  — HR recommends candidates from the catalog and links straight to their profiles. Backed by the
+  pre-hired HR agent on a real LLM backend; keyword match as the offline fallback.
+- Each candidate links to a **candidate profile page** (`hire/candidates/{template_id}`) — a
+  read-about-this-AI page showing mission, responsibilities, out-of-scope, ideal candidate profile,
+  and access & approvals, with **Hire {name}** (deep-links via `hire?template={id}`, preselecting the
+  candidate and jumping to details) and **Duplicate to your templates**.
+- Card descriptions are clamped to two lines; full text lives on the profile page.
+- Card actions: **Use this profile** | **Duplicate** | **Read full profile →** | **Archive / Unarchive**.
+- **Archive** is a per-workspace hide flag (bundled profiles ship read-only, so archive ≠ delete),
+  stored in `marketplace/archived.json`; archived profiles appear only when **Show archived** is on.
 
 **Steps 2–3 — Editable brief**
 
@@ -112,17 +123,25 @@ Post-hire edits update `hire_customization_json` on the employee row and append 
 
 ## 5. Pidgin HR assist
 
-Built-in hiring coach — **not** a hired AI employee. Available even when no HR agent exists.
+The hiring coach is the **pre-hired HR agent** (`hr-onboarding` recipe), seeded as a workspace
+singleton at workspace creation (handle `@hr`). The same agent both coaches hiring and stewards the
+onboarding doc (§AGENT_ONBOARDING). The chat panel renders its persona; suggestions come from the
+agent, not a hardcoded script.
+
+> Reverses the original MVP rule ("*not* a hired AI employee"). A keyword **stub** remains as the
+> offline fallback so the panel still answers and **hiring never blocks** when the LLM backend is
+> `stub` or unavailable.
 
 | Property | Rule |
 |----------|------|
+| Backed by | Pre-hired HR agent (`@hr`, singleton); keyword stub is the fallback only |
 | Surfaces | Hire wizard (steps 2–3), agent profile edit, custom template editor |
 | UI | Split layout: form left, **Discuss with Pidgin** chat right (collapsible on mobile) |
 | Persona | HR / hiring advisor: clarifies role scope, tightens ideal candidate wording, flags gaps |
-| Apply flow | Suggestions include **Apply to form** (fills/overwrites targeted fields) or **Append to your take** |
+| Context | The current draft brief is sent with each message so the coach reasons over real values |
+| Apply flow | Agent emits a `pidgin-suggestion` block → **Apply to form** (targeted fields) or **Append to your take** |
 | Persistence | Chat thread saved per context (`hire_session_id`, `agent_id`, or `template_id`) |
-| Runtime | Stub LLM acceptable for MVP; must not block save/hire if assist unavailable |
-| Future | When an HR agent is hired, operator may choose HR agent vs Pidgin assist (out of MVP) |
+| Runtime | Real backend → agent persona reply; `stub` backend or any failure → keyword fallback; never blocks save/hire |
 
 **Out of scope for assist:** changing access & approvals without explicit operator action; auto-hire without review step.
 

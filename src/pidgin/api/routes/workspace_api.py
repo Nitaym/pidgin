@@ -81,8 +81,11 @@ from pidgin.templates import (
     create_workspace_template,
     delete_workspace_template,
     get_workspace_template,
+    is_archived,
     list_workspace_template_summaries,
+    load_archived,
     save_workspace_template_version,
+    set_archived,
 )
 from pidgin.types.customization import HireCustomization, IdealCandidate, JobRequirements
 from pidgin.types.enums import ProcessingStatus
@@ -136,6 +139,22 @@ class CreateTemplateFromAgentBody(BaseModel):
     slug: str | None = None
 
 
+class ArchiveProfileBody(BaseModel):
+    source: str = Field(pattern="^(bundled|workspace)$")
+    id: str = Field(min_length=1)
+    archived: bool
+
+
+class CandidateFinderTurn(BaseModel):
+    role: str = Field(pattern="^(operator|assist)$")
+    text: str
+
+
+class CandidateFinderBody(BaseModel):
+    message: str = Field(min_length=1)
+    history: list[CandidateFinderTurn] = Field(default_factory=list)
+
+
 class CommonInstructionsBody(BaseModel):
     body_markdown: str = Field(min_length=1)
 
@@ -147,6 +166,7 @@ class CreateHrAssistSessionBody(BaseModel):
 
 class HrAssistMessageBody(BaseModel):
     body_text: str = Field(min_length=1)
+    customization: HireCustomizationBody | None = None
 
 
 class ManualConnectBody(BaseModel):
@@ -178,19 +198,62 @@ def api_list_agents(workspace_slug: str, request: Request) -> list[dict]:
 @router.get("/role-templates")
 def api_list_role_templates(workspace_slug: str, request: Request) -> dict:
     session = require_workspace_session(request, workspace_slug)
+    root = Path(session.paths_root)
+    archived = load_archived(root)
     bundled = list_bundled_template_summaries()
-    workspace = list_workspace_template_summaries(Path(session.paths_root))
+    for entry in bundled:
+        entry["archived"] = is_archived(archived, "bundled", entry["template_id"])
+    workspace = list_workspace_template_summaries(root)
+    for entry in workspace:
+        entry["archived"] = is_archived(archived, "workspace", entry["slug"])
     return {"bundled": bundled, "workspace": workspace}
+
+
+@router.post("/role-templates/archive")
+def api_archive_profile(
+    workspace_slug: str,
+    body: ArchiveProfileBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    set_archived(
+        Path(session.paths_root),
+        source=body.source,  # type: ignore[arg-type]
+        identifier=body.id,
+        archived=body.archived,
+    )
+    return {"source": body.source, "id": body.id, "archived": body.archived}
+
+
+@router.post("/role-templates/assist")
+def api_find_candidate(
+    workspace_slug: str,
+    body: CandidateFinderBody,
+    request: Request,
+) -> dict:
+    from pidgin.hr_assist.finder import find_candidates
+
+    session = require_workspace_session(request, workspace_slug)
+    candidates = list_bundled_template_summaries()
+    reply, recommended = find_candidates(
+        session.conn,
+        message=body.message,
+        history=[h.model_dump() for h in body.history],
+        candidates=candidates,
+    )
+    return {"reply": reply, "recommended": recommended}
 
 
 @router.get("/role-templates/bundled/{recipe_id}")
 def api_get_bundled_template(workspace_slug: str, recipe_id: str, request: Request) -> dict:
-    _ = workspace_slug
-    require_workspace_session(request, workspace_slug)
+    session = require_workspace_session(request, workspace_slug)
     try:
-        return bundled_template_detail(recipe_id)
+        detail = bundled_template_detail(recipe_id)
     except UnknownRecipeError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    archived = load_archived(Path(session.paths_root))
+    detail["archived"] = is_archived(archived, "bundled", recipe_id)
+    return detail
 
 
 @router.post("/hire")
@@ -607,11 +670,18 @@ def api_send_hr_assist_message(
     request: Request,
 ) -> dict:
     session = require_workspace_session(request, workspace_slug)
+    draft = (
+        HireCustomization.model_validate(body.customization.model_dump())
+        if body.customization is not None
+        else None
+    )
     try:
         return send_operator_message(
             Path(session.paths_root),
             session_id,
             body_text=body.body_text,
+            conn=session.conn,
+            draft_customization=draft,
         )
     except HrAssistError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

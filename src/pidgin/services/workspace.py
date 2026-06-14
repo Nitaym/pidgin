@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import secrets
+import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +13,26 @@ from pidgin.db import apply_migrations, connect, init_workspace_db
 from pidgin.db.employees import ensure_operator_principal
 from pidgin.util.slug import normalize_slug, slugify
 from pidgin.workspace.manager import create_workspace, ensure_home, registry_path
+
+log = logging.getLogger(__name__)
+
+
+def _seed_platform_agents(conn: sqlite3.Connection, workspace_root: Path) -> None:
+    """Pre-hire the agents listed in the workspace seed manifest.
+
+    The starting team (e.g. the HR agent) is defined as data in
+    ``recipes/workspace-seed.json``. Seeding must never block workspace creation
+    — if it fails, the workspace is still usable and the agents can be hired
+    later.
+    """
+    from pidgin.hire import seed_workspace_agents
+
+    try:
+        hired = seed_workspace_agents(conn, paths_root=workspace_root)
+        if hired:
+            log.info("[workspace] seeded agents: %s", ", ".join(hired))
+    except Exception:  # noqa: BLE001 — seeding must not break workspace creation
+        log.exception("[workspace] failed to seed workspace agents")
 
 
 @dataclass(frozen=True)
@@ -73,6 +95,7 @@ def create_workspace_with_db(
     apply_migrations(conn)
     init_workspace_db(conn, auth["workspace_id"], display_name)
     ensure_operator_principal(conn)
+    _seed_platform_agents(conn, paths.root)
     return WorkspaceSummary(
         id=auth["workspace_id"],
         slug=normalized_slug,
