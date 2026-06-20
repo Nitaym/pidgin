@@ -33,6 +33,32 @@ def build_system_prompt(
     return f"{body}\n\n---\n**Current time (UTC):** {now}"
 
 
+def _obligations_block(ctx: WorkspaceContext, agent: AgentContextRecord) -> str:
+    """The agent's 'calendar' — pending wake-ups and open tasks — per
+    AGENT_RUNTIME_SPEC §4.3. This is what lets a recurring wake-up pick up
+    ongoing work instead of re-deriving its job each time."""
+    conn = ctx.db_bridge
+    if conn is None:
+        return ""
+    from pidgin.db.tasks import list_open_tasks
+    from pidgin.db.timers import list_pending_timers
+
+    lines: list[str] = []
+    timers = list_pending_timers(conn, ai_employee_id=agent.agent_id)
+    if timers:
+        lines.append("My scheduled wake-ups:")
+        for t in timers:
+            tag = " (recurring)" if t["kind"] == "recurring" else ""
+            lines.append(f"  - {t['scheduled_at']}{tag} — {t['reason']}")
+    tasks = list_open_tasks(conn, owner_principal_id=agent.agent_principal_id)
+    if tasks:
+        lines.append("My open tasks:")
+        for task in tasks:
+            due = f" (due {task['due_at']})" if task["due_at"] else ""
+            lines.append(f"  - [{task['current_status']}] {task['title']}{due} (id {task['id']})")
+    return "\n".join(lines)
+
+
 def assemble_messages(
     ctx: WorkspaceContext,
     *,
@@ -40,11 +66,12 @@ def assemble_messages(
     event: InboundEventRecord,
 ) -> list[ChatMessage]:
     common = common_instructions_text(ctx.paths.root)
+    system_text = build_system_prompt(agent, common_instructions=common)
+    obligations = _obligations_block(ctx, agent)
+    if obligations:
+        system_text = f"{system_text}\n\n---\n{obligations}"
     messages: list[ChatMessage] = [
-        ChatMessage(
-            role="system",
-            content=build_system_prompt(agent, common_instructions=common),
-        ),
+        ChatMessage(role="system", content=system_text),
     ]
     conversation_id = event.payload.get("conversation_id")
     if conversation_id:

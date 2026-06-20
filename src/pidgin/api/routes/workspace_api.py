@@ -51,6 +51,7 @@ from pidgin.runtime.streaming import KeyedTurnEventSink, format_sse, turn_event_
 from pidgin.runtime.turn_dispatcher import dispatch_turn
 from pidgin.services import inject_test_event
 from pidgin.services.admin import process_pending_events
+from pidgin.services.activation import ActivationError, activate_agent
 from pidgin.services.agent_lifecycle import ArchiveError, archive_agent
 from pidgin.services.brief import (
     BriefError,
@@ -393,6 +394,21 @@ def api_send_agent_message(
         "conversation_id": conversation_id,
         "messages": list_messages(session.conn, conversation_id),
     }
+
+
+@router.post("/agents/{handle}/activate")
+def api_activate_agent(workspace_slug: str, handle: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return activate_agent(
+            session.conn,
+            handle=handle,
+            actor_principal_id=get_or_create_operator_principal(session.conn),
+        )
+    except ActivationError as exc:
+        detail = str(exc)
+        status = 404 if "not found" in detail.lower() else 400
+        raise HTTPException(status_code=status, detail=detail) from exc
 
 
 @router.post("/agents/{handle}/archive")

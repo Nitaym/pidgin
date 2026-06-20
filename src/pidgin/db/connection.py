@@ -11,6 +11,7 @@ MIGRATION_VERSIONS = (
     "002_hire_customization",
     "003_remove_rooms",
     "004_slack_messaging",
+    "005_autonomy",
 )
 SYSTEM_EMPLOYEE_ID = "000000000000000000000000"
 

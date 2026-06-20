@@ -27,7 +27,21 @@ def execute_action(action_ctx: ActionContext, action: ProposedAction) -> str:
         return _execute_recall(action_ctx, action)
     if action.action_type == ActionType.SCHEDULE_SELF:
         return _execute_schedule_self(action_ctx, action)
+    if action.action_type == ActionType.OPEN_TASK:
+        return _execute_open_task(action_ctx, action)
+    if action.action_type == ActionType.CLOSE:
+        return _execute_close(action_ctx, action)
+    if action.action_type == ActionType.ESCALATE:
+        return _execute_escalate(action_ctx, action)
     return f"Action {action.action_type.value} not implemented in MVP"
+
+
+def _max_pending_timers(action_ctx: ActionContext) -> int:
+    recipe = getattr(action_ctx.agent, "recipe", None)
+    autonomy = getattr(recipe, "autonomy", None) if recipe is not None else None
+    if autonomy and autonomy.limits and autonomy.limits.max_pending_timers:
+        return autonomy.limits.max_pending_timers
+    return 50
 
 
 def _execute_say(action_ctx: ActionContext, action: ProposedAction) -> str:
@@ -98,25 +112,67 @@ def _execute_read(action_ctx: ActionContext, action: ProposedAction) -> str:
 
 
 def _execute_schedule_self(action_ctx: ActionContext, action: ProposedAction) -> str:
+    import json
     from datetime import UTC, datetime, timedelta
 
-    from pidgin.db.timers import create_timer, find_pending_timer_near
+    from pidgin.db.timers import (
+        count_pending_timers,
+        create_timer,
+        find_pending_timer_near,
+        iso_utc,
+        next_occurrence,
+    )
 
-    try:
-        delay_minutes = float(action.params.get("delay_minutes") or 0)
-    except (TypeError, ValueError):
-        return "Invalid delay_minutes"
     reason = str(action.params.get("reason") or "").strip()
-    if delay_minutes <= 0:
-        return "delay_minutes must be positive"
     if not reason:
         return "Missing reason"
     conn = action_ctx.workspace.db_bridge
     if conn is None:
         return "schedule_self requires database bridge (not configured)"
 
+    if count_pending_timers(conn, ai_employee_id=action_ctx.agent.agent_id) >= _max_pending_timers(action_ctx):
+        return (
+            "You already have the maximum number of pending wake-ups. Cancel or "
+            "let some fire before scheduling more."
+        )
+
+    recurrence = action.params.get("recurrence")
+    if recurrence:
+        if not isinstance(recurrence, dict):
+            return "recurrence must be an object (kind + schedule)"
+        try:
+            fire_at = next_occurrence(recurrence, after=datetime.now(tz=UTC))
+        except ValueError as exc:
+            return f"Invalid recurrence: {exc}"
+        scheduled_at = iso_utc(fire_at)
+        timer_id = create_timer(
+            conn,
+            ai_employee_id=action_ctx.agent.agent_id,
+            scheduled_at=scheduled_at,
+            reason=reason,
+            originating_turn_id=action_ctx.turn.id,
+            inherited_trust_label=action_ctx.event.trust_label.value,
+            kind="recurring",
+            recurrence_json=json.dumps(recurrence),
+        )
+        log.info(
+            "[schedule_self] CREATED recurring timer=%s — turn_id=%s next=%s recurrence=%s reason=%r",
+            timer_id, action_ctx.turn.id, scheduled_at, recurrence, reason[:60],
+        )
+        return (
+            f"Recurring wake-up created (timer {timer_id}); next fire {scheduled_at}, "
+            "then it re-arms automatically. Do not schedule this cadence again."
+        )
+
+    try:
+        delay_minutes = float(action.params.get("delay_minutes") or 0)
+    except (TypeError, ValueError):
+        return "Invalid delay_minutes"
+    if delay_minutes <= 0:
+        return "Provide either delay_minutes (positive) or a recurrence"
+
     fire_at = datetime.now(tz=UTC) + timedelta(minutes=delay_minutes)
-    scheduled_at = fire_at.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    scheduled_at = iso_utc(fire_at)
     existing = find_pending_timer_near(
         conn,
         ai_employee_id=action_ctx.agent.agent_id,
@@ -151,6 +207,80 @@ def _execute_schedule_self(action_ctx: ActionContext, action: ProposedAction) ->
         f"Scheduled wake-up at {scheduled_at} (timer {timer_id}). "
         "Confirmed — do not call schedule_self again for this follow-up."
     )
+
+
+def _execute_open_task(action_ctx: ActionContext, action: ProposedAction) -> str:
+    from pidgin.db.tasks import create_task
+
+    title = str(action.params.get("title") or "").strip()
+    if not title:
+        return "Missing task title"
+    conn = action_ctx.workspace.db_bridge
+    if conn is None:
+        return "open_task requires database bridge (not configured)"
+    task_id = create_task(
+        conn,
+        owner_principal_id=action_ctx.agent.agent_principal_id,
+        title=title,
+        description=str(action.params.get("description") or "") or None,
+        due_at=str(action.params.get("due_at") or "") or None,
+        source_turn_id=action_ctx.turn.id,
+    )
+    log.info("[open_task] CREATED task=%s — agent=%s title=%r", task_id, action_ctx.agent.handle, title[:60])
+    return f"Opened task {task_id}: {title}"
+
+
+def _execute_close(action_ctx: ActionContext, action: ProposedAction) -> str:
+    from pidgin.db.tasks import set_task_status
+
+    task_id = str(action.params.get("task_id") or "").strip()
+    if not task_id:
+        return "Missing task_id"
+    status = str(action.params.get("status") or "done").strip()
+    if status not in ("in_progress", "blocked", "done", "cancelled"):
+        return "status must be one of: in_progress, blocked, done, cancelled"
+    conn = action_ctx.workspace.db_bridge
+    if conn is None:
+        return "close requires database bridge (not configured)"
+    ok = set_task_status(
+        conn,
+        task_id=task_id,
+        owner_principal_id=action_ctx.agent.agent_principal_id,
+        to_status=status,
+        outcome=str(action.params.get("outcome") or "") or None,
+    )
+    if not ok:
+        return f"No task {task_id} owned by you"
+    return f"Task {task_id} → {status}"
+
+
+def _execute_escalate(action_ctx: ActionContext, action: ProposedAction) -> str:
+    """Hand work up to the human owner/manager via the agent's operator chat.
+
+    Unlike say (replies in place) and post (names a destination), escalate always
+    lands in the agent's primary operator conversation so the human sees it — even
+    when the turn was self-anchored (a timer with no conversation).
+    """
+    from pidgin.db.chat import get_or_create_agent_conversation, insert_message
+
+    text = str(action.params.get("text") or action.params.get("summary") or "").strip()
+    if not text:
+        return "Missing escalation text"
+    conn = action_ctx.workspace.db_bridge
+    if conn is None:
+        return "escalate requires database bridge (not configured)"
+    agent = action_ctx.agent
+    conversation_id = get_or_create_agent_conversation(conn, agent.agent_id)
+    insert_message(
+        conn,
+        conversation_id=conversation_id,
+        sender_principal_id=agent.agent_principal_id,
+        sender_display_name=agent.display_name,
+        body_text=f"⬆️ Escalation from {agent.display_name} ({agent.role_title}):\n\n{text}",
+        originating_turn_id=action_ctx.turn.id,
+    )
+    log.info("[escalate] agent=%s -> operator conversation=%s", agent.handle, conversation_id)
+    return "Escalated to your operator (posted to your chat with them)."
 
 
 def _execute_remember(action_ctx: ActionContext, action: ProposedAction) -> str:

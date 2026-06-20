@@ -37,6 +37,29 @@ class RecipePermissions(BaseModel):
         return values
 
 
+class AutonomyLimits(BaseModel):
+    max_pending_timers: int | None = None
+    max_wakeups_per_day: int | None = None
+
+
+class SupervisorReport(BaseModel):
+    cadence: str = "weekly"  # daily | weekly
+    weekday: str = "fri"
+    at_local_time: str = "16:00"
+
+
+class AutonomySettings(BaseModel):
+    """How a hired agent runs itself once active (AUTONOMY_SPEC §8).
+
+    Guidance, not hard schedule: the bootstrap turn reads cadence_guidance and
+    decides its own wake-ups, so the agent owns its calendar.
+    """
+
+    cadence_guidance: list[str] = Field(default_factory=list)
+    supervisor_report: SupervisorReport | None = None
+    limits: AutonomyLimits | None = None
+
+
 class RoleRecipe(BaseModel):
     recipe_id: str
     version: str
@@ -49,6 +72,7 @@ class RoleRecipe(BaseModel):
     default_job_requirements: DefaultJobRequirements | None = None
     default_ideal_candidate: DefaultIdealCandidate | None = None
     tools: list[str] = Field(default_factory=list)
+    autonomy: AutonomySettings | None = None
 
     @field_validator("recipe_id")
     @classmethod

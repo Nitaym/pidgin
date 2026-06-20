@@ -56,24 +56,97 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
     "schedule_self": ToolSpec(
         name="schedule_self",
         description=(
-            "Schedule a future wake-up for yourself to follow up on something. "
-            "When it fires you receive a timer event with your reason and can "
-            "act on it (e.g. post a message to someone)."
+            "Schedule a wake-up for yourself. Use a one-shot delay_minutes for a "
+            "single follow-up, or a recurrence for a standing cadence (e.g. a "
+            "daily review or a weekly status report). A recurring wake-up re-arms "
+            "itself automatically after each fire — set it once. When it fires you "
+            "receive a timer event with your reason and act on it."
         ),
         parameters={
             "type": "object",
             "properties": {
                 "delay_minutes": {
                     "type": "number",
-                    "description": "How many minutes from now to fire",
+                    "description": "One-shot: minutes from now to fire. Omit if using recurrence.",
+                },
+                "recurrence": {
+                    "type": "object",
+                    "description": (
+                        "Standing cadence. One of: "
+                        '{"kind":"daily","at_local_time":"09:00"}, '
+                        '{"kind":"weekly","weekday":"fri","at_local_time":"16:00"}, '
+                        '{"kind":"interval","every_minutes":240}. Times are UTC.'
+                    ),
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["daily", "weekly", "interval"]},
+                        "at_local_time": {"type": "string", "description": "HH:MM (UTC)"},
+                        "weekday": {
+                            "type": "string",
+                            "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                        },
+                        "every_minutes": {"type": "number"},
+                    },
+                    "required": ["kind"],
                 },
                 "reason": {
                     "type": "string",
-                    "description": "What to do when the timer fires — be specific, "
+                    "description": "What to do when it fires — be specific, "
                     "future-you only sees this text",
                 },
             },
-            "required": ["delay_minutes", "reason"],
+            "required": ["reason"],
+        },
+    ),
+    "open_task": ToolSpec(
+        name="open_task",
+        description=(
+            "Add a durable item to your task backlog — something you're responsible "
+            "for that spans more than one turn. Your open tasks are shown to you at "
+            "the start of every turn, so this is how you remember ongoing work."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short task title"},
+                "description": {"type": "string", "description": "Optional detail"},
+                "due_at": {"type": "string", "description": "Optional ISO date/time"},
+            },
+            "required": ["title"],
+        },
+    ),
+    "close": ToolSpec(
+        name="close",
+        description=(
+            "Update a task on your backlog — mark it done/cancelled, or move it to "
+            "in_progress/blocked. Use the task id shown in your open-tasks list."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string"},
+                "status": {
+                    "type": "string",
+                    "enum": ["in_progress", "blocked", "done", "cancelled"],
+                    "description": "Defaults to done",
+                },
+                "outcome": {"type": "string", "description": "Optional result note"},
+            },
+            "required": ["task_id"],
+        },
+    ),
+    "escalate": ToolSpec(
+        name="escalate",
+        description=(
+            "Hand something up to your human operator/manager: a decision you need, "
+            "a blocker, or a periodic status report. It posts to your chat with them "
+            "even if this turn started from a timer with no conversation."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "What you're escalating, with context"},
+            },
+            "required": ["text"],
         },
     ),
     "remember": ToolSpec(
