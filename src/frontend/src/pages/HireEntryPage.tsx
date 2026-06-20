@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { api } from "../api/client";
 import { useApp } from "../context/AppContext";
 
 function SpecialistIcon() {
@@ -45,6 +47,19 @@ export function HireEntryPage() {
   const navigate = useNavigate();
   const { workspace } = useApp();
   const slug = workspace?.slug ?? "";
+  const [error, setError] = useState<string | null>(null);
+
+  // Resolve the HR agent by role at click time (it may be hired under any name),
+  // so there's no race with a preload and no dead "agent not found" link.
+  async function consultSpecialist() {
+    setError(null);
+    try {
+      const hr = await api.getHrAgent(slug);
+      navigate(`/${slug}/agents/${hr.handle}/chat`);
+    } catch {
+      setError("No HR specialist is available yet. Pick a candidate from the marketplace instead.");
+    }
+  }
 
   const options = [
     {
@@ -52,7 +67,7 @@ export function HireEntryPage() {
       icon: <SpecialistIcon />,
       title: "Consult a specialist",
       desc: "Talk it through with HR. Describe what you need and get a recommendation.",
-      onClick: () => navigate(`/${slug}/agents/hr/chat`),
+      onClick: () => void consultSpecialist(),
     },
     {
       key: "marketplace",
@@ -78,6 +93,8 @@ export function HireEntryPage() {
         </Link>
         <h1 className="hire-entry-question">What position are you looking to hire?</h1>
         <p className="hire-entry-sub">Pick how you'd like to start.</p>
+
+        {error ? <div className="error">{error}</div> : null}
 
         <div className="hire-entry-options">
           {options.map((opt) => (

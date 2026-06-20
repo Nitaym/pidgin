@@ -79,6 +79,14 @@ def test_api_create_and_agents(client: TestClient) -> None:
     assert handles == {"hr"}
 
 
+def test_hr_agent_endpoint_resolves_by_role(client: TestClient) -> None:
+    slug = create_workspace(client, "HR Lookup Co")
+    # The HR agent is identified by role, so the UI can find it under any handle.
+    resp = client.get(f"/{slug}/api/hr-agent")
+    assert resp.status_code == 200
+    assert resp.json()["handle"] == "hr"
+
+
 def test_workspace_requires_auth(client: TestClient) -> None:
     response = client.post(
         "/api/workspace",

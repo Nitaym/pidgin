@@ -4,27 +4,26 @@ import { api } from "../api/client";
 import { ChatView } from "./ChatView";
 import { useApp } from "../context/AppContext";
 
-const HR_HANDLE = "hr";
-
 /**
  * Always-available HR assistant. A floating launcher in the bottom-right opens
- * a docked chat with the pre-hired HR agent, on any page. Hidden on the HR
- * agent's own full chat screen (you're already there).
+ * a docked chat with the pre-hired HR agent, on any page. The HR agent is
+ * resolved by role (it may be hired under any name), and the launcher is hidden
+ * on the HR agent's own full chat screen (you're already there).
  */
 export function HrChatLauncher() {
   const { workspace } = useApp();
   const slug = workspace?.slug ?? "";
   const location = useLocation();
   const [open, setOpen] = useState(false);
-  const [hr, setHr] = useState<{ display_name: string } | null>(null);
+  const [hr, setHr] = useState<{ handle: string; display_name: string } | null>(null);
 
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
     void api
-      .getAgent(slug, HR_HANDLE)
+      .getHrAgent(slug)
       .then((agent) => {
-        if (!cancelled) setHr({ display_name: agent.display_name });
+        if (!cancelled) setHr(agent);
       })
       .catch(() => {
         if (!cancelled) setHr(null);
@@ -35,7 +34,7 @@ export function HrChatLauncher() {
   }, [slug]);
 
   // Don't show the floating launcher on the HR agent's own chat page.
-  const onHrChat = location.pathname.endsWith(`/agents/${HR_HANDLE}/chat`);
+  const onHrChat = hr ? location.pathname.endsWith(`/agents/${hr.handle}/chat`) : false;
   if (!slug || !hr || onHrChat) return null;
 
   const initial = hr.display_name.charAt(0).toUpperCase();
@@ -64,7 +63,7 @@ export function HrChatLauncher() {
           <div className="hr-launcher-panel-body">
             <ChatView
               slug={slug}
-              agentHandle={HR_HANDLE}
+              agentHandle={hr.handle}
               agentDisplayName={hr.display_name}
               inModal
               compact

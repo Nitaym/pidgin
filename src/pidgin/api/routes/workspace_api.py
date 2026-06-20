@@ -195,6 +195,19 @@ def api_list_agents(workspace_slug: str, request: Request) -> list[dict]:
     return agents
 
 
+@router.get("/hr-agent")
+def api_get_hr_agent_route(workspace_slug: str, request: Request) -> dict:
+    """Identify the workspace HR agent by role (not handle), so the UI's
+    always-available HR chat works regardless of the name it was hired under."""
+    from pidgin.hire import get_hr_agent
+
+    session = require_workspace_session(request, workspace_slug)
+    agent = get_hr_agent(session.conn)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="No HR agent hired")
+    return {"handle": agent["handle"], "display_name": agent["display_name"]}
+
+
 @router.get("/role-templates")
 def api_list_role_templates(workspace_slug: str, request: Request) -> dict:
     session = require_workspace_session(request, workspace_slug)

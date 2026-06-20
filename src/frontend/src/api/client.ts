@@ -232,6 +232,8 @@ export const api = {
       body: JSON.stringify({ name, slug }),
     }),
   listAgents: (slug: string) => request<Agent[]>(`${workspaceBase(slug)}/agents`),
+  getHrAgent: (slug: string) =>
+    request<{ handle: string; display_name: string }>(`${workspaceBase(slug)}/hr-agent`),
   getAgent: (slug: string, handle: string) =>
     request<Agent>(`${workspaceBase(slug)}/agents/${handle}`),
   getAgentConversation: (slug: string, handle: string) =>

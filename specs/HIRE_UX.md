@@ -56,34 +56,45 @@ Hire still creates an immutable **snapshot** on the employee row at hire time (e
 
 ---
 
-## 3. Hire wizard
+## 3. Hire flow
 
 ```mermaid
 flowchart TD
-  T1[1. Pick template] --> T2[2. Job requirements]
-  T2 --> T3[3. Ideal candidate profile]
-  T3 --> T4[4. Identity + manager]
-  T4 --> T5[5. Review and hire]
-  T5 --> L[Lifecycle: interview → onboard → active]
+  E[Hire a role: how do you want to start?] --> S[Consult a specialist → HR chat]
+  E --> M[Choose from marketplace]
+  E --> F[Write from scratch → blank brief]
+  M --> P[Candidate profile page]
+  P --> D[Agent details + brief]
+  F --> D
+  D --> L[Lifecycle: interview → onboard → active]
 ```
 
-Steps 2–3 include the **Pidgin HR assist** chat panel (§5).
+**Step 0 — Hire entry (`/hire`)**
 
-**Step 1 — Pick a candidate (the marketplace)**
+An onboarding-style chooser, not a grid. Large heading **"What position are you looking to hire?"**
+with three cards:
 
-- Sections: **Candidate Profiles** (bundled) + **Your saved profiles** (workspace).
-- Toolbar above the grid: **search** (filters by name / role / description), **Show archived
-  profiles** toggle, and a **candidate-finder chat** ("Ask HR to help you find the right candidate")
-  — HR recommends candidates from the catalog and links straight to their profiles. Backed by the
-  pre-hired HR agent on a real LLM backend; keyword match as the offline fallback.
-- Each candidate links to a **candidate profile page** (`hire/candidates/{template_id}`) — a
-  read-about-this-AI page showing mission, responsibilities, out-of-scope, ideal candidate profile,
-  and access & approvals, with **Hire {name}** (deep-links via `hire?template={id}`, preselecting the
-  candidate and jumping to details) and **Duplicate to your templates**.
+| Option | Action |
+|--------|--------|
+| **Consult a specialist** | Opens the HR agent's full chat (`/agents/hr/chat`) to talk it through |
+| **Choose from marketplace** | → the marketplace (`/hire/marketplace`) |
+| **Write a profile from scratch** | → marketplace with a blank brief (`/hire/marketplace?fresh=1`) |
+
+**Step 1 — Marketplace (`/hire/marketplace`)**
+
+- Well-separated and chat-free: just **search** (black input) over **Candidate Profiles** (bundled)
+  + **Your saved profiles** (workspace), plus a **Show archived profiles** toggle. The HR chat is the
+  global floating launcher (§5), not embedded here.
+- Each candidate links to its **candidate profile page** (`hire/marketplace/candidates/{template_id}`)
+  — mission, responsibilities, out-of-scope, ideal candidate profile, and access & approvals, with
+  **Hire {name}** (deep-links via `?template={id}`, preselecting + jumping to details), **Duplicate to
+  your profiles**, and **Archive / Unarchive** (archive lives *only* on the profile page).
 - Card descriptions are clamped to two lines; full text lives on the profile page.
-- Card actions: **Use this profile** | **Duplicate** | **Read full profile →** | **Archive / Unarchive**.
 - **Archive** is a per-workspace hide flag (bundled profiles ship read-only, so archive ≠ delete),
   stored in `marketplace/archived.json`; archived profiles appear only when **Show archived** is on.
+
+> The standalone "Your templates" page was **removed**; saved profiles live in the marketplace under
+> *Your saved profiles* (created via Duplicate or *Create template from this agent*).
 
 **Steps 2–3 — Editable brief**
 
@@ -135,12 +146,10 @@ agent, not a hardcoded script.
 | Property | Rule |
 |----------|------|
 | Backed by | Pre-hired HR agent (`@hr`, singleton); keyword stub is the fallback only |
-| Surfaces | Hire wizard (steps 2–3), agent profile edit, custom template editor |
-| UI | Split layout: form left, **Discuss with Pidgin** chat right (collapsible on mobile) |
-| Persona | HR / hiring advisor: clarifies role scope, tightens ideal candidate wording, flags gaps |
-| Context | The current draft brief is sent with each message so the coach reasons over real values |
-| Apply flow | Agent emits a `pidgin-suggestion` block → **Apply to form** (targeted fields) or **Append to your take** |
-| Persistence | Chat thread saved per context (`hire_session_id`, `agent_id`, or `template_id`) |
+| Always available | A **floating launcher** (bottom-right) is present on every workspace page and opens a docked HR chat. Hidden only on the HR agent's own full chat screen. |
+| Dedicated screen | "Consult a specialist" and the launcher both open the HR agent (`/agents/hr/chat`) — same agent, same thread |
+| Persona | HR / hiring advisor: clarifies role scope, recommends candidates, tightens wording |
+| Form coach | On the brief steps the in-form **Discuss with Pidgin** panel still emits `pidgin-suggestion` → **Apply to form** / **Append to your take** |
 | Runtime | Real backend → agent persona reply; `stub` backend or any failure → keyword fallback; never blocks save/hire |
 
 **Out of scope for assist:** changing access & approvals without explicit operator action; auto-hire without review step.
