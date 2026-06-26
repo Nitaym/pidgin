@@ -1950,6 +1950,8 @@ button.secondary.is-selected {
 
 .team-card-blurb {
   margin: 0;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
   font-size: 0.9rem;
   color: var(--text-secondary);
   line-height: 1.4;
