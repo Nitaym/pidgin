@@ -43,7 +43,7 @@ export function TeamPage() {
 
       {error ? <div className="error">{error}</div> : null}
 
-      <section className="panel stack">
+      <section className="stack">
         <h3 style={{ margin: 0 }}>Your AI team</h3>
         {agents.length === 0 ? (
           <div className="empty-state">
@@ -57,36 +57,39 @@ export function TeamPage() {
             <p>Hire your first AI employee from a role template to get started.</p>
           </div>
         ) : (
-          <ul className="list-links">
-            {agents.map((agent) => (
-              <li key={agent.id} className="team-agent-row">
-                <div>
-                  <div>
-                    <Link to={`agents/${agent.handle}`}>{agent.display_name}</Link>
+          <div className="team-grid">
+            {agents.map((agent) => {
+              const archived = agent.current_status === "offboarded";
+              return (
+                <div key={agent.id} className="panel team-card">
+                  <div className="team-card-head">
+                    <Link to={`agents/${agent.handle}`} className="team-card-name">
+                      {agent.display_name}
+                    </Link>
                     {agent.is_preseeded ? (
                       <span className="chip team-preseeded-chip">Preseeded</span>
                     ) : null}
-                    <span className="muted">
-                      {" "}
-                      — {agent.role_title} (@{agent.handle}) ·{" "}
-                      {agent.current_status === "offboarded" ? "archived" : agent.current_status}
-                    </span>
                   </div>
-                  {agent.is_preseeded && agent.preseeded_blurb ? (
-                    <p className="muted team-agent-blurb">{agent.preseeded_blurb}</p>
+                  <p className="muted team-card-meta">
+                    {agent.role_title} · @{agent.handle} · {archived ? "archived" : agent.current_status}
+                  </p>
+                  {agent.preseeded_blurb ? (
+                    <p className="team-card-blurb">{agent.preseeded_blurb}</p>
                   ) : null}
+                  <div className="team-card-foot">
+                    {!archived ? (
+                      <Link
+                        to={`agents/${agent.handle}/chat`}
+                        className="btn secondary team-chat-btn"
+                      >
+                        Chat
+                      </Link>
+                    ) : null}
+                  </div>
                 </div>
-                {agent.current_status !== "offboarded" ? (
-                  <Link
-                    to={`agents/${agent.handle}/chat`}
-                    className="btn secondary team-chat-btn"
-                  >
-                    Chat
-                  </Link>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+              );
+            })}
+          </div>
         )}
       </section>
 

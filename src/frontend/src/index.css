@@ -1908,11 +1908,56 @@ button.secondary.is-selected {
   color: var(--accent);
 }
 
-.team-agent-row {
+.team-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-3);
+}
+
+.team-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.team-card:hover {
+  border-color: var(--border-strong);
+}
+
+.team-card-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.team-card-name {
+  font-weight: 600;
+  font-size: 1.05rem;
+  text-decoration: none;
+  color: var(--text-primary);
+}
+
+.team-card-name:hover {
+  color: var(--accent);
+}
+
+.team-card-meta {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.team-card-blurb {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.team-card-foot {
+  margin-top: auto;
+  padding-top: var(--space-2);
 }
 
 .team-chat-btn {
@@ -1922,17 +1967,10 @@ button.secondary.is-selected {
 }
 
 .team-preseeded-chip {
-  margin-left: var(--space-2);
   vertical-align: middle;
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.team-agent-blurb {
-  margin: 4px 0 0;
-  font-size: 0.85rem;
-  max-width: 60ch;
 }
 
 .profile-hero {
