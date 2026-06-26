@@ -95,7 +95,7 @@ export function TeamPage() {
                       {archived ? "archived" : agent.current_status}
                     </span>
                   </div>
-                  <p className="muted team-card-meta">
+                  <p className="team-card-meta">
                     {agent.role_title} · @{agent.handle}
                   </p>
                   {agent.preseeded_blurb ? (

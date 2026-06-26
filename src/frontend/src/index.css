@@ -1981,6 +1981,7 @@ button.secondary.is-selected {
 .team-card-meta {
   margin: 0;
   font-size: 0.85rem;
+  color: var(--text-tertiary);
 }
 
 .team-card-blurb {
