@@ -8,6 +8,7 @@ export function TeamPage() {
   const slug = workspace?.slug ?? "";
   const [agents, setAgents] = useState<Agent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [activating, setActivating] = useState<string | null>(null);
 
   const loadTeam = useCallback(async () => {
     if (!slug) return;
@@ -18,6 +19,23 @@ export function TeamPage() {
   useEffect(() => {
     void loadTeam().catch((err: Error) => setError(err.message));
   }, [loadTeam]);
+
+  async function handleActivate(handle: string) {
+    setActivating(handle);
+    setError(null);
+    try {
+      const result = await api.activateAgent(slug, handle);
+      setAgents((prev) =>
+        prev.map((a) =>
+          a.handle === handle ? { ...a, current_status: result.current_status } : a,
+        ),
+      );
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setActivating(null);
+    }
+  }
 
   async function handleLogout() {
     await api.logout();
@@ -63,20 +81,37 @@ export function TeamPage() {
               return (
                 <div key={agent.id} className="panel team-card">
                   <div className="team-card-head">
-                    <Link to={`agents/${agent.handle}`} className="team-card-name">
-                      {agent.display_name}
-                    </Link>
-                    {agent.is_preseeded ? (
-                      <span className="chip team-preseeded-chip">Preseeded</span>
-                    ) : null}
+                    <div className="team-card-id">
+                      <Link to={`agents/${agent.handle}`} className="team-card-name">
+                        {agent.display_name}
+                      </Link>
+                      {agent.is_preseeded ? (
+                        <span className="chip team-preseeded-chip">Preseeded</span>
+                      ) : null}
+                    </div>
+                    <span
+                      className={`team-status team-status-${archived ? "offboarded" : agent.current_status}`}
+                    >
+                      {archived ? "archived" : agent.current_status}
+                    </span>
                   </div>
                   <p className="muted team-card-meta">
-                    {agent.role_title} · @{agent.handle} · {archived ? "archived" : agent.current_status}
+                    {agent.role_title} · @{agent.handle}
                   </p>
                   {agent.preseeded_blurb ? (
                     <p className="team-card-blurb">{agent.preseeded_blurb}</p>
                   ) : null}
                   <div className="team-card-foot">
+                    {!archived && agent.current_status === "draft" ? (
+                      <button
+                        type="button"
+                        className="team-activate-btn"
+                        disabled={activating === agent.handle}
+                        onClick={() => void handleActivate(agent.handle)}
+                      >
+                        {activating === agent.handle ? "Activating…" : "Activate"}
+                      </button>
+                    ) : null}
                     {!archived ? (
                       <Link
                         to={`agents/${agent.handle}/chat`}

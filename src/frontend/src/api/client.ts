@@ -331,6 +331,11 @@ export const api = {
       `${workspaceBase(slug)}/agents/${handle}/archive`,
       { method: "POST" },
     ),
+  activateAgent: (slug: string, handle: string) =>
+    request<{ handle: string; current_status: string }>(
+      `${workspaceBase(slug)}/agents/${handle}/activate`,
+      { method: "POST" },
+    ),
   createTemplateFromAgent: (
     slug: string,
     handle: string,
