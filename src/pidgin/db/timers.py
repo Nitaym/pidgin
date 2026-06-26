@@ -231,3 +231,19 @@ def cancel_timer(conn: sqlite3.Connection, timer_id: str, *, ai_employee_id: str
     )
     conn.commit()
     return cur.rowcount > 0
+
+
+def cancel_agent_timers(conn: sqlite3.Connection, *, ai_employee_id: str) -> int:
+    """Cancel all pending timers for an agent. Returns the number cancelled.
+
+    Used when an agent is deactivated so its self-scheduled wakeups stop firing.
+    """
+    cur = conn.execute(
+        """
+        UPDATE agent_timers SET status = 'cancelled', updated_at = ?
+        WHERE ai_employee_id = ? AND status = 'pending'
+        """,
+        (utc_now_iso(), ai_employee_id),
+    )
+    conn.commit()
+    return cur.rowcount

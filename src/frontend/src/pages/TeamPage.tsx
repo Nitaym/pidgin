@@ -8,7 +8,7 @@ export function TeamPage() {
   const slug = workspace?.slug ?? "";
   const [agents, setAgents] = useState<Agent[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [activating, setActivating] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
 
   const loadTeam = useCallback(async () => {
     if (!slug) return;
@@ -20,11 +20,14 @@ export function TeamPage() {
     void loadTeam().catch((err: Error) => setError(err.message));
   }, [loadTeam]);
 
-  async function handleActivate(handle: string) {
-    setActivating(handle);
+  async function changeStatus(handle: string, action: "activate" | "deactivate") {
+    setPending(handle);
     setError(null);
     try {
-      const result = await api.activateAgent(slug, handle);
+      const result =
+        action === "activate"
+          ? await api.activateAgent(slug, handle)
+          : await api.deactivateAgent(slug, handle);
       setAgents((prev) =>
         prev.map((a) =>
           a.handle === handle ? { ...a, current_status: result.current_status } : a,
@@ -33,7 +36,7 @@ export function TeamPage() {
     } catch (err) {
       setError((err as Error).message);
     } finally {
-      setActivating(null);
+      setPending(null);
     }
   }
 
@@ -106,10 +109,20 @@ export function TeamPage() {
                       <button
                         type="button"
                         className="team-activate-btn"
-                        disabled={activating === agent.handle}
-                        onClick={() => void handleActivate(agent.handle)}
+                        disabled={pending === agent.handle}
+                        onClick={() => void changeStatus(agent.handle, "activate")}
                       >
-                        {activating === agent.handle ? "Activating…" : "Activate"}
+                        {pending === agent.handle ? "Activating…" : "Activate"}
+                      </button>
+                    ) : null}
+                    {!archived && agent.current_status === "active" ? (
+                      <button
+                        type="button"
+                        className="secondary team-deactivate-btn"
+                        disabled={pending === agent.handle}
+                        onClick={() => void changeStatus(agent.handle, "deactivate")}
+                      >
+                        {pending === agent.handle ? "Deactivating…" : "Deactivate"}
                       </button>
                     ) : null}
                     {!archived ? (

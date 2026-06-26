@@ -336,6 +336,11 @@ export const api = {
       `${workspaceBase(slug)}/agents/${handle}/activate`,
       { method: "POST" },
     ),
+  deactivateAgent: (slug: string, handle: string) =>
+    request<{ handle: string; current_status: string }>(
+      `${workspaceBase(slug)}/agents/${handle}/deactivate`,
+      { method: "POST" },
+    ),
   createTemplateFromAgent: (
     slug: string,
     handle: string,

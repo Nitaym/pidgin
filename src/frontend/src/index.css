@@ -2007,7 +2007,8 @@ button.secondary.is-selected {
   font-size: 0.75rem;
 }
 
-.team-activate-btn {
+.team-activate-btn,
+.team-deactivate-btn {
   flex-shrink: 0;
   padding: var(--space-1) var(--space-3);
   font-size: 0.75rem;

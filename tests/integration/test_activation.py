@@ -78,3 +78,62 @@ def test_activate_unknown_agent_raises(pidgin_home: Path) -> None:
 
     with pytest.raises(ActivationError):
         activate_agent(conn, handle="nobody")
+
+
+def test_deactivate_stops_agent_and_cancels_timers(pidgin_home: Path, recipe_path: Path) -> None:
+    from pidgin.services.activation import deactivate_agent
+
+    paths, conn = _workspace(pidgin_home)
+    hired = hire_from_recipe(
+        conn, paths, HireRequest(display_name="VP Marketing", recipe_path=recipe_path)
+    )
+    activate_agent(conn, handle="vp-marketing")
+
+    result = deactivate_agent(conn, handle="vp-marketing")
+    assert result["current_status"] == "draft"
+    assert result["timers_cancelled"] == "1"  # the bootstrap timer
+
+    emp = conn.execute(
+        "SELECT bootstrapped_at, current_status FROM ai_employees WHERE id = ?",
+        (hired.ai_employee_id,),
+    ).fetchone()
+    assert emp["current_status"] == "draft"
+    assert emp["bootstrapped_at"] is None  # cleared so a later activate re-bootstraps
+
+    pending = conn.execute(
+        "SELECT COUNT(*) AS n FROM agent_timers WHERE ai_employee_id = ? AND status = 'pending'",
+        (hired.ai_employee_id,),
+    ).fetchone()["n"]
+    assert pending == 0
+
+
+def test_deactivate_then_reactivate_rebootstraps(pidgin_home: Path, recipe_path: Path) -> None:
+    from pidgin.services.activation import deactivate_agent
+
+    paths, conn = _workspace(pidgin_home)
+    hire_from_recipe(
+        conn, paths, HireRequest(display_name="VP Marketing", recipe_path=recipe_path)
+    )
+    activate_agent(conn, handle="vp-marketing")
+    deactivate_agent(conn, handle="vp-marketing")
+
+    again = activate_agent(conn, handle="vp-marketing")
+    assert again["current_status"] == "active"
+    assert again["bootstrapped"] == "true"  # cleared marker → fresh bootstrap
+
+    live = conn.execute(
+        "SELECT COUNT(*) AS n FROM agent_timers WHERE status = 'pending' AND kind = 'bootstrap'"
+    ).fetchone()["n"]
+    assert live == 1
+
+
+def test_deactivate_non_active_raises(pidgin_home: Path, recipe_path: Path) -> None:
+    from pidgin.services.activation import ActivationError, deactivate_agent
+
+    paths, conn = _workspace(pidgin_home)
+    hire_from_recipe(
+        conn, paths, HireRequest(display_name="VP Marketing", recipe_path=recipe_path)
+    )
+    # Never activated → still draft.
+    with pytest.raises(ActivationError):
+        deactivate_agent(conn, handle="vp-marketing")

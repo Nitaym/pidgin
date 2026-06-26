@@ -15,7 +15,7 @@ import sqlite3
 
 from pidgin.db.employees import get_agent_by_handle, transition_employee_status
 from pidgin.db.principals import get_or_create_operator_principal
-from pidgin.db.timers import create_timer
+from pidgin.db.timers import cancel_agent_timers, create_timer
 from pidgin.recipes.models import RoleRecipe
 from pidgin.types import TrustLabel
 from pidgin.util.ids import utc_now_iso
@@ -67,6 +67,50 @@ def _bootstrap_brief(recipe: RoleRecipe | None) -> str:
     else:
         lines.append("  - Default: a brief daily review and a weekly report to your operator.")
     return "\n".join(lines)
+
+
+def deactivate_agent(
+    conn: sqlite3.Connection,
+    *,
+    handle: str,
+    actor_principal_id: str | None = None,
+) -> dict[str, str]:
+    """Stop a running agent: transition active → draft and cancel its timers.
+
+    The scheduler doesn't gate on status, so flipping the status alone would
+    leave the agent's self-scheduled wakeups firing. We cancel all pending
+    timers, and clear ``bootstrapped_at`` so a later activate cleanly
+    re-bootstraps (rebuilds the backlog and re-arms its check-ins) rather than
+    resuming with no timers.
+    """
+    agent = get_agent_by_handle(conn, handle)
+    if agent is None:
+        raise ActivationError(f"Agent not found: {handle}")
+    if agent["current_status"] != "active":
+        raise ActivationError(f"Agent is not active: {handle}")
+
+    actor_id = actor_principal_id or get_or_create_operator_principal(conn)
+    transition_employee_status(
+        conn,
+        employee_id=agent["id"],
+        to_status="draft",
+        actor_principal_id=actor_id,
+        reason="Deactivated by workspace operator",
+    )
+    cancelled = cancel_agent_timers(conn, ai_employee_id=agent["id"])
+    conn.execute(
+        "UPDATE ai_employees SET bootstrapped_at = NULL, updated_at = ? WHERE id = ?",
+        (utc_now_iso(), agent["id"]),
+    )
+    conn.commit()
+    log.info(
+        "[activation] %s deactivated — %d pending timer(s) cancelled", handle, cancelled
+    )
+    return {
+        "handle": handle,
+        "current_status": "draft",
+        "timers_cancelled": str(cancelled),
+    }
 
 
 def activate_agent(
