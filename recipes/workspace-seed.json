@@ -1,11 +1,18 @@
 {
-  "version": 1,
-  "description": "Agents pre-hired into every new workspace on onboarding. Each entry names a bundled recipe and the handle to hire it under. Seeding is idempotent (an already-hired handle or singleton role is skipped), so this can also be run as a backfill on existing workspaces.",
+  "version": 2,
+  "description": "Agents pre-hired into every new workspace on onboarding. Each entry names a bundled recipe and the handle to hire it under. Seeding is idempotent (an already-hired handle or singleton role is skipped), so this can also be run as a backfill / reconciliation pass on existing workspaces.",
   "agents": [
+    {
+      "recipe_id": "enablement",
+      "handle": "enablement",
+      "blurb": "Owns the company's onboarding knowledge — what the company is, who's who, and how things work here.",
+      "note": "Enablement lead: owns the company-wide onboarding material. The more fundamental seed — every agent depends on company context even if it never hires."
+    },
     {
       "recipe_id": "hr-onboarding",
       "handle": "hr",
-      "note": "HR lead: coaches hiring in the wizard and stewards the onboarding doc."
+      "blurb": "Coaches you through hiring and helps write each new role.",
+      "note": "HR lead: coaches hiring in the wizard and points new hires to Enablement's onboarding material."
     }
   ]
 }

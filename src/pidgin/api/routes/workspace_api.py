@@ -185,14 +185,30 @@ class IntegrationConfigBody(BaseModel):
 
 @router.get("/agents")
 def api_list_agents(workspace_slug: str, request: Request) -> list[dict]:
+    from pidgin.hire.seed import seed_blurbs
+
     session = require_workspace_session(request, workspace_slug)
     agents = list_agents(session.conn)
+    # Pre-seeded agents (HR, Enablement) get a tag + short blurb on the team
+    # page. "Pre-seeded" = the agent's recipe is one the workspace seed manifest
+    # ships, so this stays correct as the seed list changes.
+    blurbs = seed_blurbs()
+    recipe_by_employee = {
+        row["id"]: row["recipe_id"]
+        for row in session.conn.execute(
+            """
+            SELECT e.id, s.recipe_id
+            FROM ai_employees e
+            JOIN ai_employee_recipe_snapshots s ON s.id = e.recipe_snapshot_id
+            """
+        ).fetchall()
+    }
     for agent in agents:
         conversation = get_agent_conversation(session.conn, agent["handle"])
-        if conversation is not None:
-            agent["conversation_id"] = conversation["id"]
-        else:
-            agent["conversation_id"] = None
+        agent["conversation_id"] = conversation["id"] if conversation else None
+        recipe_id = recipe_by_employee.get(agent["id"])
+        agent["is_preseeded"] = recipe_id in blurbs
+        agent["preseeded_blurb"] = blurbs.get(recipe_id)
     return agents
 
 

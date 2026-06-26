@@ -71,12 +71,17 @@ def test_admin_human_test_loop(client: TestClient) -> None:
 def test_api_create_and_agents(client: TestClient) -> None:
     slug = create_workspace(client, "UI Co")
 
-    # Every workspace ships with the HR agent pre-hired (it coaches hiring and
-    # stewards onboarding docs), so a fresh team is not empty.
+    # Every workspace ships with two agents pre-hired: HR (coaches hiring) and
+    # Enablement (owns the onboarding material), so a fresh team is not empty.
     agents = client.get(f"/{slug}/api/agents")
     assert agents.status_code == 200
-    handles = {agent["handle"] for agent in agents.json()}
-    assert handles == {"hr"}
+    by_handle = {agent["handle"]: agent for agent in agents.json()}
+    assert set(by_handle) == {"hr", "enablement"}
+
+    # Both are tagged pre-seeded with a short blurb for the team page.
+    for handle in ("hr", "enablement"):
+        assert by_handle[handle]["is_preseeded"] is True
+        assert by_handle[handle]["preseeded_blurb"]
 
 
 def test_hr_agent_endpoint_resolves_by_role(client: TestClient) -> None:

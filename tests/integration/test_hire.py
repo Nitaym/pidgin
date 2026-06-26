@@ -94,11 +94,11 @@ def test_hire_support_agent_creates_conversation(pidgin_home: Path, recipe_path:
     assert conversation["ai_employee_id"] == result["ai_employee_id"]
 
 
-def test_seed_manifest_lists_hr_agent() -> None:
+def test_seed_manifest_lists_hr_and_enablement_agents() -> None:
     seeds = load_seed_manifest()
     by_recipe = {seed.recipe_id: seed for seed in seeds}
-    assert "hr-onboarding" in by_recipe
     assert by_recipe["hr-onboarding"].handle == "hr"
+    assert by_recipe["enablement"].handle == "enablement"
 
 
 def test_seed_workspace_agents_is_idempotent(pidgin_home: Path) -> None:
@@ -112,18 +112,54 @@ def test_seed_workspace_agents_is_idempotent(pidgin_home: Path) -> None:
 
     hired = seed_workspace_agents(conn, paths_root=paths.root)
     assert "hr" in hired
+    assert "enablement" in hired
 
     agent = get_hr_agent(conn)
     assert agent is not None
     assert agent["handle"] == "hr"
 
-    # Re-running seeding must not duplicate the singleton HR agent.
+    # Re-running seeding must not duplicate the singleton agents.
     again = seed_workspace_agents(conn, paths_root=paths.root)
     assert again == []
-    hr_rows = conn.execute(
-        "SELECT id FROM ai_employees WHERE handle = 'hr'"
-    ).fetchall()
-    assert len(hr_rows) == 1
+    for handle in ("hr", "enablement"):
+        rows = conn.execute(
+            "SELECT id FROM ai_employees WHERE handle = ?", (handle,)
+        ).fetchall()
+        assert len(rows) == 1
+
+
+def test_reconcile_backfills_existing_workspace(pidgin_home: Path) -> None:
+    # A workspace seeded with only HR (as if created before Enablement existed)
+    # gains Enablement on the next reconciliation pass, without duplicating HR.
+    from pidgin.hire import TemplateHireRequest, hire_with_template
+    from pidgin.services.workspace import reconcile_workspace_agents
+
+    paths = create_workspace("Acme", "pw", slugify("Acme"), home=pidgin_home)
+    auth = json.loads(paths.auth_json.read_text(encoding="utf-8"))
+    conn = connect(paths.db_sqlite)
+    apply_migrations(conn)
+    init_workspace_db(conn, auth["workspace_id"], "Acme")
+    hire_with_template(
+        conn,
+        paths_root=paths.root,
+        request=TemplateHireRequest(
+            template_source="bundled", template_id="hr-onboarding", handle="hr"
+        ),
+    )
+    conn.close()
+
+    results = reconcile_workspace_agents(home=pidgin_home)
+    assert results[slugify("Acme")] == ["enablement"]
+
+    conn = connect(paths.db_sqlite)
+    handles = {
+        row["handle"]
+        for row in conn.execute("SELECT handle FROM ai_employees").fetchall()
+    }
+    assert {"hr", "enablement"} <= handles
+
+    # Converged: a second pass hires nothing.
+    assert reconcile_workspace_agents(home=pidgin_home)[slugify("Acme")] == []
 
 
 def test_resolve_permission_profile_from_recipe(recipe_path: Path) -> None:

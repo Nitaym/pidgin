@@ -66,6 +66,8 @@ export type Agent = {
   current_status: string;
   created_at: string;
   conversation_id?: string | null;
+  is_preseeded?: boolean;
+  preseeded_blurb?: string | null;
 };
 
 export type HireCustomization = import("../types/hire").HireCustomization;

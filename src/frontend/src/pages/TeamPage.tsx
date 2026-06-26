@@ -61,12 +61,20 @@ export function TeamPage() {
             {agents.map((agent) => (
               <li key={agent.id} className="team-agent-row">
                 <div>
-                  <Link to={`agents/${agent.handle}`}>{agent.display_name}</Link>
-                  <span className="muted">
-                    {" "}
-                    — {agent.role_title} (@{agent.handle}) ·{" "}
-                    {agent.current_status === "offboarded" ? "archived" : agent.current_status}
-                  </span>
+                  <div>
+                    <Link to={`agents/${agent.handle}`}>{agent.display_name}</Link>
+                    {agent.is_preseeded ? (
+                      <span className="chip team-preseeded-chip">Preseeded</span>
+                    ) : null}
+                    <span className="muted">
+                      {" "}
+                      — {agent.role_title} (@{agent.handle}) ·{" "}
+                      {agent.current_status === "offboarded" ? "archived" : agent.current_status}
+                    </span>
+                  </div>
+                  {agent.is_preseeded && agent.preseeded_blurb ? (
+                    <p className="muted team-agent-blurb">{agent.preseeded_blurb}</p>
+                  ) : null}
                 </div>
                 {agent.current_status !== "offboarded" ? (
                   <Link

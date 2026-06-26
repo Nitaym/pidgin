@@ -12,7 +12,12 @@ from fastapi import HTTPException
 from pidgin.db import apply_migrations, connect, init_workspace_db
 from pidgin.db.employees import ensure_operator_principal
 from pidgin.util.slug import normalize_slug, slugify
-from pidgin.workspace.manager import create_workspace, ensure_home, registry_path
+from pidgin.workspace.manager import (
+    WorkspacePaths,
+    create_workspace,
+    ensure_home,
+    registry_path,
+)
 
 log = logging.getLogger(__name__)
 
@@ -102,3 +107,45 @@ def create_workspace_with_db(
         display_name=display_name,
         path=str(paths.root),
     )
+
+
+def reconcile_workspace_agents(home: Path | None = None) -> dict[str, list[str]]:
+    """Ensure every registered workspace has the seed-manifest agents hired.
+
+    Reconciliation pass: the seed manifest (``recipes/workspace-seed.json``) is
+    the desired state; the hired agents are the actual state. Seeding is
+    idempotent — handles already taken and singleton roles already filled are
+    skipped — so running this repeatedly converges each workspace onto the
+    manifest without duplicating anything. That makes it safe to run at startup
+    and lets a newly added seed agent (e.g. Enablement) backfill into workspaces
+    created before it existed, with no hand-written migration.
+
+    Returns ``{workspace_slug: [newly hired handles]}``. A failure on one
+    workspace is logged and isolated — it never aborts the others.
+    """
+    from pidgin.hire import seed_workspace_agents
+
+    results: dict[str, list[str]] = {}
+    for workspace in list_registered_workspaces(home):
+        paths = WorkspacePaths(root=Path(workspace.path))
+        if not paths.db_sqlite.is_file():
+            log.warning(
+                "[reconcile] skipping %s: no db at %s",
+                workspace.slug,
+                paths.db_sqlite,
+            )
+            results[workspace.slug] = []
+            continue
+        try:
+            conn = connect(paths.db_sqlite)
+            apply_migrations(conn)
+            hired = seed_workspace_agents(conn, paths_root=paths.root)
+            if hired:
+                log.info(
+                    "[reconcile] %s: hired %s", workspace.slug, ", ".join(hired)
+                )
+            results[workspace.slug] = hired
+        except Exception:  # noqa: BLE001 — one workspace must not abort the rest
+            log.exception("[reconcile] failed for workspace %s", workspace.slug)
+            results[workspace.slug] = []
+    return results

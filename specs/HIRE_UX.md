@@ -135,9 +135,11 @@ Post-hire edits update `hire_customization_json` on the employee row and append 
 ## 5. Pidgin HR assist
 
 The hiring coach is the **pre-hired HR agent** (`hr-onboarding` recipe), seeded as a workspace
-singleton at workspace creation (handle `@hr`). The same agent both coaches hiring and stewards the
-onboarding doc (§AGENT_ONBOARDING). The chat panel renders its persona; suggestions come from the
-agent, not a hardcoded script.
+singleton at workspace creation (handle `@hr`). HR is now **hiring only** — coaching the owner
+through the wizard. Stewardship of the company onboarding material has moved to a separate
+pre-seeded **`@enablement`** agent ([AGENT_ONBOARDING.md](AGENT_ONBOARDING.md)); at hire completion
+HR simply points the new agent at Enablement's material. The chat panel renders HR's persona;
+suggestions come from the agent, not a hardcoded script.
 
 > Reverses the original MVP rule ("*not* a hired AI employee"). A keyword **stub** remains as the
 > offline fallback so the panel still answers and **hiring never blocks** when the LLM backend is
@@ -145,10 +147,11 @@ agent, not a hardcoded script.
 
 | Property | Rule |
 |----------|------|
-| Backed by | Pre-hired HR agent (`@hr`, singleton); keyword stub is the fallback only |
+| Backed by | Pre-hired HR agent (`@hr`, singleton, **hiring only**); keyword stub is the fallback only |
 | Always available | A **floating launcher** (bottom-right) is present on every workspace page and opens a docked HR chat. Hidden only on the HR agent's own full chat screen. |
 | Dedicated screen | "Consult a specialist" and the launcher both open the HR agent (`/agents/hr/chat`) — same agent, same thread |
 | Persona | HR / hiring advisor: clarifies role scope, recommends candidates, tightens wording |
+| Onboarding | **Not HR's job** — the pre-seeded `@enablement` agent owns the onboarding material; HR only points new hires to it ([AGENT_ONBOARDING.md](AGENT_ONBOARDING.md)) |
 | Form coach | On the brief steps the in-form **Discuss with Pidgin** panel still emits `pidgin-suggestion` → **Apply to form** / **Append to your take** |
 | Runtime | Real backend → agent persona reply; `stub` backend or any failure → keyword fallback; never blocks save/hire |
 

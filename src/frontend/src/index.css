@@ -1921,6 +1921,20 @@ button.secondary.is-selected {
   font-size: 0.75rem;
 }
 
+.team-preseeded-chip {
+  margin-left: var(--space-2);
+  vertical-align: middle;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.team-agent-blurb {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  max-width: 60ch;
+}
+
 .profile-hero {
   align-items: center;
   justify-content: space-between;

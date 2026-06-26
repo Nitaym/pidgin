@@ -21,11 +21,13 @@ DEFAULT_SUPPORT_RECIPE = (
 )
 SUPPORT_RECIPE_ID = "support-agent"
 HR_RECIPE_ID = "hr-onboarding"
+ENABLEMENT_RECIPE_ID = "enablement"
 
 # Roles that may exist at most once per workspace, mapped to a human label for errors.
 SINGLETON_RECIPES: dict[str, str] = {
     SUPPORT_RECIPE_ID: "Support agent",
     HR_RECIPE_ID: "HR agent",
+    ENABLEMENT_RECIPE_ID: "Enablement agent",
 }
 
 

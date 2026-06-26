@@ -15,6 +15,7 @@ from starlette.middleware.sessions import SessionMiddleware
 import pidgin.connectors  # noqa: F401 — register connector factories
 from pidgin.api.routes import auth, hooks, workspace_api, workspaces
 from pidgin.runtime.worker import BackgroundWorker
+from pidgin.services.workspace import reconcile_workspace_agents
 from pidgin.voice import routes as voice_routes
 
 # Configure logging early — runs in every worker process (including --reload workers)
@@ -55,7 +56,17 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         raw_home = app.state.pidgin_home
-        worker = BackgroundWorker(Path(raw_home) if raw_home else None)
+        home = Path(raw_home) if raw_home else None
+        # Reconcile the pre-seeded agents (Enablement, HR) across every existing
+        # workspace, so workspaces created before a seed agent was added gain it.
+        # Idempotent and isolated — never block startup if it fails.
+        try:
+            reconcile_workspace_agents(home)
+        except Exception:  # noqa: BLE001 — reconciliation must not block startup
+            logging.getLogger(__name__).exception(
+                "[startup] workspace agent reconciliation failed"
+            )
+        worker = BackgroundWorker(home)
         app.state.worker = worker
         worker.start()
         try:

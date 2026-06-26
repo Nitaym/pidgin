@@ -27,6 +27,7 @@ SEED_MANIFEST_PATH = (
 class SeedAgent:
     recipe_id: str
     handle: str | None = None
+    blurb: str | None = None
 
 
 def load_seed_manifest(path: Path | None = None) -> list[SeedAgent]:
@@ -40,8 +41,23 @@ def load_seed_manifest(path: Path | None = None) -> list[SeedAgent]:
         recipe_id = entry.get("recipe_id")
         if not recipe_id:
             continue
-        agents.append(SeedAgent(recipe_id=recipe_id, handle=entry.get("handle")))
+        agents.append(
+            SeedAgent(
+                recipe_id=recipe_id,
+                handle=entry.get("handle"),
+                blurb=entry.get("blurb"),
+            )
+        )
     return agents
+
+
+def seed_blurbs(path: Path | None = None) -> dict[str, str]:
+    """Map of seed recipe_id → short user-facing blurb, for the team page tag."""
+    return {
+        seed.recipe_id: seed.blurb
+        for seed in load_seed_manifest(path)
+        if seed.blurb
+    }
 
 
 def seed_workspace_agents(
