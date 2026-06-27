@@ -9,6 +9,23 @@ class ResourceUriError(ValueError):
     pass
 
 
+# Resource URI prefixes that differ from their connector_type slug
+# (CONNECTORS_SPEC §4 uses short prefixes like ``gdrive`` for ``google_drive``).
+_PREFIX_TO_CONNECTOR_TYPE = {
+    "gdrive": "google_drive",
+    "gmeet": "google_meet",
+}
+
+
+def connector_type_for_prefix(prefix: str) -> str:
+    """Map a resource URI prefix to its connector_type slug.
+
+    Most connectors use the same string for both; Google connectors use a
+    short URI prefix that differs from the catalog connector_type.
+    """
+    return _PREFIX_TO_CONNECTOR_TYPE.get(prefix, prefix)
+
+
 def parse_resource_uri(raw: str) -> ResourceUri:
     if ":" not in raw:
         raise ResourceUriError(f"Invalid resource URI (missing prefix): {raw}")

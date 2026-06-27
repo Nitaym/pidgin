@@ -6,7 +6,7 @@ from typing import Any
 
 from pidgin.connectors.base import ConnectorProtocol
 from pidgin.connectors.catalog import catalog_entry
-from pidgin.connectors.resources import parse_resource_uri
+from pidgin.connectors.resources import connector_type_for_prefix, parse_resource_uri
 from pidgin.connectors.types import ResourceUri
 
 ConnectorFactory = Callable[[dict[str, Any]], ConnectorProtocol]
@@ -74,9 +74,10 @@ def resolve_resource(conn: sqlite3.Connection, uri: str | ResourceUri) -> Connec
     if installation_id:
         return load_connector(conn, installation_id)
 
-    loaded = load_connector_by_type(conn, resource.prefix, active_only=True)
+    connector_type = connector_type_for_prefix(resource.prefix)
+    loaded = load_connector_by_type(conn, connector_type, active_only=True)
     if loaded is None:
-        raise KeyError(f"No active installation for connector type: {resource.prefix}")
+        raise KeyError(f"No active installation for connector type: {connector_type}")
     return loaded
 
 

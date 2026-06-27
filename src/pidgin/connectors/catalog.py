@@ -55,9 +55,12 @@ INTEGRATION_CATALOG: list[dict[str, Any]] = [
         "connector_type": "google_drive",
         "name": "Google Drive",
         "description": "Let agents read files and folders you grant access to.",
-        "auth_modes": ["oauth2", "manual"],
+        # Manual (service account) is the only wired auth path for now; OAuth
+        # (drive.readonly) is the shared Google flow and gets added back here
+        # once start_oauth/complete_oauth grow a google branch.
+        "auth_modes": ["manual"],
         "builtin": False,
-        "capabilities": ["read", "draft"],
+        "capabilities": ["read"],
         "oauth_scopes": ["https://www.googleapis.com/auth/drive.readonly"],
         "manual_fields": [
             {"key": "service_account_json", "label": "Service account JSON", "secret": True},

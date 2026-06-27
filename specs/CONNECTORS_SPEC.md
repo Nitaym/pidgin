@@ -312,8 +312,18 @@ Ingress from `external-unverified` cannot originate `execute` in the same turn (
 ### 11.3 Google Drive (`google_drive`)
 
 - **OAuth scopes:** `drive.readonly` MVP; `drive.file` when draft/create added
-- **Manual:** service account JSON + delegated user email
-- **Egress:** `read` exports text/plain or Google Doc → text for LLM context
+- **Manual:** service account JSON + delegated user email (domain-wide delegation)
+- **Egress:** `read` exports Google Docs/Sheets/Slides → text/CSV and downloads
+  other files via `alt=media`; folder reads list children as `gdrive:file/<id>`
+  lines. Output capped at ~32 KB ([AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md) §5.3).
+- **Resource prefix:** URIs use `gdrive:` (§4); the registry maps it to the
+  `google_drive` connector_type via `connector_type_for_prefix()` in `resources.py`.
+
+**Implementation status:** Manual (service account) auth is wired first — the
+catalog advertises `auth_modes: ["manual"]` until the shared Google OAuth flow
+(reused by `gmail` / `google_meet`) lands in `start_oauth` / `complete_oauth`.
+Service-account tokens are minted by signing an RS256 JWT (`PyJWT[crypto]`) and
+exchanging it at Google's `jwt-bearer` token endpoint — no token-refresh state.
 
 ### 11.4 Google Meet (`google_meet`)
 

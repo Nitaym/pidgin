@@ -8,7 +8,11 @@ import {
 } from "../api/client";
 import { IntegrationBrand } from "../components/IntegrationBrand";
 import { useApp } from "../context/AppContext";
-import { formatCapability, integrationMeta } from "../utils/integrationMeta";
+import {
+  formatCapability,
+  integrationMeta,
+  integrationSetupGuide,
+} from "../utils/integrationMeta";
 
 type AuthTab = "oauth" | "manual";
 
@@ -103,6 +107,7 @@ export function IntegrationDetailPage() {
   const isConnected = installation?.status === "active";
   const hasOAuth = catalogEntry.auth_modes.includes("oauth2");
   const hasManual = catalogEntry.auth_modes.includes("manual");
+  const setupGuide = integrationSetupGuide(connectorType);
 
   async function handleOAuth() {
     setBusy(true);
@@ -218,6 +223,49 @@ export function IntegrationDetailPage() {
             Connected as <strong>{installation.display_name}</strong>
             {healthMessage ? <> · {healthMessage}</> : null}
           </p>
+        ) : null}
+
+        {!isConnected && setupGuide ? (
+          <section className="brief-section integration-setup-guide">
+            <h3 className="brief-section-title">{setupGuide.title}</h3>
+            {setupGuide.intro ? (
+              <p className="muted field-hint" style={{ margin: 0 }}>
+                {setupGuide.intro}
+              </p>
+            ) : null}
+            <ol className="integration-setup-steps">
+              {setupGuide.steps.map((step, i) => (
+                <li key={i}>
+                  <span>{step.text}</span>
+                  {step.links && step.links.length > 0 ? (
+                    <span className="integration-setup-links">
+                      {step.links.map((link) => (
+                        <a
+                          key={link.href}
+                          href={link.href}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          {link.label} ↗
+                        </a>
+                      ))}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+            {setupGuide.docs ? (
+              <p className="muted field-hint" style={{ margin: 0 }}>
+                <a
+                  href={setupGuide.docs.href}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  {setupGuide.docs.label} ↗
+                </a>
+              </p>
+            ) : null}
+          </section>
         ) : null}
 
         {!isConnected ? (

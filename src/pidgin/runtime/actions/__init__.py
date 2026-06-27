@@ -13,6 +13,9 @@ from pidgin.util.ids import new_ulid, utc_now_iso
 
 log = logging.getLogger(__name__)
 
+# Hard ceiling on connector read output fed back to the LLM (AGENT_RUNTIME_SPEC §5.3).
+_READ_RESULT_CAP = 32 * 1024
+
 
 def execute_action(action_ctx: ActionContext, action: ProposedAction) -> str:
     if action.action_type == ActionType.SAY:
@@ -96,6 +99,7 @@ def _execute_read(action_ctx: ActionContext, action: ProposedAction) -> str:
         if conn is None:
             return "Read requires connector bridge (not configured)"
         from pidgin.connectors.registry import resolve_resource
+        from pidgin.connectors.resources import parse_resource_uri
         from pidgin.connectors.types import PrincipalContext
 
         connector = resolve_resource(conn, uri)
@@ -104,9 +108,14 @@ def _execute_read(action_ctx: ActionContext, action: ProposedAction) -> str:
             display_name=action_ctx.agent.display_name,
             trust_label=action_ctx.event.trust_label,
         )
-        # Connectors still use conn internally — resolved via workspace paths in future
-        _ = connector, principal
-        return f"Read not fully wired for {uri} (connector resolved)"
+        resource = parse_resource_uri(uri)
+        result = connector.read(conn, resource, principal=principal)
+        # Connectors cap their own output, but enforce a hard ceiling here too
+        # so a misbehaving connector can't blow up the next LLM invocation.
+        text = result.text[:_READ_RESULT_CAP]
+        if len(result.text) > _READ_RESULT_CAP:
+            text += "\n\n[... truncated ...]"
+        return f"Read {uri}:\n\n{text}" if text else f"Read {uri} (empty)"
     except Exception as exc:
         return f"Read failed: {exc}"
 
