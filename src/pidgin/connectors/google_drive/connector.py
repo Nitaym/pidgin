@@ -5,7 +5,11 @@ import sqlite3
 from typing import Any
 
 from pidgin.connectors.base import ConnectorProtocol, WriteMode
-from pidgin.connectors.google_drive.auth import DRIVE_READONLY_SCOPE, fetch_access_token
+from pidgin.connectors.google_drive.auth import (
+    DRIVE_READONLY_SCOPE,
+    DRIVE_WRITE_SCOPE,
+    fetch_access_token,
+)
 from pidgin.connectors.types import (
     ConnectorMetadata,
     HealthStatus,
@@ -17,6 +21,8 @@ from pidgin.connectors.types import (
 )
 
 DRIVE_API = "https://www.googleapis.com/drive/v3"
+UPLOAD_API = "https://www.googleapis.com/upload/drive/v3"
+TEXT_MIME = "text/plain; charset=utf-8"
 
 # Cap text handed back to the LLM (AGENT_RUNTIME_SPEC §5.3 ~32 KB).
 MAX_READ_BYTES = 32 * 1024
@@ -43,7 +49,7 @@ class GoogleDriveConnector:
         return ConnectorMetadata(
             connector_type=self.connector_type,
             display_name="Google Drive",
-            capabilities=("read",),
+            capabilities=("read", "write"),
         )
 
     # -- auth -------------------------------------------------------------
@@ -70,11 +76,11 @@ class GoogleDriveConnector:
         user = fields.get("delegated_user")
         return str(user) if user else None
 
-    def _access_token(self) -> str:
+    def _access_token(self, scope: str = DRIVE_READONLY_SCOPE) -> str:
         return fetch_access_token(
             self._service_account(),
             delegated_user=self._delegated_user(),
-            scope=DRIVE_READONLY_SCOPE,
+            scope=scope,
         )
 
     def _client(self, token: str) -> Any:
@@ -161,7 +167,7 @@ class GoogleDriveConnector:
             metadata={"count": len(files), "folder_id": folder_id},
         )
 
-    # -- write (not in MVP) ----------------------------------------------
+    # -- write ------------------------------------------------------------
 
     def write(
         self,
@@ -172,8 +178,59 @@ class GoogleDriveConnector:
         principal: PrincipalContext,
         mode: WriteMode,
     ) -> WriteResult:
-        _ = conn, resource, payload, principal, mode
-        raise ValueError("Google Drive write is not supported in the read-only MVP")
+        _ = conn, principal
+        # Creation is additive and ungated. Editing/deleting an existing file is
+        # a mutation that must be owner-approved — that gate isn't wired yet, so
+        # the connector only creates. A file-target write is therefore refused
+        # (this also closes any ungated path, e.g. via `post`).
+        if resource.kind == "file":
+            raise ValueError(
+                "Editing an existing Drive file requires owner approval, which is not "
+                "available yet — this connector can only create new files and folders."
+            )
+        if mode != "execute":
+            raise ValueError("Google Drive write requires execute mode")
+        if resource.kind != "folder":
+            raise ValueError(f"google_drive write unsupported kind: {resource.kind}")
+
+        token = self._access_token(DRIVE_WRITE_SCOPE)
+        with self._client(token) as client:
+            kind = str((payload.extra or {}).get("kind") or "file")
+            name = (payload.subject or "").strip() or "Untitled"
+            if kind == "folder":
+                return self._create_folder(client, parent_id=resource.resource_id, name=name)
+            return self._create_file(
+                client, parent_id=resource.resource_id, name=name, content=payload.text or ""
+            )
+
+    def _create_folder(self, client: Any, *, parent_id: str, name: str) -> WriteResult:
+        body = {"name": name, "mimeType": _FOLDER_MIME, "parents": [parent_id]}
+        resp = client.post(f"{DRIVE_API}/files", json=body, params={"fields": "id,name"})
+        self._raise_for_status(resp, f"create folder in {parent_id}")
+        data = resp.json()
+        return WriteResult(
+            handle=str(data.get("id") or ""),
+            external_ref={"id": data.get("id"), "name": data.get("name"), "kind": "folder"},
+        )
+
+    def _create_file(self, client: Any, *, parent_id: str, name: str, content: str) -> WriteResult:
+        # Two-step: create the metadata (with parent + name), then upload the
+        # body. Simpler and more robust than hand-rolling a multipart/related.
+        meta = {"name": name, "parents": [parent_id], "mimeType": "text/plain"}
+        resp = client.post(f"{DRIVE_API}/files", json=meta, params={"fields": "id,name"})
+        self._raise_for_status(resp, f"create file in {parent_id}")
+        file_id = str(resp.json().get("id") or "")
+        if content:
+            up = client.patch(
+                f"{UPLOAD_API}/files/{file_id}",
+                params={"uploadType": "media"},
+                content=content.encode("utf-8"),
+                headers={"Content-Type": TEXT_MIME},
+            )
+            self._raise_for_status(up, f"upload content to {file_id}")
+        return WriteResult(
+            handle=file_id, external_ref={"id": file_id, "name": name, "kind": "file"}
+        )
 
     # -- health -----------------------------------------------------------
 

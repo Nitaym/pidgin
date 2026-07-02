@@ -6,6 +6,9 @@ from typing import Any
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 JWT_BEARER_GRANT = "urn:ietf:params:oauth:grant-type:jwt-bearer"
 DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+# Full read/write scope — required to create/update files and folders. Reads
+# still mint a readonly-scoped token; only writes request this broader scope.
+DRIVE_WRITE_SCOPE = "https://www.googleapis.com/auth/drive"
 
 
 class ServiceAccountError(ValueError):

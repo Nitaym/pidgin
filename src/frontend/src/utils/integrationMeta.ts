@@ -18,7 +18,7 @@ const META: Record<string, IntegrationMeta> = {
     monogram: "G",
   },
   google_drive: {
-    tagline: "Let agents read files you grant access to",
+    tagline: "Read shared files, create new ones",
     accent: "#1a73e8",
     monogram: "D",
   },
@@ -62,7 +62,7 @@ const SETUP_GUIDES: Record<string, SetupGuide> = {
       {
         text: "Create (or pick) a Google Cloud project.",
         links: [
-          { label: "Google Cloud console", href: "https://console.cloud.google.com/projectcreate" },
+          { label: "Google Cloud console", href: "https://console.cloud.google.com/" },
         ],
       },
       {
@@ -75,7 +75,11 @@ const SETUP_GUIDES: Record<string, SetupGuide> = {
         ],
       },
       {
-        text: "Create a service account, then add a JSON key and download it.",
+        text:
+          "Create a service account — you can skip the optional “Grant access” " +
+          "(permissions) and “Principals with access” steps. Then open the “⋮” menu " +
+          "next to it → Manage keys → Add key → Create new key → JSON, and download " +
+          "the file.",
         links: [
           {
             label: "Service accounts",
@@ -85,24 +89,8 @@ const SETUP_GUIDES: Record<string, SetupGuide> = {
       },
       {
         text:
-          "To read a whole organisation's files, enable domain-wide delegation and authorise the scope " +
-          "https://www.googleapis.com/auth/drive.readonly in the Admin console, then set “Delegated user " +
-          "email” below to the user whose files agents should see.",
-        links: [
-          {
-            label: "Domain-wide delegation",
-            href: "https://admin.google.com/ac/owl/domainwidedelegation",
-          },
-        ],
-      },
-      {
-        text:
-          "For a single file or folder instead, share it with the service account's email address and leave " +
-          "“Delegated user email” blank.",
-      },
-      {
-        text:
-          "Paste the JSON key file's contents into “Service account JSON” below and save the connection.",
+          "Paste the JSON key below. Pidgin then shows two ways to grant access — " +
+          "organisation-wide or a single file/folder — using the Client ID from your key.",
       },
     ],
     docs: {

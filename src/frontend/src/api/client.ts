@@ -151,7 +151,7 @@ export type IntegrationCatalogEntry = {
   builtin?: boolean;
   capabilities: string[];
   oauth_scopes?: string[];
-  manual_fields?: Array<{ key: string; label: string; secret: boolean }>;
+  manual_fields?: Array<{ key: string; label: string; secret: boolean; multiline?: boolean }>;
 };
 
 export type IntegrationInstallation = {

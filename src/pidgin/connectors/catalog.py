@@ -54,16 +54,29 @@ INTEGRATION_CATALOG: list[dict[str, Any]] = [
     {
         "connector_type": "google_drive",
         "name": "Google Drive",
-        "description": "Let agents read files and folders you grant access to.",
+        "description": (
+            "Let agents read files you share with them and create new files and "
+            "folders. Editing or deleting existing files needs your approval."
+        ),
         # Manual (service account) is the only wired auth path for now; OAuth
         # (drive.readonly) is the shared Google flow and gets added back here
         # once start_oauth/complete_oauth grow a google branch.
         "auth_modes": ["manual"],
         "builtin": False,
-        "capabilities": ["read"],
-        "oauth_scopes": ["https://www.googleapis.com/auth/drive.readonly"],
+        "capabilities": ["read", "write"],
+        # Reads use drive.readonly; writes (create/update files & folders) need
+        # the broader drive scope. Both must be authorised for delegation.
+        "oauth_scopes": [
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/drive",
+        ],
         "manual_fields": [
-            {"key": "service_account_json", "label": "Service account JSON", "secret": True},
+            {
+                "key": "service_account_json",
+                "label": "Service account JSON",
+                "secret": True,
+                "multiline": True,
+            },
             {"key": "delegated_user", "label": "Delegated user email", "secret": False},
         ],
     },

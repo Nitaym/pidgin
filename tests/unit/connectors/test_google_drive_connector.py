@@ -187,18 +187,148 @@ def test_read_api_error_raises(monkeypatch: pytest.MonkeyPatch) -> None:
         _read(connector, ResourceUri(prefix="gdrive", kind="file", resource_id="ghost"))
 
 
-def test_write_not_supported(monkeypatch: pytest.MonkeyPatch) -> None:
+WriteHandler = Callable[[str, str, object], "FakeResponse"]
+
+
+class WriteFakeClient:
+    def __init__(self, handler: WriteHandler) -> None:
+        self._handler = handler
+        self.calls: list[tuple[str, str, dict[str, Any]]] = []
+
+    def __enter__(self) -> WriteFakeClient:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def post(
+        self, url: str, json: Any = None, params: dict[str, str] | None = None
+    ) -> FakeResponse:
+        self.calls.append(("POST", url, {"json": json, "params": params}))
+        return self._handler("POST", url, json)
+
+    def patch(
+        self,
+        url: str,
+        params: dict[str, str] | None = None,
+        content: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> FakeResponse:
+        self.calls.append(("PATCH", url, {"params": params, "content": content}))
+        return self._handler("PATCH", url, content)
+
+
+def _write_connector(
+    monkeypatch: pytest.MonkeyPatch, handler: WriteHandler, scopes: list[str]
+) -> tuple[GoogleDriveConnector, WriteFakeClient]:
+    connector = GoogleDriveConnector(
+        {
+            "id": "inst1",
+            "credentials_json": json.dumps(
+                {
+                    "auth_mode": "manual",
+                    "fields": {"service_account_json": '{"client_email":"x","private_key":"k"}'},
+                }
+            ),
+            "config_json": "{}",
+        }
+    )
+    client = WriteFakeClient(handler)
+    monkeypatch.setattr(connector, "_access_token", lambda scope=None: scopes.append(scope) or "t")
+    monkeypatch.setattr(connector, "_client", lambda token: client)
+    return connector, client
+
+
+def _write(connector: GoogleDriveConnector, resource: ResourceUri, payload: Any) -> Any:
+    return connector.write(
+        sqlite3.connect(":memory:"), resource, payload, principal=PRINCIPAL, mode="execute"
+    )
+
+
+def test_write_creates_file_in_folder(monkeypatch: pytest.MonkeyPatch) -> None:
     from pidgin.connectors.types import WritePayload
 
-    connector = _connector(monkeypatch, lambda p, q: FakeResponse())
-    conn = sqlite3.connect(":memory:")
-    with pytest.raises(ValueError, match="read-only MVP"):
+    def handler(method: str, url: str, body: object) -> FakeResponse:
+        if method == "POST" and url.endswith("/drive/v3/files"):
+            assert body == {"name": "Plan", "parents": ["FOLD"], "mimeType": "text/plain"}
+            return FakeResponse(payload={"id": "new1", "name": "Plan"})
+        if method == "PATCH" and "/upload/drive/v3/files/new1" in url:
+            assert body == b"body text"
+            return FakeResponse(payload={"id": "new1"})
+        raise AssertionError(f"unexpected {method} {url}")
+
+    scopes: list[str] = []
+    connector, _ = _write_connector(monkeypatch, handler, scopes)
+    result = _write(
+        connector,
+        ResourceUri(prefix="gdrive", kind="folder", resource_id="FOLD"),
+        WritePayload(text="body text", subject="Plan"),
+    )
+    assert result.handle == "new1"
+    assert result.external_ref["kind"] == "file"
+    assert scopes == ["https://www.googleapis.com/auth/drive"]  # write uses full scope
+
+
+def test_write_creates_folder(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.connectors.types import WritePayload
+
+    def handler(method: str, url: str, body: object) -> FakeResponse:
+        assert method == "POST" and url.endswith("/drive/v3/files")
+        assert body == {
+            "name": "Reports",
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": ["FOLD"],
+        }
+        return FakeResponse(payload={"id": "fold2", "name": "Reports"})
+
+    connector, client = _write_connector(monkeypatch, handler, [])
+    result = _write(
+        connector,
+        ResourceUri(prefix="gdrive", kind="folder", resource_id="FOLD"),
+        WritePayload(subject="Reports", extra={"kind": "folder"}),
+    )
+    assert result.external_ref["kind"] == "folder"
+    assert not any(c[0] == "PATCH" for c in client.calls)  # folders have no media upload
+
+
+def test_write_editing_existing_file_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Editing an existing file is a gated mutation; the create-only connector
+    # refuses it (no HTTP call is made).
+    from pidgin.connectors.types import WritePayload
+
+    connector, client = _write_connector(monkeypatch, lambda m, u, b: FakeResponse(), [])
+    with pytest.raises(ValueError, match="requires owner approval"):
+        _write(
+            connector,
+            ResourceUri(prefix="gdrive", kind="file", resource_id="f9"),
+            WritePayload(text="new contents"),
+        )
+    assert client.calls == []
+
+
+def test_write_draft_mode_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.connectors.types import WritePayload
+
+    connector, _ = _write_connector(monkeypatch, lambda m, u, b: FakeResponse(), [])
+    with pytest.raises(ValueError, match="requires execute mode"):
         connector.write(
-            conn,
-            ResourceUri(prefix="gdrive", kind="file", resource_id="x"),
-            WritePayload(text="hi"),
+            sqlite3.connect(":memory:"),
+            ResourceUri(prefix="gdrive", kind="folder", resource_id="F"),
+            WritePayload(text="hi", subject="doc"),
             principal=PRINCIPAL,
             mode="draft",
+        )
+
+
+def test_write_unsupported_kind_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.connectors.types import WritePayload
+
+    connector, _ = _write_connector(monkeypatch, lambda m, u, b: FakeResponse(), [])
+    with pytest.raises(ValueError, match="unsupported kind"):
+        _write(
+            connector,
+            ResourceUri(prefix="gdrive", kind="comment", resource_id="x"),
+            WritePayload(text="hi"),
         )
 
 

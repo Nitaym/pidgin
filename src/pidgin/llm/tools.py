@@ -53,6 +53,38 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
             "required": ["resource_uri"],
         },
     ),
+    "execute": ToolSpec(
+        name="execute",
+        description=(
+            "Create new content in a connector resource — e.g. add a file to Google "
+            "Drive. Target the parent folder URI (gdrive:folder/<id>) and set `name` "
+            "(and `kind` for a subfolder). Creating is additive; editing or deleting "
+            "existing files is a separate, owner-approved action and is not done here."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "resource_uri": {
+                    "type": "string",
+                    "description": "Parent folder to create inside, e.g. gdrive:folder/<id>.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "File body text. Omit when creating a folder.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Name of the new file or folder.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["file", "folder"],
+                    "description": "What to create in the target folder. Defaults to file.",
+                },
+            },
+            "required": ["resource_uri"],
+        },
+    ),
     "schedule_self": ToolSpec(
         name="schedule_self",
         description=(

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import {
   api,
@@ -15,6 +15,25 @@ import {
 } from "../utils/integrationMeta";
 
 type AuthTab = "oauth" | "manual";
+
+const GOOGLE_DELEGATION_URL = "https://admin.google.com/ac/owl/domainwidedelegation";
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="integration-copy-btn"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
 
 export function IntegrationDetailPage() {
   const { connectorType = "" } = useParams();
@@ -77,6 +96,26 @@ export function IntegrationDetailPage() {
     [catalogEntry],
   );
 
+  // Parse a pasted service-account key so we can show the operator the exact
+  // Client ID / service-account email their access-grant steps need. Returns
+  // null while the JSON is still incomplete (mid-paste) or absent.
+  const serviceAccount = useMemo(() => {
+    const raw = manualFields["service_account_json"];
+    if (!raw || !raw.trim()) return null;
+    try {
+      const obj = JSON.parse(raw) as { client_id?: string; client_email?: string };
+      if (obj.client_id || obj.client_email) {
+        return {
+          clientId: String(obj.client_id ?? ""),
+          clientEmail: String(obj.client_email ?? ""),
+        };
+      }
+    } catch {
+      // incomplete/invalid JSON while typing — no options yet
+    }
+    return null;
+  }, [manualFields]);
+
   if (!connectorType) {
     return <Navigate to="../integrations" replace />;
   }
@@ -105,9 +144,20 @@ export function IntegrationDetailPage() {
   }
 
   const isConnected = installation?.status === "active";
+  // Surface the connector's own health/error text: prefer the fresh result from
+  // a just-run check, fall back to the last message persisted in config_json.
+  const healthDetail =
+    healthMessage ??
+    (typeof installation?.config_json?.last_health_message === "string"
+      ? (installation.config_json.last_health_message as string)
+      : undefined);
   const hasOAuth = catalogEntry.auth_modes.includes("oauth2");
   const hasManual = catalogEntry.auth_modes.includes("manual");
   const setupGuide = integrationSetupGuide(connectorType);
+  const oauthScopes =
+    catalogEntry.oauth_scopes && catalogEntry.oauth_scopes.length > 0
+      ? catalogEntry.oauth_scopes
+      : ["https://www.googleapis.com/auth/drive.readonly"];
 
   async function handleOAuth() {
     setBusy(true);
@@ -326,18 +376,96 @@ export function IntegrationDetailPage() {
                   />
                 </div>
                 {(catalogEntry.manual_fields ?? []).map((field) => (
-                  <div key={field.key} className="field">
-                    <label htmlFor={`manual-${field.key}`}>{field.label}</label>
-                    <input
-                      id={`manual-${field.key}`}
-                      type={field.secret ? "password" : "text"}
-                      value={manualFields[field.key] ?? ""}
-                      onChange={(e) =>
-                        setManualFields((prev) => ({ ...prev, [field.key]: e.target.value }))
-                      }
-                      autoComplete="off"
-                    />
-                  </div>
+                  <Fragment key={field.key}>
+                    <div className="field">
+                      <label htmlFor={`manual-${field.key}`}>{field.label}</label>
+                      {field.multiline ? (
+                        <textarea
+                          id={`manual-${field.key}`}
+                          className="integration-json-input"
+                          rows={8}
+                          value={manualFields[field.key] ?? ""}
+                          onChange={(e) =>
+                            setManualFields((prev) => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                          autoComplete="off"
+                          spellCheck={false}
+                          placeholder="Paste the full service account JSON key file"
+                        />
+                      ) : (
+                        <input
+                          id={`manual-${field.key}`}
+                          type={field.secret ? "password" : "text"}
+                          value={manualFields[field.key] ?? ""}
+                          onChange={(e) =>
+                            setManualFields((prev) => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                          autoComplete="off"
+                        />
+                      )}
+                    </div>
+                    {field.key === "service_account_json" && serviceAccount ? (
+                      <div className="integration-access-options">
+                        <p className="muted field-hint" style={{ margin: 0 }}>
+                          Key detected. Now grant it access one of two ways:
+                        </p>
+
+                        <div className="integration-access-option">
+                          <h4>Read a whole organisation</h4>
+                          <p className="muted field-hint" style={{ margin: 0 }}>
+                            Impersonate a user so agents read everything that user can. In the
+                            Google Admin console open{" "}
+                            <a
+                              href={GOOGLE_DELEGATION_URL}
+                              target="_blank"
+                              rel="noreferrer noopener"
+                            >
+                              Domain-wide delegation ↗
+                            </a>{" "}
+                            → <strong>Add new</strong>, and authorise:
+                          </p>
+                          <dl className="integration-meta-list integration-access-kv">
+                            <div>
+                              <dt>Client ID</dt>
+                              <dd>
+                                <code>{serviceAccount.clientId}</code>
+                                <CopyButton value={serviceAccount.clientId} />
+                              </dd>
+                            </div>
+                            <div>
+                              <dt>OAuth scopes</dt>
+                              <dd>
+                                {oauthScopes.map((scope) => (
+                                  <code key={scope}>{scope}</code>
+                                ))}
+                                <CopyButton value={oauthScopes.join(", ")} />
+                              </dd>
+                            </div>
+                          </dl>
+                          <p className="muted field-hint" style={{ margin: 0 }}>
+                            Then set <strong>Delegated user email</strong> below to that user.
+                          </p>
+                        </div>
+
+                        <div className="integration-access-option">
+                          <h4>Read a single file or folder</h4>
+                          <p className="muted field-hint" style={{ margin: 0 }}>
+                            Share it in Google Drive with the service account, and leave{" "}
+                            <strong>Delegated user email</strong> below blank:
+                          </p>
+                          <dl className="integration-meta-list integration-access-kv">
+                            <div>
+                              <dt>Service account</dt>
+                              <dd>
+                                <code>{serviceAccount.clientEmail}</code>
+                                <CopyButton value={serviceAccount.clientEmail} />
+                              </dd>
+                            </div>
+                          </dl>
+                        </div>
+                      </div>
+                    ) : null}
+                  </Fragment>
                 ))}
                 <div className="row hire-page-actions">
                   <button type="button" disabled={busy} onClick={() => void handleManualConnect()}>
@@ -365,6 +493,18 @@ export function IntegrationDetailPage() {
                 <dt>Display name</dt>
                 <dd>{installation.display_name}</dd>
               </div>
+              {healthDetail ? (
+                <div>
+                  <dt>{installation.status === "errored" ? "Error" : "Details"}</dt>
+                  <dd
+                    className={`integration-health-detail${
+                      installation.status === "errored" ? " integration-health-error" : ""
+                    }`}
+                  >
+                    {healthDetail}
+                  </dd>
+                </div>
+              ) : null}
               {installation.last_health_check_at ? (
                 <div>
                   <dt>Last health check</dt>

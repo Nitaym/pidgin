@@ -311,11 +311,19 @@ Ingress from `external-unverified` cannot originate `execute` in the same turn (
 
 ### 11.3 Google Drive (`google_drive`)
 
-- **OAuth scopes:** `drive.readonly` MVP; `drive.file` when draft/create added
+- **OAuth scopes:** `drive.readonly` for reads; full `drive` for writes. Reads
+  and writes mint separately-scoped tokens, so both scopes must be authorised for
+  domain-wide delegation.
 - **Manual:** service account JSON + delegated user email (domain-wide delegation)
-- **Egress:** `read` exports Google Docs/Sheets/Slides → text/CSV and downloads
+- **Egress `read`:** exports Google Docs/Sheets/Slides → text/CSV and downloads
   other files via `alt=media`; folder reads list children as `gdrive:file/<id>`
   lines. Output capped at ~32 KB ([AGENT_RUNTIME_SPEC.md](AGENT_RUNTIME_SPEC.md) §5.3).
+- **Egress `execute` (write):** creates **new** content only — a file
+  (`gdrive:folder/<id>` + `name` + `content`) or a subfolder (`kind: folder`).
+  Surfaced via the `execute` tool, gated by `can_write`. **Creation is additive
+  and not owner-approved.** Editing or deleting an existing file is a gated
+  mutation — the connector refuses a file-target write until the Phase 3 approval
+  inbox (§10) is wired, so no ungated edit/delete path exists.
 - **Resource prefix:** URIs use `gdrive:` (§4); the registry maps it to the
   `google_drive` connector_type via `connector_type_for_prefix()` in `resources.py`.
 

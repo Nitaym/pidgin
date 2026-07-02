@@ -24,6 +24,8 @@ def execute_action(action_ctx: ActionContext, action: ProposedAction) -> str:
         return _execute_post(action_ctx, action)
     if action.action_type == ActionType.READ:
         return _execute_read(action_ctx, action)
+    if action.action_type == ActionType.EXECUTE:
+        return _execute_execute(action_ctx, action)
     if action.action_type == ActionType.REMEMBER:
         return _execute_remember(action_ctx, action)
     if action.action_type == ActionType.RECALL:
@@ -118,6 +120,46 @@ def _execute_read(action_ctx: ActionContext, action: ProposedAction) -> str:
         return f"Read {uri}:\n\n{text}" if text else f"Read {uri} (empty)"
     except Exception as exc:
         return f"Read failed: {exc}"
+
+
+def _execute_execute(action_ctx: ActionContext, action: ProposedAction) -> str:
+    """Create/update a connector resource (e.g. write a file to Drive).
+
+    Only reached after the gate accepts the action as EXECUTED — external
+    writes are staged for owner approval by policy before landing here.
+    """
+    uri = str(action.params.get("resource_uri") or "")
+    if not uri:
+        return "Missing resource_uri"
+    conn = action_ctx.workspace.db_bridge
+    if conn is None:
+        return "Write requires connector bridge (not configured)"
+    from pidgin.connectors.registry import resolve_resource
+    from pidgin.connectors.resources import parse_resource_uri
+    from pidgin.connectors.types import PrincipalContext, WritePayload
+
+    try:
+        resource = parse_resource_uri(uri)
+        connector = resolve_resource(conn, resource)
+        payload = WritePayload(
+            text=str(action.params.get("content") or ""),
+            subject=(str(action.params.get("name") or "").strip() or None),
+            extra={"kind": str(action.params.get("kind") or "file")},
+        )
+        result = connector.write(
+            conn,
+            resource,
+            payload,
+            principal=PrincipalContext(
+                principal_id=action_ctx.agent.agent_principal_id,
+                display_name=action_ctx.agent.display_name,
+                trust_label=action_ctx.event.trust_label,
+            ),
+            mode="execute",
+        )
+        return f"Wrote {resource} (ref={result.external_ref})"
+    except Exception as exc:
+        return f"Write failed: {exc}"
 
 
 def _execute_schedule_self(action_ctx: ActionContext, action: ProposedAction) -> str:
