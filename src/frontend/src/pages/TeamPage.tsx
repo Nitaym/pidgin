@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import { api, type Agent } from "../api/client";
 import { useApp } from "../context/AppContext";
+import type { LayoutOutletContext } from "../components/Layout";
 
 export function TeamPage() {
   const { workspace, user, refresh } = useApp();
+  const { openChat } = useOutletContext<LayoutOutletContext>();
   const slug = workspace?.slug ?? "";
   const [agents, setAgents] = useState<Agent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -126,12 +128,13 @@ export function TeamPage() {
                       </button>
                     ) : null}
                     {!archived ? (
-                      <Link
-                        to={`agents/${agent.handle}/chat`}
-                        className="btn secondary team-chat-btn"
+                      <button
+                        type="button"
+                        className="btn team-chat-btn"
+                        onClick={() => openChat(agent.handle)}
                       >
                         Chat
-                      </Link>
+                      </button>
                     ) : null}
                   </div>
                 </div>

@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Agent } from "../api/client";
-import { ChatModal } from "./ChatModal";
 import { onReadChange, unreadCount } from "../utils/chatUnread";
 
 type SidebarChatProps = {
   slug: string;
   base: string;
+  /** Opens the shared Messages modal (owned by Layout), defaulting to the first agent. */
+  onOpen: () => void;
 };
 
-export function SidebarChat({ slug, base: _base }: SidebarChatProps) {
+export function SidebarChat({ slug, base: _base, onOpen }: SidebarChatProps) {
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [chatOpen, setChatOpen] = useState(false);
   const [unread, setUnread] = useState(0);
 
   useEffect(() => {
@@ -53,22 +53,18 @@ export function SidebarChat({ slug, base: _base }: SidebarChatProps) {
   if (chatAgents.length === 0) return null;
 
   return (
-    <>
-      <div className="sidebar-section">
-        <p className="sidebar-section-label">Chat</p>
-        <button
-          className="sidebar-chat-btn"
-          onClick={() => setChatOpen(true)}
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="sidebar-chat-icon">
-            <path d="M14 1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h2v3l3-3h7a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1z" fill="currentColor" opacity=".9"/>
-          </svg>
-          Messages
-          {unread > 0 && <span className="sidebar-chat-badge">{unread}</span>}
-        </button>
-      </div>
-
-      {chatOpen && <ChatModal onClose={() => setChatOpen(false)} />}
-    </>
+    <div className="sidebar-section">
+      <p className="sidebar-section-label">Chat</p>
+      <button
+        className="sidebar-chat-btn"
+        onClick={onOpen}
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="sidebar-chat-icon">
+          <path d="M14 1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h2v3l3-3h7a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1z" fill="currentColor" opacity=".9"/>
+        </svg>
+        Messages
+        {unread > 0 && <span className="sidebar-chat-badge">{unread}</span>}
+      </button>
+    </div>
   );
 }

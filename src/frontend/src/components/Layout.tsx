@@ -1,4 +1,6 @@
+import { useCallback, useState } from "react";
 import { NavLink, Outlet, useParams } from "react-router-dom";
+import { ChatModal } from "./ChatModal";
 import { HrChatLauncher } from "./HrChatLauncher";
 import { PidginLogo } from "./PidginLogo";
 import { SidebarChat } from "./SidebarChat";
@@ -8,10 +10,20 @@ type LayoutProps = {
   showNav?: boolean;
 };
 
+export type LayoutOutletContext = {
+  /** Opens the same Messages modal as the sidebar's "Messages" link, optionally
+   * pre-selected to one agent's thread. */
+  openChat: (handle?: string) => void;
+};
+
 export function Layout({ showNav = true }: LayoutProps) {
   const { workspace, user } = useApp();
   const { workspaceSlug = workspace?.slug ?? "" } = useParams();
   const base = workspaceSlug ? `/${workspaceSlug}` : "";
+  const [chatModal, setChatModal] = useState<{ handle?: string } | null>(null);
+
+  const openChat = useCallback((handle?: string) => setChatModal({ handle }), []);
+  const closeChat = useCallback(() => setChatModal(null), []);
 
   return (
     <div className="layout">
@@ -40,7 +52,7 @@ export function Layout({ showNav = true }: LayoutProps) {
               <p className="sidebar-section-label">Workforce</p>
               <NavLink to={`${base}/hire`}>Hire a role</NavLink>
             </div>
-            <SidebarChat slug={workspace.slug} base={base} />
+            <SidebarChat slug={workspace.slug} base={base} onOpen={() => openChat()} />
             <div className="sidebar-section">
               <p className="sidebar-section-label">System</p>
               <NavLink to={`${base}/integrations`}>Integrations</NavLink>
@@ -56,9 +68,12 @@ export function Layout({ showNav = true }: LayoutProps) {
         {user ? <div className="user-line">{user.name || user.email}</div> : null}
       </aside>
       <main className="main">
-        <Outlet />
+        <Outlet context={{ openChat } satisfies LayoutOutletContext} />
       </main>
-      {workspace ? <HrChatLauncher /> : null}
+      {workspace && !chatModal ? <HrChatLauncher /> : null}
+      {workspace && chatModal ? (
+        <ChatModal initialHandle={chatModal.handle} onClose={closeChat} />
+      ) : null}
     </div>
   );
 }

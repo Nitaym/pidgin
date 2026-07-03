@@ -6,13 +6,15 @@ import { markRead } from "../utils/chatUnread";
 
 type ChatModalProps = {
   onClose: () => void;
+  /** Pre-select this agent's thread on open, instead of defaulting to the first. */
+  initialHandle?: string;
 };
 
-export function ChatModal({ onClose }: ChatModalProps) {
+export function ChatModal({ onClose, initialHandle }: ChatModalProps) {
   const { workspace } = useApp();
   const slug = workspace?.slug ?? "";
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [selectedHandle, setSelectedHandle] = useState<string | null>(null);
+  const [selectedHandle, setSelectedHandle] = useState<string | null>(initialHandle ?? null);
 
   useEffect(() => {
     if (!slug) return;
@@ -23,11 +25,12 @@ export function ChatModal({ onClose }: ChatModalProps) {
         (a) => a.current_status !== "offboarded",
       );
       setAgents(chatAgents);
-      if (chatAgents.length > 0) {
-        setSelectedHandle(chatAgents[0].handle);
-      }
+      const preselected = initialHandle && chatAgents.some((a) => a.handle === initialHandle)
+        ? initialHandle
+        : chatAgents[0]?.handle;
+      if (preselected) setSelectedHandle(preselected);
     });
-  }, [slug]);
+  }, [slug, initialHandle]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {

@@ -1109,6 +1109,7 @@ tbody tr:hover {
 }
 
 a.btn,
+button.btn,
 .btn.google {
   display: inline-flex;
   align-items: center;
@@ -1123,6 +1124,7 @@ a.btn,
 }
 
 a.btn:hover,
+button.btn:hover,
 .btn.google:hover {
   background: var(--accent-hover);
   text-decoration: none;
