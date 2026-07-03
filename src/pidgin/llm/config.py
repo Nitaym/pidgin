@@ -23,7 +23,7 @@ def load_llm_config(settings_json: str | None) -> LlmConfig:
         backend = "stub"
     return LlmConfig(
         default_backend=backend,
-        default_model=str(llm.get("default_model", "claude-sonnet-4-20250514")),
+        default_model=str(llm.get("default_model", "claude-haiku-4-5-20251001")),
         budgets=LlmBudget(
             max_invocations_per_turn=int(budgets.get("max_invocations_per_turn", 10)),
         ),

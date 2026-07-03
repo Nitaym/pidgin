@@ -1,5 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { VoiceDiagnosticModal } from "../components/VoiceDiagnosticModal";
+import { api } from "../api/client";
+import type { LlmModelOption } from "../api/client";
+import { useApp } from "../context/AppContext";
 
 const STT_OPTIONS = [
   { value: "openai", label: "OpenAI Whisper" },
@@ -12,6 +15,88 @@ const TTS_OPTIONS = [
   { value: "elevenlabs", label: "ElevenLabs" },
   { value: "openai", label: "OpenAI TTS" },
 ] as const;
+
+function ModelSettings() {
+  const { workspace } = useApp();
+  const slug = workspace?.slug ?? "";
+  const [models, setModels] = useState<LlmModelOption[]>([]);
+  const [model, setModel] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!slug) return;
+    api
+      .getLlmSettings(slug)
+      .then((settings) => {
+        setModels(settings.available_models);
+        setModel(settings.default_model);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false));
+  }, [slug]);
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      const settings = await api.saveLlmSettings(slug, model);
+      setModel(settings.default_model);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const selected = models.find((m) => m.id === model);
+
+  return (
+    <section className="brief-section">
+      <h3 className="brief-section-title">Model</h3>
+      <div className="panel stack" style={{ padding: "20px 24px", gap: 20 }}>
+        {loading ? (
+          <p className="field-hint">Loading…</p>
+        ) : (
+          <>
+            <div className="field">
+              <label htmlFor="model-select">Default model for agent chat</label>
+              <select
+                id="model-select"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+              >
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label} — {m.tier}
+                    {m.recommended ? " (recommended)" : ""}
+                  </option>
+                ))}
+              </select>
+              {selected && <p className="field-hint">{selected.description}</p>}
+            </div>
+
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <button type="button" onClick={handleSave} disabled={saving || !model}>
+                Save
+              </button>
+              {saved && (
+                <span style={{ fontSize: 13, color: "var(--success)" }}>Saved ✓</span>
+              )}
+              {error && (
+                <span style={{ fontSize: 13, color: "var(--danger, #c33)" }}>{error}</span>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
 
 export function SettingsPage() {
   const [stt, setStt] = useState(() => localStorage.getItem("voice_stt") ?? "openai");
@@ -34,6 +119,8 @@ export function SettingsPage() {
           <h2>Settings</h2>
         </div>
       </div>
+
+      <ModelSettings />
 
       <section className="brief-section">
         <h3 className="brief-section-title">Voice</h3>

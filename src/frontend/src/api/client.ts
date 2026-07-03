@@ -212,6 +212,19 @@ export type LlmInvocation = {
   response: LlmResponse | null;
 };
 
+export type LlmModelOption = {
+  id: string;
+  label: string;
+  tier: string;
+  description: string;
+  recommended: boolean;
+};
+
+export type LlmSettings = {
+  default_model: string;
+  available_models: LlmModelOption[];
+};
+
 function workspaceBase(slug: string) {
   return `/${slug}/api`;
 }
@@ -458,6 +471,13 @@ export const api = {
       `${workspaceBase(slug)}/integrations/${installationId}/config`,
       { method: "PATCH", body: JSON.stringify({ config }) },
     ),
+  getLlmSettings: (slug: string) =>
+    request<LlmSettings>(`${workspaceBase(slug)}/llm-settings`),
+  saveLlmSettings: (slug: string, defaultModel: string) =>
+    request<LlmSettings>(`${workspaceBase(slug)}/llm-settings`, {
+      method: "PUT",
+      body: JSON.stringify({ default_model: defaultModel }),
+    }),
 };
 
 export function googleLoginUrl() {

@@ -76,5 +76,5 @@ class LlmBudget(BaseModel):
 
 class LlmConfig(BaseModel):
     default_backend: Literal["stub", "anthropic", "litellm"] = "stub"
-    default_model: str = "claude-sonnet-4-20250514"
+    default_model: str = "claude-haiku-4-5-20251001"
     budgets: LlmBudget = Field(default_factory=LlmBudget)

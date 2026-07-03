@@ -77,6 +77,7 @@ from pidgin.services.integrations import (
     start_oauth,
     update_integration_config,
 )
+from pidgin.services.settings import SettingsError, get_llm_settings, save_llm_settings
 from pidgin.templates import (
     TemplateError,
     create_workspace_template,
@@ -154,6 +155,10 @@ class CandidateFinderTurn(BaseModel):
 class CandidateFinderBody(BaseModel):
     message: str = Field(min_length=1)
     history: list[CandidateFinderTurn] = Field(default_factory=list)
+
+
+class LlmSettingsBody(BaseModel):
+    default_model: str = Field(min_length=1)
 
 
 class CommonInstructionsBody(BaseModel):
@@ -494,6 +499,25 @@ def api_patch_agent_brief(
         )
     except BriefError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/llm-settings")
+def api_get_llm_settings(workspace_slug: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    return get_llm_settings(session.conn)
+
+
+@router.put("/llm-settings")
+def api_save_llm_settings(
+    workspace_slug: str,
+    body: LlmSettingsBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    try:
+        return save_llm_settings(session.conn, default_model=body.default_model)
+    except SettingsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/common-instructions")
