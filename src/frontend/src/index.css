@@ -791,58 +791,74 @@ button.danger:disabled {
 
 .chat-compose {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: var(--space-2);
   background: var(--bg-elevated);
   border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
-  transition: border-color 0.15s;
+  border-radius: 24px;
+  padding: var(--space-4) var(--space-4) var(--space-3);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .chat-compose:focus-within {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .chat-input {
-  flex: 1;
+  width: 100%;
   background: transparent;
   border: none;
   outline: none;
   color: var(--text-primary);
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   line-height: 1.5;
   resize: none;
-  padding: var(--space-2) 0;
+  padding: 0;
+  min-height: 24px;
   max-height: 160px;
   overflow-y: auto;
   font-family: inherit;
+}
+
+/* The chat box itself shows the focus ring (.chat-compose:focus-within above)
+   — override the global textarea:focus ring so it isn't duplicated on just
+   the inner textarea. */
+.chat-input:focus {
+  border: none;
+  box-shadow: none;
 }
 
 .chat-input::placeholder {
   color: var(--text-tertiary);
 }
 
-/* Voice toggle button (in compose bar) */
-.chat-voice-toggle {
+.chat-compose-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Plain icon button (voice toggle) in the compose toolbar */
+.chat-icon-btn {
   flex-shrink: 0;
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  background: var(--accent);
+  background: transparent;
   border: none;
-  color: #fff;
+  color: var(--text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.15s, box-shadow 0.15s;
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 40%, transparent);
+  transition: background 0.15s, color 0.15s;
 }
 
-.chat-voice-toggle:hover {
-  transform: scale(1.08);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 50%, transparent);
+.chat-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* Voice panel — replaces compose bar */
@@ -981,9 +997,9 @@ button.danger:disabled {
 
 .chat-send-btn {
   flex-shrink: 0;
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   background: var(--accent);
   border: none;
   color: #fff;

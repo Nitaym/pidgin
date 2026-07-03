@@ -104,6 +104,11 @@ export function ChatView({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, draft]);
 
+  // Default focus to the composer whenever the chat is ready and not mid-voice-mode.
+  useEffect(() => {
+    if (!loading && !voiceMode) textareaRef.current?.focus();
+  }, [loading, voiceMode, agentHandle]);
+
   function resizeTextarea() {
     const el = textareaRef.current;
     if (!el) return;
@@ -420,26 +425,29 @@ export function ChatView({
               onKeyDown={handleKeyDown}
               placeholder={`Message ${displayName}…`}
               disabled={streaming}
+              autoFocus
             />
-            <button
-              type="button"
-              className="chat-voice-toggle"
-              aria-label="Switch to voice"
-              title="Voice conversation"
-              onClick={() => { void enterVoiceMode(); }}
-            >
-              <MicIcon />
-            </button>
-            <button
-              type="submit"
-              className="chat-send-btn"
-              disabled={streaming || !body.trim()}
-              aria-label="Send"
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M14 8L2 2l2.5 6L2 14l12-6z" fill="currentColor"/>
-              </svg>
-            </button>
+            <div className="chat-compose-toolbar">
+              <button
+                type="button"
+                className="chat-icon-btn"
+                aria-label="Switch to voice"
+                title="Voice conversation"
+                onClick={() => { void enterVoiceMode(); }}
+              >
+                <MicIcon size={22} />
+              </button>
+              <button
+                type="submit"
+                className="chat-send-btn"
+                disabled={streaming || !body.trim()}
+                aria-label="Send"
+              >
+                <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+                  <path d="M14 8L2 2l2.5 6L2 14l12-6z" fill="currentColor"/>
+                </svg>
+              </button>
+            </div>
           </form>
         )}
         {!voiceMode && <p className="chat-footer-hint">Enter to send · Shift+Enter for new line</p>}
