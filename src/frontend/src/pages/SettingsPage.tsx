@@ -16,6 +16,124 @@ const TTS_OPTIONS = [
   { value: "openai", label: "OpenAI TTS" },
 ] as const;
 
+function ResetMemorySection() {
+  const { workspace } = useApp();
+  const slug = workspace?.slug ?? "";
+  const workspaceName = workspace?.display_name ?? "";
+  const [open, setOpen] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [resetting, setResetting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function closeModal() {
+    if (resetting) return;
+    setOpen(false);
+    setConfirmText("");
+    setError(null);
+  }
+
+  async function handleReset() {
+    setResetting(true);
+    setError(null);
+    try {
+      await api.resetMemory(slug, confirmText);
+      window.location.href = `/${slug}/`;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setResetting(false);
+    }
+  }
+
+  return (
+    <section className="brief-section">
+      <h3 className="brief-section-title">Danger zone</h3>
+      <div className="panel stack" style={{ padding: "20px 24px", gap: 12 }}>
+        <p className="field-hint" style={{ margin: 0 }}>
+          Permanently wipes every agent, conversation, task, and memory journal in this
+          workspace, then re-runs onboarding from day 0. Your login and connected
+          integrations (Google Drive, Slack, etc.) are kept.
+        </p>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button type="button" className="secondary" onClick={() => setOpen(true)}>
+            Reset workspace memory
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 1000,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
+        >
+          <div
+            className="panel stack"
+            style={{ width: "min(520px, 100%)", padding: 0, gap: 0, overflow: "hidden" }}
+          >
+            <div
+              style={{
+                display: "flex", gap: 12, padding: "16px 24px",
+                background: "var(--danger-bg)", borderBottom: "1px solid var(--border-strong)",
+              }}
+            >
+              <span style={{ fontSize: 18, lineHeight: 1 }}>⚠️</span>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: "var(--text-secondary)" }}>
+                <li>Resetting a workspace&apos;s memory cannot be undone.</li>
+                <li>
+                  Every agent, conversation, task, and memory journal is deleted. Your
+                  login and connected integrations (Google Drive, Slack, etc.) are kept.
+                </li>
+              </ul>
+            </div>
+
+            <div className="stack" style={{ padding: 24, gap: 16 }}>
+              <h3 style={{ margin: 0 }}>
+                Reset <em>{workspaceName}</em> memory?
+              </h3>
+
+              <div className="field">
+                <label htmlFor="reset-confirm-input">
+                  To confirm, enter the name of the workspace in the text input field.
+                </label>
+                <input
+                  id="reset-confirm-input"
+                  type="text"
+                  value={confirmText}
+                  onChange={(e) => setConfirmText(e.target.value)}
+                  placeholder={workspaceName}
+                  disabled={resetting}
+                  autoFocus
+                />
+              </div>
+              {error && (
+                <span style={{ fontSize: 13, color: "var(--danger, #c33)" }}>{error}</span>
+              )}
+
+              <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+                <button type="button" className="secondary" onClick={closeModal} disabled={resetting}>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={handleReset}
+                  disabled={resetting || confirmText !== workspaceName}
+                >
+                  {resetting ? "Resetting…" : "Reset memory"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function ModelSettings() {
   const { workspace } = useApp();
   const slug = workspace?.slug ?? "";
@@ -181,6 +299,8 @@ export function SettingsPage() {
       </section>
 
       <VoiceDiagnosticModal open={diagOpen} onClose={() => setDiagOpen(false)} />
+
+      <ResetMemorySection />
     </div>
   );
 }

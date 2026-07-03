@@ -77,6 +77,7 @@ from pidgin.services.integrations import (
     start_oauth,
     update_integration_config,
 )
+from pidgin.services.reset import reset_workspace_memory
 from pidgin.services.settings import SettingsError, get_llm_settings, save_llm_settings
 from pidgin.templates import (
     TemplateError,
@@ -159,6 +160,10 @@ class CandidateFinderBody(BaseModel):
 
 class LlmSettingsBody(BaseModel):
     default_model: str = Field(min_length=1)
+
+
+class ResetMemoryBody(BaseModel):
+    confirm_name: str = Field(min_length=1)
 
 
 class CommonInstructionsBody(BaseModel):
@@ -518,6 +523,20 @@ def api_save_llm_settings(
         return save_llm_settings(session.conn, default_model=body.default_model)
     except SettingsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/reset-memory")
+def api_reset_memory(
+    workspace_slug: str,
+    body: ResetMemoryBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    if body.confirm_name.strip() != session.display_name:
+        raise HTTPException(status_code=400, detail="Workspace name did not match")
+    paths = WorkspacePaths(root=Path(session.paths_root))
+    reseeded = reset_workspace_memory(session.conn, paths)
+    return {"status": "success", "reseeded_agents": reseeded}
 
 
 @router.get("/common-instructions")

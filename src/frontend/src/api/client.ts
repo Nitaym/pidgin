@@ -478,6 +478,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ default_model: defaultModel }),
     }),
+  resetMemory: (slug: string, confirmName: string) =>
+    request<{ status: string; reseeded_agents: string[] }>(
+      `${workspaceBase(slug)}/reset-memory`,
+      { method: "POST", body: JSON.stringify({ confirm_name: confirmName }) },
+    ),
 };
 
 export function googleLoginUrl() {

@@ -84,6 +84,32 @@ def test_api_create_and_agents(client: TestClient) -> None:
         assert by_handle[handle]["preseeded_blurb"]
 
 
+def test_reset_memory_requires_matching_workspace_name(client: TestClient) -> None:
+    slug = create_workspace(client, "Reset Co")
+
+    wrong = client.post(f"/{slug}/api/reset-memory", json={"confirm_name": "Not Reset Co"})
+    assert wrong.status_code == 400
+
+    inject = client.post(f"/{slug}/api/inject-event", json={"message": "hello"})
+    assert inject.status_code == 200
+    client.post(f"/{slug}/api/run-once")
+
+    turns_before = client.get(f"/{slug}/api/turns")
+    assert len(turns_before.json()) >= 1
+
+    ok = client.post(f"/{slug}/api/reset-memory", json={"confirm_name": "Reset Co"})
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["status"] == "success"
+    assert set(body["reseeded_agents"]) == {"hr", "enablement"}
+
+    turns_after = client.get(f"/{slug}/api/turns")
+    assert turns_after.json() == []
+
+    agents = client.get(f"/{slug}/api/agents")
+    assert set(agent["handle"] for agent in agents.json()) == {"hr", "enablement"}
+
+
 def test_hr_agent_endpoint_resolves_by_role(client: TestClient) -> None:
     slug = create_workspace(client, "HR Lookup Co")
     # The HR agent is identified by role, so the UI can find it under any handle.
