@@ -7,8 +7,9 @@ import { useApp } from "../context/AppContext";
 /**
  * Always-available HR assistant. A floating launcher in the bottom-right opens
  * a docked chat with the pre-hired HR agent, on any page. The HR agent is
- * resolved by role (it may be hired under any name), and the launcher is hidden
- * on the HR agent's own full chat screen (you're already there).
+ * resolved by role (it may be hired under any name). Hidden on Settings and on
+ * any agent's full-page chat screen — chatting with another agent (or HR
+ * itself) already has its own full-page focus.
  */
 export function HrChatLauncher() {
   const { workspace } = useApp();
@@ -33,9 +34,11 @@ export function HrChatLauncher() {
     };
   }, [slug]);
 
-  // Don't show the floating launcher on the HR agent's own chat page.
-  const onHrChat = hr ? location.pathname.endsWith(`/agents/${hr.handle}/chat`) : false;
-  if (!slug || !hr || onHrChat) return null;
+  // Don't show the floating launcher on any agent's own chat page, or on
+  // Settings — both already have their own full-page focus.
+  const onAgentChat = /\/agents\/[^/]+\/chat$/.test(location.pathname);
+  const onSettings = location.pathname.endsWith("/settings");
+  if (!slug || !hr || onAgentChat || onSettings) return null;
 
   const initial = hr.display_name.charAt(0).toUpperCase();
 
