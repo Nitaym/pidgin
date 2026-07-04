@@ -245,6 +245,30 @@ export type PendingApproval = {
   created_at: string;
 };
 
+export type ApprovalStep = {
+  index: number;
+  action_type: string;
+  summary: string;
+  params: Record<string, unknown>;
+};
+
+export type ApprovalContext = {
+  approval_id: string;
+  agent: {
+    id: string;
+    handle: string;
+    display_name: string;
+    role_title: string | null;
+  };
+  conversation_id: string;
+  why: {
+    policy_reason: string;
+    trigger: { kind: string; summary: string };
+    rationale: string | null;
+  };
+  steps: ApprovalStep[];
+};
+
 export type AuditEntry = {
   id: string;
   turn_id: string;
@@ -574,6 +598,8 @@ export const api = {
     ),
   listApprovals: (slug: string) =>
     request<PendingApproval[]>(`${workspaceBase(slug)}/approvals`),
+  getApprovalContext: (slug: string, approvalId: string) =>
+    request<ApprovalContext>(`${workspaceBase(slug)}/approvals/${approvalId}/context`),
   approveApproval: (slug: string, approvalId: string) =>
     request<PendingApproval>(
       `${workspaceBase(slug)}/approvals/${approvalId}/approve`,

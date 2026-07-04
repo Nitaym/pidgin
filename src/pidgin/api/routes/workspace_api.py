@@ -83,6 +83,7 @@ from pidgin.services.integrations import (
 from pidgin.services.approvals import (
     ApprovalError,
     approve_pending_approval,
+    build_approval_context,
     list_open_approvals,
     reject_pending_approval,
 )
@@ -991,6 +992,18 @@ class RejectApprovalBody(BaseModel):
 def api_list_approvals(workspace_slug: str, request: Request) -> list[dict]:
     session = require_workspace_session(request, workspace_slug)
     return list_open_approvals(session.conn)
+
+
+@router.get("/approvals/{approval_id}/context")
+def api_approval_context(workspace_slug: str, approval_id: str, request: Request) -> dict:
+    """Why the agent staged this action — reason, trigger, rationale, full steps —
+    plus the agent's conversation id so the owner can discuss it before deciding."""
+    session = require_workspace_session(request, workspace_slug)
+    ctx = workspace_context_from_session(session)
+    try:
+        return build_approval_context(session.conn, ctx, approval_id)
+    except ApprovalError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/approvals/{approval_id}/approve")

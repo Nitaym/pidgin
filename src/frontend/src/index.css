@@ -761,6 +761,54 @@ button.danger:disabled {
   margin-top: var(--space-2);
 }
 
+/* Approval "why & discuss" detail */
+.approval-why {
+  border-left: 2px solid var(--border, #e5e7eb);
+  padding-left: var(--space-3);
+}
+
+.approval-rationale {
+  font-size: 14px;
+  line-height: 1.5;
+}
+.approval-rationale > :first-child {
+  margin-top: 0;
+}
+.approval-rationale > :last-child {
+  margin-bottom: 0;
+}
+
+.approval-steps {
+  margin: 0;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.approval-step-kind {
+  display: inline-block;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface-2, #f3f4f6);
+  color: var(--text-secondary, #6b7280);
+}
+
+/* Embed the agent chat inside an expanded approval card, height-bounded so the
+   full-height .chat-page fits without taking over the page. */
+.approval-chat-embed {
+  height: 440px;
+  margin-top: var(--space-3);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-typing-indicator {
   display: inline-flex;
   align-items: center;
