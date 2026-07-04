@@ -60,7 +60,8 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
         name="execute",
         description=(
             "Create new content in a connector resource — e.g. add a document to "
-            "Google Drive. Target the parent folder URI (gdrive:folder/<id>), set "
+            "Google Drive. Target the parent folder URI (gdrive:folder/<id>); to "
+            "create at the top level of Drive use gdrive:folder/root. Set "
             "`name`, and choose `kind`: use \"doc\" for a real Google Doc (your "
             "markdown content becomes headings/lists), \"folder\" for a subfolder, or "
             "\"file\" for a raw text file. Prefer \"doc\" for anything people will read "
@@ -72,7 +73,10 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
             "properties": {
                 "resource_uri": {
                     "type": "string",
-                    "description": "Parent folder to create inside, e.g. gdrive:folder/<id>.",
+                    "description": (
+                        "Parent folder to create inside, e.g. gdrive:folder/<id>. "
+                        "Use gdrive:folder/root for the top level of Drive."
+                    ),
                 },
                 "content": {
                     "type": "string",
