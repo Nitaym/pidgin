@@ -3,6 +3,7 @@ import { Layout } from "./components/Layout";
 import { useApp } from "./context/AppContext";
 import { AgentProfilePage } from "./pages/AgentProfilePage";
 import { AgentChatPage } from "./pages/AgentChatPage";
+import { ApprovalsPage } from "./pages/ApprovalsPage";
 import { CandidateProfilePage } from "./pages/CandidateProfilePage";
 import { DebugPage } from "./pages/DebugPage";
 import { HireEntryPage } from "./pages/HireEntryPage";
@@ -70,6 +71,7 @@ function WorkspaceApp() {
         <Route path="debug/turns/:turnId" element={<TurnDetailPage />} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="integrations/:connectorType" element={<IntegrationDetailPage />} />
+        <Route path="approvals" element={<ApprovalsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="settings/integrations" element={<Navigate to="../integrations" replace />} />
       </Route>

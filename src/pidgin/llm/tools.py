@@ -5,7 +5,10 @@ from pidgin.types import PermissionProfile
 
 
 def tools_for_profile(profile: PermissionProfile) -> list[ToolSpec]:
-    allowed = set(profile.can_read) | set(profile.can_write)
+    # requires_approval actions (e.g. "execute" gated behind owner approval) are
+    # allowed by gate.py independently of can_write — they must be offered as
+    # tools too, or the agent can never even attempt them to get staged.
+    allowed = set(profile.can_read) | set(profile.can_write) | set(profile.requires_approval)
     blocked = set(profile.blocked)
     names = sorted(action for action in allowed - blocked if action in _TOOL_DEFS)
     return [_TOOL_DEFS[name] for name in names]

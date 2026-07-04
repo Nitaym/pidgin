@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Iterator
@@ -16,6 +17,8 @@ from pidgin.llm.types import (
     ToolSpec,
 )
 from pidgin.types import ActionType
+
+log = logging.getLogger(__name__)
 
 
 def _message_kwargs(request: ModelRequest) -> dict[str, Any]:
@@ -86,6 +89,7 @@ class AnthropicLLMProvider:
                         if event.usage:
                             usage.output_tokens = event.usage.output_tokens or usage.output_tokens
                 final = stream.get_final_message()
+                raw_stop_reason = getattr(final, "stop_reason", None)
                 if final.usage:
                     usage = TokenUsage(
                         input_tokens=final.usage.input_tokens,
@@ -117,12 +121,25 @@ class AnthropicLLMProvider:
             actions.append(action)
             yield StreamEvent(type="tool_call_ready", action=action)
 
+        stop_reason = _resolve_stop_reason(raw_stop_reason, has_actions=bool(actions))
+        if stop_reason == "max_tokens":
+            _log_truncation(
+                tool_name=tool_name,
+                partial_args_len=len(tool_args),
+                text_len=len("".join(text_parts)),
+                output_tokens=usage.output_tokens,
+            )
+
         response = ModelResponse(
             assistant_text="".join(text_parts) or None,
             actions=actions,
-            stop_reason="tool_use" if actions else "end_turn",
+            stop_reason=stop_reason,
             usage=usage,
-            raw_response={"content": raw_blocks, "latency_ms": latency_ms},
+            raw_response={
+                "content": raw_blocks,
+                "latency_ms": latency_ms,
+                "provider_stop_reason": raw_stop_reason,
+            },
         )
         yield StreamEvent(type="usage", usage=usage)
         yield StreamEvent(type="invocation_end", response=response)
@@ -174,13 +191,38 @@ def _anthropic_tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
     ]
 
 
+def _resolve_stop_reason(raw_stop_reason: str | None, *, has_actions: bool) -> str:
+    """Prefer the provider's own stop reason so a max_tokens truncation is never
+    silently relabeled as a normal tool_use/end_turn — that mislabeling is what let
+    the 2026-07-03 truncated-say incident go undetected until it crashed."""
+    if raw_stop_reason == "max_tokens":
+        return "max_tokens"
+    if raw_stop_reason in ("end_turn", "tool_use"):
+        return raw_stop_reason
+    return "tool_use" if has_actions else "end_turn"
+
+
+def _log_truncation(
+    *, tool_name: str, partial_args_len: int, text_len: int, output_tokens: int
+) -> None:
+    log.warning(
+        "[llm] response TRUNCATED by max_tokens — tool_in_progress=%s partial_args_len=%d "
+        "text_len=%d output_tokens=%d (model ran out of output budget mid-response; "
+        "any tool call in progress will have incomplete/missing arguments)",
+        tool_name or "(none — cut off before any content)",
+        partial_args_len, text_len, output_tokens,
+    )
+
+
 def _parse_anthropic_response(response: Any, latency_ms: int) -> ModelResponse:
     actions: list[ParsedAction] = []
     text_parts: list[str] = []
+    tool_name = ""
     for block in response.content:
         if block.type == "text":
             text_parts.append(block.text)
         elif block.type == "tool_use":
+            tool_name = block.name
             tool_input = block.input if isinstance(block.input, dict) else {}
             parsed = parse_tool_call(block.name, tool_input)
             if parsed:
@@ -196,15 +238,25 @@ def _parse_anthropic_response(response: Any, latency_ms: int) -> ModelResponse:
         input_tokens=response.usage.input_tokens,
         output_tokens=response.usage.output_tokens,
     )
+    raw_stop_reason = getattr(response, "stop_reason", None)
+    stop_reason = _resolve_stop_reason(raw_stop_reason, has_actions=bool(actions))
+    if stop_reason == "max_tokens":
+        _log_truncation(
+            tool_name=tool_name,
+            partial_args_len=0,
+            text_len=len("".join(text_parts)),
+            output_tokens=usage.output_tokens,
+        )
     return ModelResponse(
         assistant_text="".join(text_parts) or None,
         actions=actions,
-        stop_reason="tool_use" if actions else "end_turn",
+        stop_reason=stop_reason,
         usage=usage,
         raw_response={
             "id": response.id,
             "model": response.model,
             "content": [b.model_dump() for b in response.content],
             "latency_ms": latency_ms,
+            "provider_stop_reason": raw_stop_reason,
         },
     )

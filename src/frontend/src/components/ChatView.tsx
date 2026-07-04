@@ -56,6 +56,7 @@ export function ChatView({
   const [draft, setDraft] = useState<DraftMessage | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
+  const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendingRef = useRef(false); // synchronous guard against double-send
@@ -221,6 +222,30 @@ export function ChatView({
     }
   }
 
+  // Quick approve/reject right on the chat message that asked for it — the
+  // Approvals page covers the same actions, but staying in the conversation
+  // is faster for the common case of a single pending request.
+  async function resolveInlineApproval(approvalId: string, decision: "approve" | "reject") {
+    setResolvingApprovalId(approvalId);
+    setError(null);
+    try {
+      if (decision === "approve") await api.approveApproval(slug, approvalId);
+      else await api.rejectApproval(slug, approvalId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to ${decision}`);
+    } finally {
+      setResolvingApprovalId(null);
+      // Refetch rather than patch locally — this also pulls in the outcome
+      // notice the backend posts ("✅ Approved — …" / "❌ Not approved — …").
+      try {
+        const fresh = await api.getAgentMessages(slug, agentHandle);
+        setMessages(fresh.messages);
+      } catch {
+        /* keep whatever is currently shown */
+      }
+    }
+  }
+
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const { mics, speakers, micId, setMicId, speakerId, setSpeakerId, refresh: refreshDevices } = useAudioDevices();
   const { state: voiceState, warming, warmup, startRecording, stopRecording, feedText, finishSpeaking, disconnect } = useVoiceSession({
@@ -300,6 +325,26 @@ export function ChatView({
                     <div className="chat-message-body">
                       {isHuman ? message.body_text : <ReactMarkdown>{message.body_text}</ReactMarkdown>}
                     </div>
+                    {message.pending_approval_id && message.pending_approval_status === "open" ? (
+                      <div className="chat-approval-actions">
+                        <button
+                          type="button"
+                          className="btn"
+                          disabled={resolvingApprovalId === message.pending_approval_id}
+                          onClick={() => void resolveInlineApproval(message.pending_approval_id!, "approve")}
+                        >
+                          {resolvingApprovalId === message.pending_approval_id ? "Approving…" : "Approve"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={resolvingApprovalId === message.pending_approval_id}
+                          onClick={() => void resolveInlineApproval(message.pending_approval_id!, "reject")}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               );

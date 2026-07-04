@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from pidgin.api.deps import (
     OAUTH_STATE_SESSION_KEY,
     require_workspace_session,
+    workspace_context_from_session,
 )
 from pidgin.db import connect
 from pidgin.db.chat import (
@@ -76,6 +77,12 @@ from pidgin.services.integrations import (
     run_health_check,
     start_oauth,
     update_integration_config,
+)
+from pidgin.services.approvals import (
+    ApprovalError,
+    approve_pending_approval,
+    list_open_approvals,
+    reject_pending_approval,
 )
 from pidgin.services.reset import reset_workspace_memory
 from pidgin.services.settings import SettingsError, get_llm_settings, save_llm_settings
@@ -923,6 +930,42 @@ def api_get_turn(workspace_slug: str, turn_id: str, request: Request) -> dict:
 def api_list_audit(workspace_slug: str, request: Request, limit: int = 100) -> list[dict]:
     session = require_workspace_session(request, workspace_slug)
     return list_audit_log(session.conn, limit=limit)
+
+
+class RejectApprovalBody(BaseModel):
+    reason: str | None = None
+
+
+@router.get("/approvals")
+def api_list_approvals(workspace_slug: str, request: Request) -> list[dict]:
+    session = require_workspace_session(request, workspace_slug)
+    return list_open_approvals(session.conn)
+
+
+@router.post("/approvals/{approval_id}/approve")
+def api_approve_approval(workspace_slug: str, approval_id: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    ctx = workspace_context_from_session(session)
+    try:
+        return approve_pending_approval(session.conn, ctx, approval_id=approval_id)
+    except ApprovalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/approvals/{approval_id}/reject")
+def api_reject_approval(
+    workspace_slug: str,
+    approval_id: str,
+    request: Request,
+    body: RejectApprovalBody | None = None,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    ctx = workspace_context_from_session(session)
+    reason = body.reason if body else None
+    try:
+        return reject_pending_approval(session.conn, ctx, approval_id=approval_id, reason=reason)
+    except ApprovalError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/llm-invocations")

@@ -25,7 +25,12 @@ from pidgin.runtime.actions import (
 from pidgin.runtime.agent_load import load_agent_for_event
 from pidgin.runtime.context import NullTurnEventSink, TurnEventSink, WorkspaceContext
 from pidgin.runtime.prompt import assemble_messages
-from pidgin.storage.records import InboundEventRecord, ModelInvocationRecord, TurnRecord
+from pidgin.storage.records import (
+    AgentContextRecord,
+    InboundEventRecord,
+    ModelInvocationRecord,
+    TurnRecord,
+)
 from pidgin.types import ActionType, GateOutcome, ProposedAction
 from pidgin.util.ids import new_ulid, utc_now_iso
 
@@ -177,6 +182,17 @@ class TurnExecutor:
                 turn_status = "failed"
                 break
 
+            if response.stop_reason == "max_tokens":
+                log.warning(
+                    "[turn] LLM invocation #%d TRUNCATED by max_tokens — turn_id=%s "
+                    "output_tokens=%s assistant_text_len=%d actions_parsed=%s "
+                    "(cut off mid-generation; downstream action params may be incomplete)",
+                    sequence, turn.id,
+                    response.usage.output_tokens if response.usage else "?",
+                    len(response.assistant_text or ""),
+                    [a.action_type.value for a in response.actions],
+                )
+
             action_ctx = ActionContext(
                 workspace=ctx,
                 turn=turn,
@@ -228,6 +244,14 @@ class TurnExecutor:
                     staged = True
                     turn_status = "refused"
                     end_turn = True
+                    approval_id = _stage_action_for_approval(
+                        ctx, turn=turn, event=event, agent=agent, action=action, egress=egress,
+                    )
+                    if approval_id:
+                        log.info(
+                            "[turn] action persisted as pending_approval=%s — turn_id=%s",
+                            approval_id, turn.id,
+                        )
                     break
                 if gate_result.outcome == GateOutcome.REFUSED:
                     log.info("[turn] action REFUSED — turn_id=%s action=%s", turn.id, action.action_type.value)
@@ -240,11 +264,30 @@ class TurnExecutor:
                     continue
                 if gate_result.outcome == GateOutcome.EXECUTED:
                     log.debug("[turn] executing action — turn_id=%s action=%s", turn.id, action.action_type.value)
-                    result = execute_action(action_ctx, action)
+                    try:
+                        result = execute_action(action_ctx, action)
+                    except Exception as exc:
+                        # Safety net: no single action handler should be able to take down
+                        # the whole turn (the 2026-07-03 "say requires payload.text" crash
+                        # happened because _execute_say had no such guard). Log loudly and
+                        # feed the failure back as a tool result instead of propagating.
+                        log.error(
+                            "[turn] action EXECUTION CRASHED — turn_id=%s action=%s params=%r "
+                            "error=%s",
+                            turn.id, action.action_type.value, action.params, exc, exc_info=True,
+                        )
+                        result = f"Action failed: {exc}"
                     log.debug("[turn] action result — turn_id=%s result=%r", turn.id, result[:200] if result else result)
                     tool_results.append(_label_tool_result(action.action_type.value, result))
                     if action.action_type == ActionType.SAY:
-                        end_turn = True
+                        if str(action.params.get("text") or "").strip():
+                            end_turn = True
+                        else:
+                            log.warning(
+                                "[turn] SAY had no text — turn_id=%s; continuing turn instead of "
+                                "ending it silently, so the model gets a chance to retry",
+                                turn.id,
+                            )
 
             if tool_results and not end_turn:
                 log.debug("[turn] appending tool results for next invocation — turn_id=%s count=%d", turn.id, len(tool_results))
@@ -264,6 +307,17 @@ class TurnExecutor:
             if end_turn or staged:
                 log.info("[turn] ending turn — turn_id=%s end_turn=%s staged=%s", turn.id, end_turn, staged)
                 break
+        else:
+            # Loop ran out of invocations without ever hitting a `break` above —
+            # no successful say, no staged action, no error. The agent silently
+            # never replied this turn (e.g. repeated truncation churning through
+            # the whole budget). Surface this clearly instead of a quiet "completed".
+            log.warning(
+                "[turn] invocation BUDGET EXHAUSTED without ending turn — turn_id=%s "
+                "max_invocations=%d (agent never produced a completed reply this turn)",
+                turn.id, max_invocations,
+            )
+            turn_status = "incomplete"
 
         ctx.turn_store.complete_turn(turn.id, event.id, status=turn_status)
         log.info("[turn] completed — turn_id=%s status=%s sequence=%d", turn.id, turn_status, sequence)
@@ -274,6 +328,72 @@ class TurnExecutor:
             )
         detail = ctx.turn_store.get_turn_detail(turn.id)
         return detail.turn if detail is not None else turn
+
+
+def _stage_action_for_approval(
+    ctx: WorkspaceContext,
+    *,
+    turn: TurnRecord,
+    event: InboundEventRecord,
+    agent: AgentContextRecord,
+    action: ProposedAction,
+    egress: EgressHandler,
+) -> str | None:
+    """Persist a STAGED action as a pending_approval row and notify the owner.
+
+    Without this, GateOutcome.STAGED just ended the turn with nothing recorded
+    anywhere — the agent believed it had "staged something for approval" but
+    there was no way for the owner to ever see or approve it (see the 2026-07
+    "Agent Enablement can't write to Drive" investigation).
+    """
+    conn = ctx.db_bridge
+    if conn is None:
+        log.warning(
+            "[turn] cannot persist pending approval (no db_bridge) — turn_id=%s action=%s",
+            turn.id, action.action_type.value,
+        )
+        return None
+
+    from pidgin.db.approvals import create_pending_approval
+    from pidgin.db.principals import get_or_create_operator_principal
+
+    requester_id = str(event.payload.get("sender_principal_id") or "operator")
+    approver_id = get_or_create_operator_principal(conn)
+    approval_id = create_pending_approval(
+        conn,
+        ai_employee_id=agent.agent_id,
+        originating_turn_id=turn.id,
+        proposed_action=action.action_type.value,
+        proposed_action_params=action.params,
+        trust_label=event.trust_label.value,
+        requesting_principal_id=requester_id,
+        requires_approver_principal_id=approver_id,
+    )
+
+    notice = (
+        f"⏸️ Awaiting your approval before I can {_describe_staged_action(action)}. "
+        f"Review it under Approvals (ref ...{approval_id[-6:]})."
+    )
+    try:
+        # pending_approval_id rides along in the message's attachments so the
+        # chat UI can render Approve/Reject right here, not only on the
+        # separate Approvals page.
+        egress.write(text=notice, turn_id=turn.id, extra={"pending_approval_id": approval_id})
+    except Exception as exc:
+        log.warning(
+            "[turn] failed to post approval notice — turn_id=%s approval_id=%s error=%s",
+            turn.id, approval_id, exc,
+        )
+    return approval_id
+
+
+def _describe_staged_action(action: ProposedAction) -> str:
+    if action.action_type == ActionType.EXECUTE:
+        kind = action.params.get("kind") or "file"
+        name = action.params.get("name") or "(unnamed)"
+        target = action.params.get("resource_uri") or "?"
+        return f'create {kind} "{name}" in {target}'
+    return f"{action.action_type.value} ({json.dumps(action.params)[:200]})"
 
 
 def _invoke(

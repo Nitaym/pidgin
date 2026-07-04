@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
@@ -88,6 +89,7 @@ def insert_message(
     body_text: str,
     originating_event_id: str | None = None,
     originating_turn_id: str | None = None,
+    attachments_json: str | None = None,
 ) -> str:
     message_id = new_ulid()
     now = utc_now_iso()
@@ -95,9 +97,9 @@ def insert_message(
         """
         INSERT INTO messages (
           id, conversation_id, sender_principal_id, sender_display_name,
-          modality, body_text, body_format, originating_event_id,
+          modality, body_text, body_format, attachments_json, originating_event_id,
           originating_turn_id, created_at
-        ) VALUES (?, ?, ?, ?, 'pidgin_chat', ?, 'text', ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, 'pidgin_chat', ?, 'text', ?, ?, ?, ?)
         """,
         (
             message_id,
@@ -105,6 +107,7 @@ def insert_message(
             sender_principal_id,
             sender_display_name,
             body_text,
+            attachments_json,
             originating_event_id,
             originating_turn_id,
             now,
@@ -117,7 +120,7 @@ def insert_message(
 def list_messages(conn: sqlite3.Connection, conversation_id: str, limit: int = 100) -> list[dict]:
     rows = conn.execute(
         """
-        SELECT id, sender_display_name, body_text, created_at, originating_turn_id
+        SELECT id, sender_display_name, body_text, created_at, originating_turn_id, attachments_json
         FROM messages
         WHERE conversation_id = ?
         ORDER BY created_at ASC
@@ -125,4 +128,39 @@ def list_messages(conn: sqlite3.Connection, conversation_id: str, limit: int = 1
         """,
         (conversation_id, limit),
     ).fetchall()
-    return [dict(row) for row in rows]
+    messages = [dict(row) for row in rows]
+
+    # Chat messages that requested owner approval carry a pending_approval_id in
+    # attachments_json — join in its live status so the frontend can render
+    # inline Approve/Reject buttons right on that message (not just the
+    # separate Approvals page) and knows when they've already been resolved.
+    approval_ids: list[str] = []
+    for message in messages:
+        raw = message.pop("attachments_json", None)
+        message["pending_approval_id"] = None
+        message["pending_approval_status"] = None
+        if raw:
+            try:
+                attachments = json.loads(raw)
+            except (TypeError, ValueError):
+                attachments = {}
+            approval_id = (
+                attachments.get("pending_approval_id") if isinstance(attachments, dict) else None
+            )
+            if approval_id:
+                message["pending_approval_id"] = approval_id
+                approval_ids.append(approval_id)
+
+    if approval_ids:
+        placeholders = ", ".join("?" for _ in approval_ids)
+        status_rows = conn.execute(
+            f"SELECT id, current_status FROM pending_approvals WHERE id IN ({placeholders})",
+            approval_ids,
+        ).fetchall()
+        status_by_id = {row["id"]: row["current_status"] for row in status_rows}
+        for message in messages:
+            approval_id = message["pending_approval_id"]
+            if approval_id:
+                message["pending_approval_status"] = status_by_id.get(approval_id)
+
+    return messages

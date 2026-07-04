@@ -3,6 +3,7 @@ import { NavLink, Outlet, useParams } from "react-router-dom";
 import { ChatModal } from "./ChatModal";
 import { HrChatLauncher } from "./HrChatLauncher";
 import { PidginLogo } from "./PidginLogo";
+import { SidebarApprovals } from "./SidebarApprovals";
 import { SidebarChat } from "./SidebarChat";
 import { useApp } from "../context/AppContext";
 
@@ -55,6 +56,7 @@ export function Layout({ showNav = true }: LayoutProps) {
             <SidebarChat slug={workspace.slug} base={base} onOpen={() => openChat()} />
             <div className="sidebar-section">
               <p className="sidebar-section-label">System</p>
+              <SidebarApprovals slug={workspace.slug} base={base} />
               <NavLink to={`${base}/integrations`}>Integrations</NavLink>
               <NavLink to={`${base}/debug`} end>
                 Diagnostics

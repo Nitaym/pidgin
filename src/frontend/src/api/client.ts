@@ -141,6 +141,8 @@ export type Message = {
   body_text: string;
   created_at: string;
   originating_turn_id: string | null;
+  pending_approval_id?: string | null;
+  pending_approval_status?: string | null;
 };
 
 export type IntegrationCatalogEntry = {
@@ -223,6 +225,24 @@ export type LlmModelOption = {
 export type LlmSettings = {
   default_model: string;
   available_models: LlmModelOption[];
+};
+
+export type PendingApproval = {
+  id: string;
+  ai_employee_id: string;
+  originating_turn_id: string;
+  proposed_action: string;
+  proposed_action_params_json: string;
+  drafted_body: string | null;
+  trust_label: string;
+  requesting_principal_id: string;
+  requires_approver_principal_id: string;
+  current_status: string;
+  resolution_event_id: string | null;
+  resolution_text: string | null;
+  resolved_at: string | null;
+  expires_at: string | null;
+  created_at: string;
 };
 
 function workspaceBase(slug: string) {
@@ -482,6 +502,18 @@ export const api = {
     request<{ status: string; reseeded_agents: string[] }>(
       `${workspaceBase(slug)}/reset-memory`,
       { method: "POST", body: JSON.stringify({ confirm_name: confirmName }) },
+    ),
+  listApprovals: (slug: string) =>
+    request<PendingApproval[]>(`${workspaceBase(slug)}/approvals`),
+  approveApproval: (slug: string, approvalId: string) =>
+    request<PendingApproval>(
+      `${workspaceBase(slug)}/approvals/${approvalId}/approve`,
+      { method: "POST" },
+    ),
+  rejectApproval: (slug: string, approvalId: string, reason?: string) =>
+    request<PendingApproval>(
+      `${workspaceBase(slug)}/approvals/${approvalId}/reject`,
+      { method: "POST", body: JSON.stringify({ reason }) },
     ),
 };
 

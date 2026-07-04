@@ -23,7 +23,11 @@ class ToolSpec(BaseModel):
 class ModelRef(BaseModel):
     backend: Literal["stub", "anthropic", "litellm"]
     model_id: str
-    max_output_tokens: int = 1024
+    # 1024 was too tight: extended-thinking models spend part of this budget on
+    # reasoning before they ever get to the tool call/reply, so a long thought
+    # would truncate the response mid-tool-call (see the 2026-07-03 "say requires
+    # payload.text" incident — the model was cut off mid-reply, not silent).
+    max_output_tokens: int = 4096
     temperature: float | None = None
 
 
@@ -47,7 +51,7 @@ class ParsedAction(BaseModel):
 class ModelResponse(BaseModel):
     assistant_text: str | None = None
     actions: list[ParsedAction] = Field(default_factory=list)
-    stop_reason: Literal["end_turn", "tool_use", "budget", "error"] = "end_turn"
+    stop_reason: Literal["end_turn", "tool_use", "max_tokens", "budget", "error"] = "end_turn"
     usage: TokenUsage = Field(default_factory=TokenUsage)
     raw_response: dict[str, Any] = Field(default_factory=dict)
     error_text: str | None = None

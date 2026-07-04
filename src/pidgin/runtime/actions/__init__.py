@@ -51,6 +51,17 @@ def _max_pending_timers(action_ctx: ActionContext) -> int:
 
 def _execute_say(action_ctx: ActionContext, action: ProposedAction) -> str:
     text = str(action.params.get("text") or "")
+    if not text.strip():
+        # Almost always a truncated LLM response (hit max_tokens mid tool-call)
+        # rather than the agent deliberately choosing silence — see parse.py's
+        # truncation warning and llm/providers/anthropic.py's max_tokens logging
+        # for the upstream signal. Degrade to a soft error so the turn loop can
+        # feed this back and let the model retry, instead of crashing the turn.
+        log.warning(
+            "[action] say called with empty/missing text — turn_id=%s params=%r",
+            action_ctx.turn.id, action.params,
+        )
+        return "Missing text — say requires non-empty text; nothing was sent."
     action_ctx.egress.write(text=text, turn_id=action_ctx.turn.id)
     return f"Sent message ({len(text)} chars)"
 

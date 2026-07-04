@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Any
 
@@ -67,13 +68,16 @@ class PidginChatConnector:
         if not payload.text:
             raise ValueError("say requires payload.text")
 
+        extra = payload.extra
+        attachments = {k: v for k, v in extra.items() if k != "originating_turn_id"}
         message_id = insert_message(
             conn,
             conversation_id=resource.resource_id,
             sender_principal_id=principal.principal_id,
             sender_display_name=principal.display_name,
             body_text=payload.text,
-            originating_turn_id=payload.extra.get("originating_turn_id"),
+            originating_turn_id=extra.get("originating_turn_id"),
+            attachments_json=json.dumps(attachments) if attachments else None,
         )
         return WriteResult(
             handle=message_id,
