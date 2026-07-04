@@ -202,10 +202,17 @@ class WriteFakeClient:
         return None
 
     def post(
-        self, url: str, json: Any = None, params: dict[str, str] | None = None
+        self,
+        url: str,
+        json: Any = None,
+        params: dict[str, str] | None = None,
+        content: bytes | None = None,
+        headers: dict[str, str] | None = None,
     ) -> FakeResponse:
-        self.calls.append(("POST", url, {"json": json, "params": params}))
-        return self._handler("POST", url, json)
+        self.calls.append(
+            ("POST", url, {"json": json, "params": params, "content": content, "headers": headers})
+        )
+        return self._handler("POST", url, content if content is not None else json)
 
     def patch(
         self,
@@ -267,6 +274,49 @@ def test_write_creates_file_in_folder(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.handle == "new1"
     assert result.external_ref["kind"] == "file"
     assert scopes == ["https://www.googleapis.com/auth/drive"]  # write uses full scope
+
+
+def test_write_creates_native_google_doc(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.connectors.types import WritePayload
+
+    def handler(method: str, url: str, body: object) -> FakeResponse:
+        assert method == "POST"
+        assert "/upload/drive/v3/files" in url  # multipart import, not a plain create
+        text = body.decode("utf-8") if isinstance(body, bytes) else str(body)
+        # The target mimeType makes Drive convert the upload into a real Doc,
+        # and the markdown body rides in the same multipart request.
+        assert "application/vnd.google-apps.document" in text
+        assert "# Onboarding" in text
+        return FakeResponse(payload={"id": "doc9", "name": "Onboarding"})
+
+    connector, _ = _write_connector(monkeypatch, handler, [])
+    result = _write(
+        connector,
+        ResourceUri(prefix="gdrive", kind="folder", resource_id="FOLD"),
+        WritePayload(text="# Onboarding\nWelcome", subject="Onboarding", extra={"kind": "doc"}),
+    )
+    assert result.external_ref["kind"] == "doc"
+    assert result.handle == "doc9"
+
+
+def test_write_creates_empty_google_doc_metadata_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.connectors.types import WritePayload
+
+    def handler(method: str, url: str, body: object) -> FakeResponse:
+        # No content → metadata-only create against the Drive API (not upload).
+        assert url.endswith("/drive/v3/files")
+        assert isinstance(body, dict)
+        assert body["mimeType"] == "application/vnd.google-apps.document"
+        return FakeResponse(payload={"id": "doc0", "name": "Blank"})
+
+    connector, client = _write_connector(monkeypatch, handler, [])
+    result = _write(
+        connector,
+        ResourceUri(prefix="gdrive", kind="folder", resource_id="F"),
+        WritePayload(subject="Blank", extra={"kind": "doc"}),
+    )
+    assert result.external_ref["kind"] == "doc"
+    assert not any("/upload/" in c[1] for c in client.calls)  # no media upload for empty doc
 
 
 def test_write_creates_folder(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -168,6 +168,22 @@ def _execute_execute(action_ctx: ActionContext, action: ProposedAction) -> str:
             ),
             mode="execute",
         )
+        # Register what we just created under any active grant, so a later edit
+        # or delete of it is recognised as the agent's own work (see gate_action).
+        try:
+            from pidgin.db.grants import record_grant_resource
+
+            ext = result.external_ref or {}
+            new_id = ext.get("id")
+            if new_id:
+                uri_kind = "folder" if ext.get("kind") == "folder" else "file"
+                record_grant_resource(
+                    conn,
+                    ai_employee_id=action_ctx.agent.agent_id,
+                    resource_uri=f"{resource.prefix}:{uri_kind}/{new_id}",
+                )
+        except Exception as exc:  # noqa: BLE001 — recording is best-effort
+            log.warning("[execute] failed to record grant resource: %s", exc)
         return f"Wrote {resource} (ref={result.external_ref})"
     except Exception as exc:
         return f"Write failed: {exc}"
@@ -402,7 +418,7 @@ def log_gate_decision(
 
 
 def gate_action(action_ctx: ActionContext, action: ProposedAction):
-    return gate(
+    result = gate(
         GateRequest(
             trust_label=action_ctx.event.trust_label,
             action=action,
@@ -410,6 +426,52 @@ def gate_action(action_ctx: ActionContext, action: ProposedAction):
             is_direct_commander=True,
         )
     )
+    # Once the owner approves an agent's plan, an execution grant lets it keep
+    # working that initiative without asking again: creates auto-approve, and so
+    # do edits/deletes of resources it created this session. Anything it did NOT
+    # create still stages (the pure gate's decision stands). See db/grants.py.
+    from pidgin.types import GateOutcome
+
+    if result.outcome == GateOutcome.STAGED and action.action_type == ActionType.EXECUTE:
+        override = _grant_override(action_ctx, action)
+        if override is not None:
+            return override
+    return result
+
+
+def _grant_override(action_ctx: ActionContext, action: ProposedAction):
+    conn = getattr(action_ctx.workspace, "db_bridge", None)
+    if conn is None:
+        return None
+    from pidgin.db.grants import get_active_grant, is_granted_resource
+    from pidgin.types import GateOutcome, GateResult, PolicyDecision
+
+    agent_id = action_ctx.agent.agent_id
+    if get_active_grant(conn, ai_employee_id=agent_id) is None:
+        return None
+    uri = str(action.params.get("resource_uri") or "")
+    granted = GateResult(
+        outcome=GateOutcome.EXECUTED, policy_decision=PolicyDecision.AUTO_APPROVED
+    )
+    # Creating inside a folder is additive → covered by the grant.
+    if _is_create_target(uri):
+        return granted
+    # Editing/deleting an existing resource → only if we created it this session.
+    if is_granted_resource(conn, ai_employee_id=agent_id, resource_uri=uri):
+        return granted
+    return None
+
+
+def _is_create_target(uri: str) -> bool:
+    """A folder-targeted execute creates new content inside it (additive)."""
+    if not uri:
+        return False
+    try:
+        from pidgin.connectors.resources import parse_resource_uri
+
+        return getattr(parse_resource_uri(uri), "kind", None) == "folder"
+    except Exception:  # noqa: BLE001 — unparseable URI is not a known-safe create
+        return False
 
 
 class PidginChatEgress:

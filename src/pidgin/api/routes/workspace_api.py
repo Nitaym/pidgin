@@ -23,6 +23,7 @@ from pidgin.db.chat import (
     list_messages,
 )
 from pidgin.db.diagnostics import (
+    agent_inspect,
     get_turn,
     list_audit_log,
     list_inbound_events,
@@ -355,6 +356,15 @@ def api_get_agent(workspace_slug: str, handle: str, request: Request) -> dict:
         "current_status": agent["current_status"],
         "created_at": agent["created_at"],
     }
+
+
+@router.get("/agents/{handle}/inspect")
+def api_inspect_agent(workspace_slug: str, handle: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    detail = agent_inspect(session.conn, handle)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return detail
 
 
 @router.get("/agents/{handle}/conversation")
@@ -927,9 +937,14 @@ def api_get_turn(workspace_slug: str, turn_id: str, request: Request) -> dict:
 
 
 @router.get("/audit")
-def api_list_audit(workspace_slug: str, request: Request, limit: int = 100) -> list[dict]:
+def api_list_audit(
+    workspace_slug: str,
+    request: Request,
+    limit: int = 100,
+    agent_id: str | None = None,
+) -> list[dict]:
     session = require_workspace_session(request, workspace_slug)
-    return list_audit_log(session.conn, limit=limit)
+    return list_audit_log(session.conn, limit=limit, ai_employee_id=agent_id)
 
 
 class RejectApprovalBody(BaseModel):
@@ -974,9 +989,12 @@ def api_list_llm_invocations(
     request: Request,
     limit: int = 50,
     after: str | None = None,
+    agent_id: str | None = None,
 ) -> list[dict]:
     session = require_workspace_session(request, workspace_slug)
-    return list_model_invocations(session.conn, limit=min(limit, 200), after=after)
+    return list_model_invocations(
+        session.conn, limit=min(limit, 200), after=after, ai_employee_id=agent_id
+    )
 
 
 @router.get("/integrations/catalog")

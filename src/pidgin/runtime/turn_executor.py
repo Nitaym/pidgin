@@ -108,6 +108,11 @@ class TurnExecutor:
         sequence = 0
         turn_status = "completed"
         response = None
+        # Actions that need owner approval accumulate here across the whole turn
+        # and are bundled into ONE approval at the end, rather than each one
+        # ending the turn on the spot. This is what lets the agent lay out a
+        # full plan (folder + doc + …) that the owner signs off once.
+        staged_actions: list[ProposedAction] = []
 
         while sequence < max_invocations:
             sequence += 1
@@ -223,7 +228,6 @@ class TurnExecutor:
 
             tool_results: list[str] = []
             end_turn = response.stop_reason == "end_turn"
-            staged = False
 
             for action in actions:
                 gate_result = gate_action(action_ctx, action)
@@ -240,19 +244,24 @@ class TurnExecutor:
                 )
 
                 if gate_result.outcome == GateOutcome.STAGED:
-                    log.info("[turn] action STAGED — turn_id=%s action=%s", turn.id, action.action_type.value)
-                    staged = True
-                    turn_status = "refused"
-                    end_turn = True
-                    approval_id = _stage_action_for_approval(
-                        ctx, turn=turn, event=event, agent=agent, action=action, egress=egress,
+                    # Don't abandon the turn on the first action needing approval —
+                    # queue it and let the agent keep planning the rest of its work.
+                    # Everything queued this turn is bundled into one approval below.
+                    log.info(
+                        "[turn] action STAGED (queued into plan) — turn_id=%s action=%s",
+                        turn.id, action.action_type.value,
                     )
-                    if approval_id:
-                        log.info(
-                            "[turn] action persisted as pending_approval=%s — turn_id=%s",
-                            approval_id, turn.id,
+                    staged_actions.append(action)
+                    tool_results.append(
+                        _label_tool_result(
+                            action.action_type.value,
+                            "Queued for the owner's approval as part of this turn's plan. "
+                            "It will run automatically once the owner approves — you do NOT "
+                            "need to ask again. Continue with any remaining steps, then end "
+                            "with a short say summarizing what you've queued.",
                         )
-                    break
+                    )
+                    continue
                 if gate_result.outcome == GateOutcome.REFUSED:
                     log.info("[turn] action REFUSED — turn_id=%s action=%s", turn.id, action.action_type.value)
                     tool_results.append(
@@ -304,8 +313,8 @@ class TurnExecutor:
                     )
                 )
 
-            if end_turn or staged:
-                log.info("[turn] ending turn — turn_id=%s end_turn=%s staged=%s", turn.id, end_turn, staged)
+            if end_turn:
+                log.info("[turn] ending turn — turn_id=%s end_turn=%s", turn.id, end_turn)
                 break
         else:
             # Loop ran out of invocations without ever hitting a `break` above —
@@ -319,6 +328,21 @@ class TurnExecutor:
             )
             turn_status = "incomplete"
 
+        if staged_actions:
+            # The turn produced a plan that needs sign-off: persist all queued
+            # actions as ONE approval and suspend the turn. approve_pending_approval
+            # runs them and re-dispatches a continuation turn so the agent picks up
+            # where it left off.
+            turn_status = "suspended"
+            approval_id = _stage_plan_for_approval(
+                ctx, turn=turn, event=event, agent=agent, actions=staged_actions, egress=egress,
+            )
+            if approval_id:
+                log.info(
+                    "[turn] plan persisted as pending_approval=%s (%d action[s]) — turn_id=%s",
+                    approval_id, len(staged_actions), turn.id,
+                )
+
         ctx.turn_store.complete_turn(turn.id, event.id, status=turn_status)
         log.info("[turn] completed — turn_id=%s status=%s sequence=%d", turn.id, turn_status, sequence)
 
@@ -330,27 +354,28 @@ class TurnExecutor:
         return detail.turn if detail is not None else turn
 
 
-def _stage_action_for_approval(
+def _stage_plan_for_approval(
     ctx: WorkspaceContext,
     *,
     turn: TurnRecord,
     event: InboundEventRecord,
     agent: AgentContextRecord,
-    action: ProposedAction,
+    actions: list[ProposedAction],
     egress: EgressHandler,
 ) -> str | None:
-    """Persist a STAGED action as a pending_approval row and notify the owner.
+    """Persist a turn's queued actions as ONE pending_approval and notify the owner.
 
-    Without this, GateOutcome.STAGED just ended the turn with nothing recorded
-    anywhere — the agent believed it had "staged something for approval" but
-    there was no way for the owner to ever see or approve it (see the 2026-07
-    "Agent Enablement can't write to Drive" investigation).
+    All actions the gate STAGED this turn are bundled into a single "plan"
+    approval, so the owner signs off once instead of once per file. On approval,
+    services/approvals runs every action in order and re-dispatches the agent so
+    it continues from where it left off (see the 2026-07 "Agent Enablement stops
+    on every approval" investigation).
     """
     conn = ctx.db_bridge
     if conn is None:
         log.warning(
-            "[turn] cannot persist pending approval (no db_bridge) — turn_id=%s action=%s",
-            turn.id, action.action_type.value,
+            "[turn] cannot persist pending approval (no db_bridge) — turn_id=%s actions=%d",
+            turn.id, len(actions),
         )
         return None
 
@@ -359,20 +384,31 @@ def _stage_action_for_approval(
 
     requester_id = str(event.payload.get("sender_principal_id") or "operator")
     approver_id = get_or_create_operator_principal(conn)
+    plan_params = {
+        "actions": [
+            {"action_type": a.action_type.value, "params": a.params} for a in actions
+        ]
+    }
     approval_id = create_pending_approval(
         conn,
         ai_employee_id=agent.agent_id,
         originating_turn_id=turn.id,
-        proposed_action=action.action_type.value,
-        proposed_action_params=action.params,
+        proposed_action="plan",
+        proposed_action_params=plan_params,
         trust_label=event.trust_label.value,
         requesting_principal_id=requester_id,
         requires_approver_principal_id=approver_id,
     )
 
+    steps = "\n".join(
+        f"  {i}. {_describe_staged_action(a)}" for i, a in enumerate(actions, 1)
+    )
+    plural = "step" if len(actions) == 1 else "steps"
     notice = (
-        f"⏸️ Awaiting your approval before I can {_describe_staged_action(action)}. "
-        f"Review it under Approvals (ref ...{approval_id[-6:]})."
+        f"⏸️ I've prepared {len(actions)} {plural} that need your approval before I "
+        f"continue:\n{steps}\n\n"
+        f"Approve the plan (ref ...{approval_id[-6:]}) and I'll run all of it and pick "
+        f"up where I left off."
     )
     try:
         # pending_approval_id rides along in the message's attachments so the

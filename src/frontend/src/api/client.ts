@@ -245,6 +245,64 @@ export type PendingApproval = {
   created_at: string;
 };
 
+export type AuditEntry = {
+  id: string;
+  turn_id: string;
+  virtual_actor_ai_employee_id: string;
+  virtual_actor_display_name: string;
+  requester_display_name: string;
+  action_type: string;
+  policy_decision: string;
+  outcome: string;
+  trust_label: string;
+  occurred_at: string;
+  action_params?: Record<string, unknown> | string | null;
+};
+
+export type AgentInspectTurn = {
+  id: string;
+  current_status: string;
+  started_at: string;
+  ended_at: string | null;
+  trigger_type: string | null;
+};
+
+export type AgentInspectTimer = {
+  id: string;
+  scheduled_at: string;
+  reason: string;
+  kind: string;
+  recurrence?: { kind?: string; every_minutes?: number; weekday?: string; at_local_time?: string } | null;
+};
+
+export type AgentInspectTask = {
+  id: string;
+  title: string;
+  current_status: string;
+  due_at: string | null;
+  created_at: string;
+};
+
+export type AgentInspect = {
+  agent: {
+    id: string;
+    handle: string;
+    display_name: string;
+    role_title: string;
+    current_status: string;
+    created_at: string;
+    bootstrapped_at: string | null;
+  };
+  is_working: boolean;
+  current_turn: AgentInspectTurn | null;
+  tools: { name: string; description: string }[];
+  tasks: AgentInspectTask[];
+  timers: AgentInspectTimer[];
+  recent_turns: AgentInspectTurn[];
+  recent_actions: AuditEntry[];
+  open_approvals: { id: string; proposed_action: string; current_status: string; created_at: string }[];
+};
+
 function workspaceBase(slug: string) {
   return `/${slug}/api`;
 }
@@ -374,6 +432,8 @@ export const api = {
       `${workspaceBase(slug)}/agents/${handle}/deactivate`,
       { method: "POST" },
     ),
+  inspectAgent: (slug: string, handle: string) =>
+    request<AgentInspect>(`${workspaceBase(slug)}/agents/${handle}/inspect`),
   createTemplateFromAgent: (
     slug: string,
     handle: string,
@@ -444,12 +504,21 @@ export const api = {
     request<Record<string, unknown>[]>(`${workspaceBase(slug)}/events`),
   listTurns: (slug: string) =>
     request<Record<string, unknown>[]>(`${workspaceBase(slug)}/turns`),
-  listAudit: (slug: string) =>
-    request<Record<string, unknown>[]>(`${workspaceBase(slug)}/audit`),
-  listLlmInvocations: (slug: string, opts: { limit?: number; after?: string } = {}) => {
+  listAudit: (slug: string, opts: { agentId?: string; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.agentId) params.set("agent_id", opts.agentId);
+    if (opts.limit) params.set("limit", String(opts.limit));
+    const query = params.toString();
+    return request<AuditEntry[]>(`${workspaceBase(slug)}/audit${query ? `?${query}` : ""}`);
+  },
+  listLlmInvocations: (
+    slug: string,
+    opts: { limit?: number; after?: string; agentId?: string } = {},
+  ) => {
     const params = new URLSearchParams();
     if (opts.limit) params.set("limit", String(opts.limit));
     if (opts.after) params.set("after", opts.after);
+    if (opts.agentId) params.set("agent_id", opts.agentId);
     const query = params.toString();
     return request<LlmInvocation[]>(
       `${workspaceBase(slug)}/llm-invocations${query ? `?${query}` : ""}`,

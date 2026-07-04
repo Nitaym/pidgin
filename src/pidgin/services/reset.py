@@ -17,6 +17,8 @@ from pidgin.workspace.manager import WorkspacePaths
 # and schema_migrations are deliberately excluded.
 _TABLES_TO_CLEAR = (
     "agent_action_log",
+    "agent_grant_resources",
+    "agent_execution_grants",
     "quarantined_items",
     "external_intake_items",
     "pending_approvals_status_log",

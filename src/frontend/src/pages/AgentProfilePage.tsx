@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type Agent } from "../api/client";
+import { api, type Agent, type AuditEntry } from "../api/client";
 import { BriefForm } from "../components/BriefForm";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { HrAssistPanel } from "../components/HrAssistPanel";
@@ -9,6 +9,98 @@ import { emptyCustomization, type HireCustomization } from "../types/hire";
 
 function agentStatusLabel(status: string): string {
   return status === "offboarded" ? "archived" : status;
+}
+
+const OUTCOME_LABELS: Record<string, string> = {
+  executed: "done",
+  staged: "awaiting approval",
+  refused: "refused",
+  failed: "failed",
+};
+
+function summarizeAction(entry: AuditEntry): string {
+  const p = entry.action_params;
+  const params = p && typeof p === "object" ? (p as Record<string, unknown>) : {};
+  const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+  if (entry.action_type === "execute") {
+    const kind = str(params.kind) ?? "file";
+    const name = str(params.name) ?? "(unnamed)";
+    const target = str(params.resource_uri) ?? "";
+    return `create ${kind} “${name}”${target ? ` in ${target}` : ""}`;
+  }
+  if (entry.action_type === "say" || entry.action_type === "post") {
+    const text = str(params.text) ?? "";
+    return text.length > 80 ? `${text.slice(0, 80)}…` : text;
+  }
+  if (entry.action_type === "read") return str(params.resource_uri) ?? "read";
+  const keys = Object.keys(params);
+  return keys.length ? `${keys.map((k) => `${k}=${String(params[k])}`).join(", ")}` : "";
+}
+
+function ActionLogPanel({ slug, agentId }: { slug: string; agentId: string }) {
+  const [entries, setEntries] = useState<AuditEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setEntries(await api.listAudit(slug, { agentId, limit: 100 }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load action log");
+    }
+  }, [slug, agentId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  return (
+    <div className="panel stack">
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <h4 style={{ margin: 0 }}>Action log</h4>
+        <button type="button" className="secondary" onClick={() => void refresh()}>
+          Refresh
+        </button>
+      </div>
+      <p className="muted" style={{ margin: 0 }}>
+        Every action this agent proposed and what the policy gate did with it.
+      </p>
+      {error ? <div className="error">{error}</div> : null}
+      {entries === null ? (
+        <p className="muted">Loading…</p>
+      ) : entries.length === 0 ? (
+        <p className="muted">No actions recorded yet.</p>
+      ) : (
+        <ul className="action-log" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {entries.map((entry) => (
+            <li
+              key={entry.id}
+              className="row"
+              style={{
+                gap: "0.75rem",
+                alignItems: "baseline",
+                padding: "0.4rem 0",
+                borderTop: "1px solid var(--border, #2a2a2a)",
+              }}
+            >
+              <span className="muted" style={{ fontFamily: "monospace", fontSize: "0.8rem" }}>
+                {new Date(entry.occurred_at).toLocaleString()}
+              </span>
+              <span style={{ fontWeight: 600 }}>{entry.action_type}</span>
+              <span className={`badge outcome-${entry.outcome}`}>
+                {OUTCOME_LABELS[entry.outcome] ?? entry.outcome}
+              </span>
+              <span className="muted" style={{ flex: 1, minWidth: 0 }}>
+                {summarizeAction(entry)}
+              </span>
+              <Link to={`../../debug/turns/${entry.turn_id}`} className="muted">
+                turn
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export function AgentProfilePage() {
@@ -251,6 +343,8 @@ export function AgentProfilePage() {
           />
         ) : null}
       </div>
+
+      <ActionLogPanel slug={slug} agentId={agent.id} />
     </div>
   );
 }

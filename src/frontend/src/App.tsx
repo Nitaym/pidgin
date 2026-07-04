@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { useApp } from "./context/AppContext";
+import { AgentDashboardPage } from "./pages/AgentDashboardPage";
 import { AgentProfilePage } from "./pages/AgentProfilePage";
 import { AgentChatPage } from "./pages/AgentChatPage";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
@@ -61,6 +62,9 @@ function WorkspaceApp() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<TeamPage />} />
+        <Route path="dashboard" element={<AgentDashboardPage />} />
+        <Route path="dashboard/:handle" element={<AgentDashboardPage />} />
+        <Route path="dashboard/:handle/console" element={<AgentDashboardPage view="console" />} />
         <Route path="hire" element={<HireEntryPage />} />
         <Route path="hire/marketplace" element={<HireWizardPage />} />
         <Route path="hire/marketplace/candidates/:templateId" element={<CandidateProfilePage />} />

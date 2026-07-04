@@ -102,3 +102,88 @@ def test_approve_unknown_approval_404s_cleanly(client: TestClient) -> None:
     slug = create_workspace(client, "Approvals Unknown Co")
     resp = client.post(f"/{slug}/api/approvals/not-a-real-id/approve")
     assert resp.status_code == 400
+
+
+def _seed_plan_approval(conn, *, ai_employee_id: str, turn_id: str, names: list[str]) -> str:
+    approver_id = get_or_create_operator_principal(conn)
+    return create_pending_approval(
+        conn,
+        ai_employee_id=ai_employee_id,
+        originating_turn_id=turn_id,
+        proposed_action="plan",
+        proposed_action_params={
+            "actions": [
+                {
+                    "action_type": "execute",
+                    "params": {
+                        "resource_uri": "gdrive:folder/root",
+                        "name": name,
+                        "kind": "folder",
+                    },
+                }
+                for name in names
+            ]
+        },
+        trust_label="internal-authenticated",
+        requesting_principal_id="operator",
+        requires_approver_principal_id=approver_id,
+    )
+
+
+def test_plan_approval_runs_all_steps_and_resumes(client: TestClient, pidgin_home: Path) -> None:
+    """Approving a batched plan runs every queued step, then re-dispatches the
+    agent (an approval_response continuation turn) so it picks up where it left
+    off instead of going silent after the first approval."""
+    slug = create_workspace(client, "Plan Approval Co")
+    handle = client.post(f"/{slug}/api/hire").json()["handle"]
+    client.post(f"/{slug}/api/agents/{handle}/messages", json={"body": "set up the wiki"})
+
+    turn = client.get(f"/{slug}/api/turns").json()[0]
+    turns_before = len(client.get(f"/{slug}/api/turns").json())
+
+    conn = _direct_conn(pidgin_home)
+    approval_id = _seed_plan_approval(
+        conn,
+        ai_employee_id=turn["ai_employee_id"],
+        turn_id=turn["id"],
+        names=["Company Wiki", "Onboarding"],
+    )
+    conn.close()
+
+    approved = client.post(f"/{slug}/api/approvals/{approval_id}/approve").json()
+    assert approved["current_status"] == "approved"
+    # Both queued steps ran and were labelled in the recorded outcome.
+    assert "1." in approved["resolution_text"]
+    assert "2." in approved["resolution_text"]
+
+    conn = _direct_conn(pidgin_home)
+    resume_events = conn.execute(
+        "SELECT * FROM inbound_events WHERE trigger_type = 'approval_response'"
+        " AND target_ai_employee_id = ?",
+        (turn["ai_employee_id"],),
+    ).fetchall()
+    conn.close()
+    assert resume_events, "approval should enqueue a continuation turn"
+
+    # The continuation actually ran, producing at least one more turn.
+    turns_after = len(client.get(f"/{slug}/api/turns").json())
+    assert turns_after > turns_before
+
+
+def test_audit_log_filters_by_agent(client: TestClient) -> None:
+    """The per-agent action log returns only that agent's gate decisions."""
+    slug = create_workspace(client, "Audit Filter Co")
+    handle = client.post(f"/{slug}/api/hire").json()["handle"]
+    client.post(f"/{slug}/api/agents/{handle}/messages", json={"body": "hello"})
+
+    turn = client.get(f"/{slug}/api/turns").json()[0]
+    agent_id = turn["ai_employee_id"]
+
+    scoped = client.get(f"/{slug}/api/audit", params={"agent_id": agent_id})
+    assert scoped.status_code == 200
+    rows = scoped.json()
+    assert rows, "the say action should have been logged"
+    assert all(row["virtual_actor_ai_employee_id"] == agent_id for row in rows)
+
+    empty = client.get(f"/{slug}/api/audit", params={"agent_id": "no-such-agent"})
+    assert empty.json() == []

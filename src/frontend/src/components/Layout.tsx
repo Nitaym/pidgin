@@ -48,6 +48,7 @@ export function Layout({ showNav = true }: LayoutProps) {
               <NavLink to={base} end>
                 Team
               </NavLink>
+              <NavLink to={`${base}/dashboard`}>Agent Dashboard</NavLink>
             </div>
             <div className="sidebar-section">
               <p className="sidebar-section-label">Workforce</p>

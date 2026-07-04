@@ -49,6 +49,9 @@ def test_activation_enqueues_self_anchored_bootstrap(pidgin_home: Path, recipe_p
     # The recipe's cadence guidance reached the brief.
     assert "content pipeline" in timer["reason"]
     assert "report to your operator" in timer["reason"].lower()
+    # Every agent is told to arm the 30-minute task heartbeat that drives its
+    # backlog to completion without being prompted.
+    assert '"every_minutes": 30' in timer["reason"]
 
     emp = conn.execute(
         "SELECT bootstrapped_at, current_status FROM ai_employees WHERE id = ?",

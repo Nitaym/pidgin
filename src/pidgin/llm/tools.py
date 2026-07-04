@@ -59,10 +59,13 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
     "execute": ToolSpec(
         name="execute",
         description=(
-            "Create new content in a connector resource — e.g. add a file to Google "
-            "Drive. Target the parent folder URI (gdrive:folder/<id>) and set `name` "
-            "(and `kind` for a subfolder). Creating is additive; editing or deleting "
-            "existing files is a separate, owner-approved action and is not done here."
+            "Create new content in a connector resource — e.g. add a document to "
+            "Google Drive. Target the parent folder URI (gdrive:folder/<id>), set "
+            "`name`, and choose `kind`: use \"doc\" for a real Google Doc (your "
+            "markdown content becomes headings/lists), \"folder\" for a subfolder, or "
+            "\"file\" for a raw text file. Prefer \"doc\" for anything people will read "
+            "in Drive. Creating is additive; editing or deleting existing files is a "
+            "separate, owner-approved action and is not done here."
         ),
         parameters={
             "type": "object",
@@ -73,16 +76,22 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
                 },
                 "content": {
                     "type": "string",
-                    "description": "File body text. Omit when creating a folder.",
+                    "description": (
+                        "Body text (markdown) for a doc or file. Omit when creating a folder."
+                    ),
                 },
                 "name": {
                     "type": "string",
-                    "description": "Name of the new file or folder.",
+                    "description": "Name of the new doc, file, or folder.",
                 },
                 "kind": {
                     "type": "string",
-                    "enum": ["file", "folder"],
-                    "description": "What to create in the target folder. Defaults to file.",
+                    "enum": ["doc", "folder", "file"],
+                    "description": (
+                        "What to create: \"doc\" = native Google Doc (recommended for "
+                        "readable content), \"folder\" = subfolder, \"file\" = raw text "
+                        "file. Defaults to file."
+                    ),
                 },
             },
             "required": ["resource_uri"],

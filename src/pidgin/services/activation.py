@@ -47,16 +47,28 @@ def _bootstrap_brief(recipe: RoleRecipe | None) -> str:
         "relevant to your role.",
         "2. Turn your mission and responsibilities into a backlog: open_task one "
         "durable task per standing responsibility you own.",
-        "3. Schedule your own recurring check-ins with schedule_self (use a "
-        "recurrence) so you act on that work without being prompted.",
+        "3. Arm your work heartbeat: call schedule_self with recurrence "
+        '{"kind": "interval", "every_minutes": 30} and a reason like "Advance my '
+        'open tasks." Every 30 minutes you will wake, look at your open tasks, and '
+        "push the most important one forward — this is the heartbeat that drives your "
+        "work to completion without anyone prompting you. Every agent runs exactly one.",
         "4. Schedule a recurring status report to your operator via schedule_self "
         "+ escalate — this is a standing rule for every agent.",
         "5. If anything blocks you from starting (a missing tool or unclear "
         "scope), escalate it now, then stop.",
+        "",
+        "How the heartbeat pursues a task: each wake, advance it as far as you can. "
+        "If a step needs the owner's sign-off, queue it for approval and stop — you'll "
+        "be woken the moment it's approved to finish that step and continue. When a "
+        "task is fully done, close it. Only keep the heartbeat for as long as you have "
+        "open tasks.",
     ]
     autonomy = recipe.autonomy if recipe else None
     if autonomy and autonomy.cadence_guidance:
-        lines += ["", "Suggested cadence for your role (you decide the exact timing):"]
+        lines += [
+            "",
+            "Role-specific reviews to fold into your heartbeat (you decide exact timing):",
+        ]
         lines += [f"  - {g}" for g in autonomy.cadence_guidance]
     if autonomy and autonomy.supervisor_report:
         rep = autonomy.supervisor_report
@@ -65,7 +77,7 @@ def _bootstrap_brief(recipe: RoleRecipe | None) -> str:
             f"  - Report to your operator {rep.cadence} ({when} ~{rep.at_local_time} UTC)."
         )
     else:
-        lines.append("  - Default: a brief daily review and a weekly report to your operator.")
+        lines.append("  - Default report cadence: a short weekly report to your operator.")
     return "\n".join(lines)
 
 
@@ -98,6 +110,12 @@ def deactivate_agent(
         reason="Deactivated by workspace operator",
     )
     cancelled = cancel_agent_timers(conn, ai_employee_id=agent["id"])
+    # Deactivation ends the agent's session, so any standing execution grant is
+    # revoked too — a reactivated agent must earn a fresh approval before it can
+    # create unattended again.
+    from pidgin.db.grants import revoke_agent_grants
+
+    revoke_agent_grants(conn, ai_employee_id=agent["id"])
     conn.execute(
         "UPDATE ai_employees SET bootstrapped_at = NULL, updated_at = ? WHERE id = ?",
         (utc_now_iso(), agent["id"]),

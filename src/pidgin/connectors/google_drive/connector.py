@@ -23,6 +23,11 @@ from pidgin.connectors.types import (
 DRIVE_API = "https://www.googleapis.com/drive/v3"
 UPLOAD_API = "https://www.googleapis.com/upload/drive/v3"
 TEXT_MIME = "text/plain; charset=utf-8"
+GDOC_MIME = "application/vnd.google-apps.document"
+MARKDOWN_MIME = "text/markdown; charset=utf-8"
+
+# kinds that mean "a real Google Doc" (converted native doc), vs a plain-text file.
+_DOC_KINDS = {"doc", "gdoc", "document", "google_doc", "googledoc"}
 
 # Cap text handed back to the LLM (AGENT_RUNTIME_SPEC §5.3 ~32 KB).
 MAX_READ_BYTES = 32 * 1024
@@ -195,10 +200,14 @@ class GoogleDriveConnector:
 
         token = self._access_token(DRIVE_WRITE_SCOPE)
         with self._client(token) as client:
-            kind = str((payload.extra or {}).get("kind") or "file")
+            kind = str((payload.extra or {}).get("kind") or "file").lower()
             name = (payload.subject or "").strip() or "Untitled"
             if kind == "folder":
                 return self._create_folder(client, parent_id=resource.resource_id, name=name)
+            if kind in _DOC_KINDS:
+                return self._create_gdoc(
+                    client, parent_id=resource.resource_id, name=name, content=payload.text or ""
+                )
             return self._create_file(
                 client, parent_id=resource.resource_id, name=name, content=payload.text or ""
             )
@@ -211,6 +220,48 @@ class GoogleDriveConnector:
         return WriteResult(
             handle=str(data.get("id") or ""),
             external_ref={"id": data.get("id"), "name": data.get("name"), "kind": "folder"},
+        )
+
+    def _create_gdoc(self, client: Any, *, parent_id: str, name: str, content: str) -> WriteResult:
+        """Create a *native* Google Doc, not a plain-text/markdown file.
+
+        Setting the target mimeType to google-apps.document makes Drive convert
+        the uploaded body into a real Doc. Markdown import is supported, so the
+        agent's markdown becomes headings/lists in the Doc rather than a raw .md
+        file (the 2026-07 "it made markdown, not Google Docs" report). An empty
+        doc is a metadata-only create.
+        """
+        metadata = {"name": name, "parents": [parent_id], "mimeType": GDOC_MIME}
+        if not content:
+            resp = client.post(f"{DRIVE_API}/files", json=metadata, params={"fields": "id,name"})
+            self._raise_for_status(resp, f"create doc in {parent_id}")
+            data = resp.json()
+            return WriteResult(
+                handle=str(data.get("id") or ""),
+                external_ref={"id": data.get("id"), "name": data.get("name"), "kind": "doc"},
+            )
+
+        boundary = "pidginGDocBoundary7b3f"
+        body = (
+            f"--{boundary}\r\n"
+            "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+            f"{json.dumps(metadata)}\r\n"
+            f"--{boundary}\r\n"
+            f"Content-Type: {MARKDOWN_MIME}\r\n\r\n"
+            f"{content}\r\n"
+            f"--{boundary}--"
+        ).encode("utf-8")
+        resp = client.post(
+            f"{UPLOAD_API}/files",
+            params={"uploadType": "multipart", "fields": "id,name"},
+            content=body,
+            headers={"Content-Type": f"multipart/related; boundary={boundary}"},
+        )
+        self._raise_for_status(resp, f"create doc in {parent_id}")
+        data = resp.json()
+        return WriteResult(
+            handle=str(data.get("id") or ""),
+            external_ref={"id": data.get("id"), "name": data.get("name"), "kind": "doc"},
         )
 
     def _create_file(self, client: Any, *, parent_id: str, name: str, content: str) -> WriteResult:
