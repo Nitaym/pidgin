@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, type Agent } from "../api/client";
 import { onReadChange, unreadCount } from "../utils/chatUnread";
+import { useWorkspaceEvent } from "../context/WorkspaceEvents";
 
 type SidebarChatProps = {
   slug: string;
@@ -45,9 +46,18 @@ export function SidebarChat({ slug, base: _base, onOpen }: SidebarChatProps) {
     setUnread(counts.reduce((a, b) => a + b, 0));
   }, [slug, chatAgents.map((a) => a.handle).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A new agent message pushes `message.created`, which lights up the badge in
+  // real time. Also refresh when a conversation is marked read elsewhere. The
+  // slow interval is just a safety net if the SSE stream drops.
+  useWorkspaceEvent("message.*", refreshUnread);
   useEffect(() => {
     void refreshUnread();
-    return onReadChange(() => void refreshUnread());
+    const interval = setInterval(() => void refreshUnread(), 60000);
+    const unsubscribe = onReadChange(() => void refreshUnread());
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
   }, [refreshUnread]);
 
   if (chatAgents.length === 0) return null;

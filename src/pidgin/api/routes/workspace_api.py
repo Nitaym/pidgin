@@ -49,6 +49,7 @@ from pidgin.recipes.catalog import (
     list_bundled_template_summaries,
 )
 from pidgin.runtime.prompt import build_system_prompt
+from pidgin.realtime import WorkspaceEvent, format_ws_sse, workspace_event_bus
 from pidgin.runtime.streaming import KeyedTurnEventSink, format_sse, turn_event_bus
 from pidgin.runtime.turn_dispatcher import dispatch_turn
 from pidgin.services import inject_test_event
@@ -879,6 +880,41 @@ async def api_turn_stream(workspace_slug: str, stream_key: str, request: Request
             await dispatch_future
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@router.get("/stream")
+async def api_workspace_stream(workspace_slug: str, request: Request):
+    """Standing per-workspace SSE channel multiplexing all UI notifications
+    (messages, approvals, diagnostics). One connection per browser tab; the
+    client routes events by topic. Thin/invalidation payloads — the client
+    refetches via REST, so a missed event self-heals on the next one."""
+    session = require_workspace_session(request, workspace_slug)
+    workspace_id = session.workspace_id
+    workspace_event_bus.bind_loop(asyncio.get_running_loop())
+    queue = workspace_event_bus.subscribe(workspace_id)
+
+    async def event_generator():
+        try:
+            # Prompt an immediate sync on (re)connect so a client that missed
+            # events while disconnected catches up.
+            yield format_ws_sse(WorkspaceEvent(topic="stream.connected"))
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=20.0)
+                except TimeoutError:
+                    yield ": keepalive\n\n"  # hold the connection open past idle proxies
+                    continue
+                yield format_ws_sse(event)
+        finally:
+            workspace_event_bus.unsubscribe(workspace_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/inject-event")

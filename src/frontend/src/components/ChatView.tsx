@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import { api, type Message } from "../api/client";
+import { useWorkspaceEvent } from "../context/WorkspaceEvents";
 import { useVoiceSession, type TimingMark } from "../hooks/useVoiceSession";
 import { useAudioDevices } from "../hooks/useAudioDevices";
 import { VoiceDiagnosticsPanel, type MarkMap, type LlmMarks } from "./VoiceDiagnosticsPanel";
@@ -50,6 +51,7 @@ export function ChatView({
   compact = false,
 }: ChatViewProps) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,6 +82,7 @@ export function ChatView({
       try {
         const data = await api.getAgentMessages(slug, agentHandle);
         setMessages(data.messages);
+        setConversationId(data.conversation_id);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load chat");
       } finally {
@@ -88,6 +91,27 @@ export function ChatView({
     }
     void load();
   }, [slug, agentHandle]);
+
+  // Live-append messages the agent posts into this thread while it's open —
+  // e.g. an autonomous turn, or a reply landing after the stream closed. The
+  // interactive send path refetches itself, so skip while it's active. A
+  // resync (undefined payload, on SSE reconnect) also refetches.
+  const onMessageEvent = useCallback(
+    (payload: unknown) => {
+      if (streaming || sendingRef.current || !slug || !agentHandle) return;
+      const convId = (payload as { conversation_id?: string } | undefined)?.conversation_id;
+      if (payload !== undefined && convId !== conversationId) return;
+      api
+        .getAgentMessages(slug, agentHandle)
+        .then((fresh) => {
+          setMessages(fresh.messages);
+          setConversationId(fresh.conversation_id);
+        })
+        .catch(() => {});
+    },
+    [streaming, conversationId, slug, agentHandle],
+  );
+  useWorkspaceEvent("message.created", onMessageEvent);
 
   // The agent's configured voice (preset key), resolved from its brief.
   const [agentVoice, setAgentVoice] = useState<string | undefined>(undefined);

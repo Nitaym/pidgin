@@ -6,6 +6,7 @@ import { PidginLogo } from "./PidginLogo";
 import { SidebarApprovals } from "./SidebarApprovals";
 import { SidebarChat } from "./SidebarChat";
 import { useApp } from "../context/AppContext";
+import { WorkspaceEventsProvider } from "../context/WorkspaceEvents";
 
 type LayoutProps = {
   showNav?: boolean;
@@ -26,7 +27,7 @@ export function Layout({ showNav = true }: LayoutProps) {
   const openChat = useCallback((handle?: string) => setChatModal({ handle }), []);
   const closeChat = useCallback(() => setChatModal(null), []);
 
-  return (
+  const layout = (
     <div className="layout">
       <aside className="sidebar">
         <div className="sidebar-header">
@@ -78,5 +79,13 @@ export function Layout({ showNav = true }: LayoutProps) {
         <ChatModal initialHandle={chatModal.handle} onClose={closeChat} />
       ) : null}
     </div>
+  );
+
+  // Wrap in the realtime provider once a workspace is known so the sidebar and
+  // page content share a single SSE connection.
+  return workspace ? (
+    <WorkspaceEventsProvider slug={workspace.slug}>{layout}</WorkspaceEventsProvider>
+  ) : (
+    layout
   );
 }

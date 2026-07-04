@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useApp } from "../context/AppContext";
+import { useWorkspaceEvent } from "../context/WorkspaceEvents";
 
 export function DebugPage() {
   const { workspace } = useApp();
@@ -11,7 +12,7 @@ export function DebugPage() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     if (!slug) return;
     setError(null);
     const [eventRows, turnRows, auditRows] = await Promise.all([
@@ -22,11 +23,17 @@ export function DebugPage() {
     setEvents(eventRows);
     setTurns(turnRows);
     setAudit(auditRows);
-  }
+  }, [slug]);
 
   useEffect(() => {
     void refresh().catch((err: Error) => setError(err.message));
-  }, [slug]);
+  }, [refresh]);
+
+  // Live-refresh the diagnostics tables as background turns complete.
+  const onTurnCompleted = useCallback(() => {
+    void refresh().catch(() => {});
+  }, [refresh]);
+  useWorkspaceEvent("turn.completed", onTurnCompleted);
 
   async function handleInject() {
     if (!slug) return;

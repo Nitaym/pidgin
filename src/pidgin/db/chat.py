@@ -114,6 +114,21 @@ def insert_message(
         ),
     )
     conn.commit()
+
+    # Notify any connected UI that this conversation changed so badges and open
+    # threads refetch. Thin/invalidation event — carries only ids to scope the
+    # refetch. Fires for every write, including background/autonomous turns
+    # (which is the path plain polling used to miss).
+    from pidgin.realtime import publish_workspace_event
+
+    publish_workspace_event(
+        conn,
+        "message.created",
+        {
+            "conversation_id": conversation_id,
+            "agent_authored": originating_turn_id is not None,
+        },
+    )
     return message_id
 
 

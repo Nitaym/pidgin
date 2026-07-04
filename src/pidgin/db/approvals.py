@@ -54,6 +54,12 @@ def create_pending_approval(
         (new_ulid(), approval_id, requesting_principal_id, now),
     )
     conn.commit()
+
+    from pidgin.realtime import publish_workspace_event
+
+    publish_workspace_event(
+        conn, "approval.created", {"approval_id": approval_id, "ai_employee_id": ai_employee_id}
+    )
     return approval_id
 
 
@@ -121,4 +127,10 @@ def resolve_pending_approval(
         (new_ulid(), approval_id, from_status, to_status, actor_principal_id, resolution_text, now),
     )
     conn.commit()
+
+    from pidgin.realtime import publish_workspace_event
+
+    publish_workspace_event(
+        conn, "approval.resolved", {"approval_id": approval_id, "status": to_status}
+    )
     return get_pending_approval(conn, approval_id)

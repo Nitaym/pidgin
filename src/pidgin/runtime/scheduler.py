@@ -180,7 +180,14 @@ def run_once(
             fire_due_timers(bridge)
         except Exception:  # noqa: BLE001 — a broken timer must not stall dispatch
             log.exception("[scheduler] fire_due_timers failed")
-    return dispatch_pending_turns(ctx, batch_size=batch_size)
+    processed = dispatch_pending_turns(ctx, batch_size=batch_size)
+    if processed and bridge is not None:
+        # Coarse diagnostics signal — lets the Diagnostics page live-refresh its
+        # events/turns/audit tables as background turns complete.
+        from pidgin.realtime import publish_workspace_event
+
+        publish_workspace_event(bridge, "turn.completed", {"processed": processed})
+    return processed
 
 
 def run_loop(
