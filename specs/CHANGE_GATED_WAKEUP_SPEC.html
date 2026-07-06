@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<!-- Change-Gated Wakeup — self-contained spec. All CSS inline. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Change-Gated Wakeup — Spec</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1b1f24;
+    --muted: #5b6570;
+    --faint: #8a939d;
+    --line: #e5e9ee;
+    --accent: #3b5bdb;
+    --accent-soft: #edf1ff;
+    --code-bg: #f4f6f9;
+    --ok: #2f9e44;
+    --warn: #e8590c;
+    --radius: 8px;
+    --maxw: 820px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a; --fg: #e6e9ec; --muted: #9aa4ad; --faint: #6b757e;
+      --line: #262b31; --accent: #7a93ff; --accent-soft: #1c2230;
+      --code-bg: #1b1f24;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 56px 28px 96px; }
+  header.spec-head { border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 34px; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .08em; font-size: 12px; font-weight: 600; color: var(--faint); margin: 0 0 8px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; letter-spacing: -.01em; }
+  .oneliner { font-size: 18px; color: var(--muted); margin: 0 0 18px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13.5px; color: var(--muted); }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+          background: var(--accent-soft); color: var(--accent); border: 1px solid transparent; }
+  h2 { font-size: 20px; margin: 40px 0 12px; letter-spacing: -.01em; }
+  h2 .num { color: var(--faint); font-weight: 600; margin-right: 8px; }
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin: 4px 0; }
+  a { color: var(--accent); }
+  code { background: var(--code-bg); padding: 1.5px 5px; border-radius: 4px; font-size: 13.5px;
+         font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); padding: 14px 16px; border-radius: var(--radius); overflow-x: auto;
+        font-size: 13px; line-height: 1.5; margin: 0 0 18px;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  pre code { background: none; padding: 0; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 620px) { .cols { grid-template-columns: 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+  .card h3 { margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 18px; font-size: 14.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); font-weight: 600; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.q { font-weight: 600; width: 26%; }
+  td.d { width: 30%; }
+  .callout { border-left: 3px solid var(--warn); background: var(--code-bg); padding: 12px 16px;
+             border-radius: 0 var(--radius) var(--radius) 0; margin: 6px 0 18px; }
+  .callout p:last-child { margin-bottom: 0; }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line);
+           font-size: 13px; color: var(--faint); }
+  @media print {
+    body { font-size: 12pt; }
+    .wrap { padding: 0; max-width: none; }
+    h2 { page-break-after: avoid; }
+    tr, .card, .callout { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="spec-head">
+    <p class="eyebrow">Feature Spec</p>
+    <h1>Change-Gated Wakeup</h1>
+    <p class="oneliner">A recurring self-wakeup runs its expensive turn only when a cheap, DB-only probe shows something actually changed since that timer last ran — otherwise it skips.</p>
+    <div class="meta">
+      <span class="pill">Draft</span>
+      <span>Author: Nitay</span>
+      <span>2026-07-06</span>
+    </div>
+  </header>
+
+  <!-- SUMMARY -->
+  <section>
+    <h2><span class="num">1</span>Summary</h2>
+    <p>
+      The autonomy layer arms recurring timers (daily/weekly/interval) that wake an agent on a fixed
+      cadence — including high-frequency pollers that fire every 30 minutes. Today every fire builds a
+      full LLM turn even when the world is unchanged, burning tokens, drawing down the daily wakeup
+      budget, and adding noise to the operator's dashboard. Change-Gated Wakeup keeps the heartbeat
+      cadence but inserts a cheap gate <em>before</em> the turn is built: a pure-DB probe over five
+      change sources, compared against the timer's own last real run. If nothing qualifying has changed,
+      the wakeup ends immediately as a recorded <code>skipped</code> turn — no LLM call, no budget draw —
+      and re-arms as usual. A configurable set of guaranteed daily wake times (default one at 09:00)
+      stays ungated so every agent still does a full pass on a floor cadence even in a totally quiet
+      world. Every skip is auditable, carrying the exact probe snapshot that justified it.
+    </p>
+  </section>
+
+  <!-- SCOPE -->
+  <section>
+    <h2><span class="num">2</span>Scope</h2>
+    <div class="cols">
+      <div class="card">
+        <h3>In scope</h3>
+        <ul>
+          <li>A <strong>change probe</strong>: a cheap, read-only, DB-only check over five change sources, run before a recurring wakeup builds its turn.</li>
+          <li><strong>Gating</strong> of all <code>recurring</code> timers uniformly — skip the LLM turn when the probe finds nothing changed.</li>
+          <li>A per-timer <strong>baseline</strong> (<code>last_ran_at</code>) that only advances on a real, non-skipped run.</li>
+          <li>Recorded <strong>skipped turns</strong> with a probe snapshot, surfaced (collapsed) in the agent turn dashboard.</li>
+          <li>A <strong>guaranteed daily wake-times floor</strong> (ungated), armed at bootstrap; default a single 09:00.</li>
+          <li>A per-agent <strong>Advanced configuration</strong> panel exposing the knobs, plus a per-timer <code>always_run</code> opt-out.</li>
+          <li>Excluding skips from <code>max_wakeups_per_day</code>, documented at the counter.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Out of scope</h3>
+        <ul>
+          <li><strong>Connector-side watcher push</strong> (trigger-5 real-time delivery) — the probe only reads change rows others record; it does not build them.</li>
+          <li>Gating non-recurring wakeups: bootstrap, one-shot self-prompts, supervisor reports, and external triggers (1–3, 7, 8) are never gated.</li>
+          <li>Active polling of connectors at probe time — the probe makes no network calls.</li>
+          <li>Changing the recurrence engine, re-arm math, or the trust model (all unchanged from the autonomy spec).</li>
+          <li>Any global "bring empty wakeups back" switch — the gate is safe by construction; only per-agent tuning exists.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section>
+    <h2><span class="num">3</span>Why this exists</h2>
+    <p>
+      The <a href="AUTONOMY_SPEC.md">autonomy layer</a> made agents self-running: they arm their own
+      recurring timers and wake on a cadence with no human in the loop. A common shape is a short-interval
+      poller — "check the campaign every 30 minutes." That's <strong>~48 firings a day from one timer</strong>,
+      and in a quiet hour every one of them builds a full LLM turn to look at an unchanged world, conclude
+      there's nothing to do, and go back to sleep.
+    </p>
+    <p>Three concrete costs of an empty wakeup that still runs:</p>
+    <ul>
+      <li><strong>Token/compute cost</strong> — a full context-assembly + LLM turn for a no-op.</li>
+      <li><strong>Budget starvation</strong> — the autonomy spec caps <code>max_wakeups_per_day</code> at 100;
+          a 30-minute poller alone can eat half of it doing nothing, deferring the agent out of <em>real</em> work.</li>
+      <li><strong>Dashboard noise</strong> — the turns timeline fills with identical "nothing to do" turns, burying the ones that mattered.</li>
+    </ul>
+    <p>
+      The runtime already knows how to record that something happened — new <code>inbound_events</code> rows,
+      <code>tasks_status_log</code> entries, resolved approvals, fired watchers, delegated returns. What's
+      missing is a cheap gate that consults those records <em>before</em> paying for a turn, so the cadence
+      stays as a heartbeat but only cashes out into real work when there's work to do.
+    </p>
+  </section>
+
+  <!-- DEFINITION / HOW IT WORKS -->
+  <section>
+    <h2><span class="num">4</span>How it works</h2>
+
+    <h3>4.1 The gate in the turn lifecycle</h3>
+    <p>
+      Nothing changes about how a recurring timer <em>fires</em>. It still materializes as an
+      <code>inbound_events</code> row (<code>trigger_type = 'timer'</code>, <code>processing_status = 'pending'</code>).
+      The gate sits in the worker, between claiming the row and building the turn:
+    </p>
+    <pre><code>recurring timer fires -> inbound_events row (pending)
+  worker claims row
+    run change probe (pure DB, read-only, no LLM, no network)
+      gating disabled for agent?  -> RUN
+      timer.always_run = 1?       -> RUN
+      any source count &gt; 0?        -> RUN
+      else                        -> SKIP
+
+    RUN:  dispatching -> build turn -> LLM -> done
+          stamp timer.last_ran_at = now   (advances baseline)
+          draws 1 against max_wakeups_per_day
+          re-arm recurrence
+
+    SKIP: create turn record (status = skipped, + probe snapshot)
+          inbound_events.processing_status = skipped
+          DO NOT stamp last_ran_at   (baseline unchanged)
+          DOES NOT draw against the wakeup budget
+          re-arm recurrence exactly as a normal fire would</code></pre>
+
+    <h3>4.2 What counts as "changed" — the five sources</h3>
+    <p>
+      The probe counts qualifying rows for each source since this timer's <code>last_ran_at</code>. The change
+      signal is the <strong>union</strong> of all five; any single non-zero count runs the turn.
+    </p>
+    <table>
+      <thead><tr><th>#</th><th>Source</th><th>Probe reads</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="d">New inbound events</td><td><code>inbound_events</code> for this agent with <code>received_at &gt; last_ran_at</code> (DMs, channel activity, external mail).</td></tr>
+        <tr><td>2</td><td class="d">Task state change</td><td><code>tasks_status_log</code> entries since baseline (new/unblocked), plus tasks whose <code>due_at</code> crossed the <code>last_ran_at → now</code> window (computed).</td></tr>
+        <tr><td>3</td><td class="d">Approvals resolved</td><td><code>pending_approvals</code> for this agent resolved since baseline.</td></tr>
+        <tr><td>4</td><td class="d">Watched-resource change</td><td>Fired <code>agent_watchers</code> / watcher <code>inbound_events</code> since baseline — <strong>only for resources the agent explicitly watches</strong>, never ambient connector activity.</td></tr>
+        <tr><td>5</td><td class="d">Delegated returns</td><td>Peer-delegation results routed back to this agent since baseline.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout">
+      <p>
+        <strong>Source 4 is scoped to explicit watchers only.</strong> A file changing somewhere in a shared
+        Drive is <em>not</em> a wakeup reason. It counts only if the agent set up (or was told to set up) an
+        <code>agent_watchers</code> subscription on that resource — matching trigger-5's meaning, "something
+        <em>you were keeping an eye on</em> changed." Otherwise a busy shared Drive would defeat the gate.
+      </p>
+    </div>
+
+    <h3>4.3 The baseline: this timer's own last real run</h3>
+    <p>
+      Each recurring timer carries <code>last_ran_at</code> — the timestamp of its most recent <strong>non-skipped</strong>
+      turn (null on first fire). The probe always asks "anything since <em>my</em> <code>last_ran_at</code>?" Two
+      rules make this safe:
+    </p>
+    <ul>
+      <li><strong>Skips never advance the baseline.</strong> If a 30-min timer skips at 09:00 and 09:30, then a
+          watched file changes at 09:45, the 10:00 fire compares against the last <em>real</em> run (say 08:30),
+          sees the change, and runs. Changes accumulated across a quiet streak are never swallowed.</li>
+      <li><strong>Other timers and triggers don't advance it.</strong> A direct-address turn at 09:50 does not let
+          the 10:00 review skip — the review has its own job the DM didn't do. Errs toward running (the safe direction).</li>
+    </ul>
+
+    <h3>4.4 Which wakeups are gated</h3>
+    <table>
+      <thead><tr><th>Wakeup</th><th>Gated?</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="d">Recurring timers (all cadences)</td><td>Yes</td><td>The only clock-driven polls that find an empty world. In practice only the frequent ones ever skip — a daily/weekly review almost always has some change.</td></tr>
+        <tr><td class="d">Guaranteed daily wake times</td><td>No</td><td>The floor. Always a real pass (see 4.5).</td></tr>
+        <tr><td class="d">Bootstrap</td><td>No</td><td>Must run; no <code>last_ran_at</code> to compare against.</td></tr>
+        <tr><td class="d">One-shot self-prompt</td><td>No</td><td>A deliberate future commitment ("remind me Friday to X"), not a poll.</td></tr>
+        <tr><td class="d">Supervisor report</td><td>No</td><td>Fires as a liveness heartbeat even in a quiet week; a quiet probe just makes it a one-liner.</td></tr>
+        <tr><td class="d">Direct address / inbound / delegation / approval (1,2,3,7,8)</td><td>No</td><td>These <em>are</em> the change — something already happened.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>4.5 The guaranteed-wake floor</h3>
+    <p>
+      To prevent an agent going silent for days when nothing changes, bootstrap arms one or more
+      <strong>ungated daily wake times</strong> (<code>always_run</code>). Default is a single wake at
+      <strong>09:00</strong>; an operator can add more in the Advanced panel (e.g. 09:00, 13:00, 17:00) — each is a
+      guaranteed full pass regardless of change. This is the liveness floor beneath the gated pollers.
+    </p>
+
+    <h3>4.6 Recording a skip</h3>
+    <p>
+      A skip still <strong>creates a turn record</strong> so it is a first-class, auditable object in the turns
+      table and dashboard — but a terminal one with no LLM call:
+    </p>
+    <ul>
+      <li><code>turns.status = 'skipped'</code>, <code>skip_reason = 'nothing_changed'</code>;</li>
+      <li>the <strong>probe snapshot</strong>: which of the five sources were checked, each source's count-since-baseline,
+          and the <code>last_ran_at</code> baseline used;</li>
+      <li><code>inbound_events.processing_status = 'skipped'</code>; one audit row per skip.</li>
+    </ul>
+    <p>
+      The dashboard <strong>collapses consecutive skips</strong> into one strip — e.g.
+      <em>"⤳ 12 recurring wakeups skipped (nothing changed) · 08:00–14:00"</em> — that expands to the individual
+      firings and their snapshots. Real turns stay legible; skips stay auditable. Expanding a skip shows exactly
+      why it was safe: <em>"0 new events · 0 task changes · 0 approvals · 0 watched-resource changes · 0 delegated
+      returns since 08:30."</em>
+    </p>
+
+    <h3>4.7 Budget</h3>
+    <p>
+      Skips <strong>do not draw against <code>max_wakeups_per_day</code></strong> — that counter meters real
+      (LLM-running) turns only. Charging empty wakeups would defeat the feature and could starve an agent out of
+      real work. This exclusion must be stated <strong>in the <code>max_wakeups_per_day</code> documentation
+      itself</strong>, so it isn't later "fixed" into counting skips. Runaway protection stays with
+      <code>max_pending_timers</code> (arming) plus per-skip auditing (a runaway probe loop is visible in
+      diagnostics even though it's unmetered).
+    </p>
+
+    <h3>4.8 Configuration</h3>
+    <p>
+      The gate and the daily floor are <strong>universal, on-by-default runtime behavior</strong>. Every knob is
+      overridable <strong>per agent</strong> in an <strong>Advanced</strong> configuration panel on the agent's
+      settings (operator-facing, tucked away — not a routine control):
+    </p>
+    <table>
+      <thead><tr><th>Knob</th><th>Default</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td class="d">Change-gating</td><td>On</td><td>Off = every recurring wakeup runs a real turn (legacy behavior).</td></tr>
+        <tr><td class="d">Guaranteed wake times</td><td><code>["09:00"]</code></td><td>Ordered list of ungated daily wake times; add/remove entries.</td></tr>
+        <tr><td class="d">Change sources</td><td>All five on</td><td>Toggle which of the five signals count for this agent.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Plus a per-timer escape hatch: <code>schedule_self(..., always_run: true)</code> opts an individual recurring
+      timer out of gating (the compliance "prove you're alive" tick).
+    </p>
+
+    <h3>4.9 Schema (additive)</h3>
+    <ul>
+      <li><code>agent_timers.last_ran_at TEXT NULL</code> — per-timer baseline; stamped only on a real run.</li>
+      <li><code>agent_timers.always_run INTEGER NOT NULL DEFAULT 0</code> — per-timer gate opt-out.</li>
+      <li><code>inbound_events.processing_status</code> — add <code>'skipped'</code> to the CHECK set.</li>
+      <li><code>turns</code> — add <code>'skipped'</code> status, <code>skip_reason TEXT NULL</code>, <code>probe_snapshot_json TEXT NULL</code>.</li>
+      <li><code>ai_employees</code> — per-agent advanced config: <code>change_gating_enabled</code>, <code>guaranteed_wake_times_json</code>, <code>change_sources_json</code>.</li>
+      <li>Indices to keep the five count-since-<code>last_ran_at</code> probes cheap (most already exist on <code>received_at</code> / status columns).</li>
+    </ul>
+  </section>
+
+  <!-- DECISIONS & RATIONALE -->
+  <section>
+    <h2><span class="num">5</span>Decisions &amp; rationale</h2>
+    <table>
+      <thead>
+        <tr><th>Question / topic</th><th>Decision</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="q">Core problem — efficiency or responsiveness?</td><td class="d">Efficiency / anti-noise: suppress empty recurring wakeups. Heartbeat cadence stays; only the LLM turn is gated.</td><td>The pain is a 30-min poller burning tokens, budget, and attention on an unchanged world — not latency to change. Smaller, safer than building real-time connector push.</td></tr>
+        <tr><td class="q">What counts as "changed"?</td><td class="d">Union of all five sources: new inbound events, task-state change, approvals resolved, watched-resource change, delegated returns.</td><td>Any of the five can mean real work waiting. Narrower scoping would let legitimate wakeup reasons fall through the gate.</td></tr>
+        <tr><td class="q">Do ambient Drive/file changes count?</td><td class="d">No — source 4 counts only resources under an explicit <code>agent_watchers</code> subscription the agent set up.</td><td>Otherwise every edit in a shared Drive wakes the agent, defeating the gate. Matches trigger-5's "something you were keeping an eye on."</td></tr>
+        <tr><td class="q">How cheap must the probe be?</td><td class="d">Pure-DB, read-only: indexed count queries. No connector calls, no LLM.</td><td>The probe must cost far less than the turn it avoids. Change is recorded as rows when it happens; the probe just reads them.</td></tr>
+        <tr><td class="q">Which wakeups are gated?</td><td class="d">All <code>recurring</code> timers uniformly. Not bootstrap, one-shot self-prompts, supervisor reports, or external triggers.</td><td>Only clock-driven polls find empty worlds. Deliberate commitments and liveness reports must fire regardless. Uniform gating self-targets the frequent pollers (daily/weekly rarely skip).</td></tr>
+        <tr><td class="q">What stops an agent going silent for days?</td><td class="d">Bootstrap arms guaranteed ungated daily wake times — a configurable list, default one at 09:00.</td><td>Even a totally quiet agent must do a real pass on a floor cadence; indefinite silence would worry an operator and skip genuine periodic review.</td></tr>
+        <tr><td class="q">"Nothing changed" since when?</td><td class="d">Since this timer's own last <em>non-skipped</em> run (<code>last_ran_at</code>). Skips and other turns don't advance it.</td><td>If skips advanced the baseline, a change during a skip streak would be swallowed. Per-timer baseline errs toward running — the safe direction.</td></tr>
+        <tr><td class="q">How is a skip recorded?</td><td class="d">Create a real turn record with <code>status = skipped</code> + probe snapshot; UI collapses consecutive skips.</td><td>A skip should be a first-class, auditable object ("no silent drop"), but no thinking happened — so terminal, no LLM, and quiet in the timeline.</td></tr>
+        <tr><td class="q">Do skips count against the wakeup budget?</td><td class="d">No. <code>max_wakeups_per_day</code> meters real turns only — and its docs must say so explicitly.</td><td>Charging empty wakeups would defeat the feature and could defer an agent out of real work. Runaway arming is already bounded by <code>max_pending_timers</code>.</td></tr>
+        <tr><td class="q">Universal or configurable?</td><td class="d">Universal on-by-default runtime behavior; every knob overridable per agent in an Advanced panel. Plus per-timer <code>always_run</code>.</td><td>Safe default for everyone; advanced operators tune per agent without recipe edits. No global "empty wakeups back" switch — there's no legitimate need.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- OPEN QUESTIONS -->
+  <section>
+    <h2><span class="num">6</span>Open questions</h2>
+    <div class="callout">
+      <ul>
+        <li><strong>Already-processed inbound events (source 1).</strong> An inbound event fires its own trigger-1/2/3
+            turn. Should it <em>also</em> count as "change" for a later recurring gate? Leaning yes (the review may want to
+            synthesize across the day) — but a chatty agent would then almost never skip. Confirm, or restrict source 1 to
+            <em>unprocessed</em> events.</li>
+        <li><strong><code>due_at</code> crossing detection (source 2).</strong> A task becoming due is time passing, not a row
+            insert. Leaning compute-at-probe (tasks with <code>last_ran_at &lt; due_at &le; now</code>) rather than
+            materializing a task-due event. Confirm.</li>
+        <li><strong>Skip-strip aggregation.</strong> Collapse consecutive skips per-timer or across all of an agent's timers?
+            UI detail, but affects how the strip reads. Leaning per-agent, expandable to per-timer.</li>
+        <li><strong>Timezone for guaranteed wake times.</strong> Reuses the autonomy spec's open decision (workspace tz,
+            fall back to UTC). Confirm no separate per-agent tz here.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- BUILD ORDER -->
+  <section>
+    <h2><span class="num">7</span>Build order</h2>
+    <table>
+      <thead>
+        <tr><th>Slice</th><th>Delivers</th><th>Touches</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="q">A — Probe &amp; gate</td><td class="d">Pure-DB five-source probe; <code>last_ran_at</code> baseline; skip decision in the worker before turn build. Suppression works (no UI yet).</td><td><code>last_ran_at</code> column, probe module, worker gate, re-arm unchanged.</td></tr>
+        <tr><td class="q">B — Skip records &amp; dashboard</td><td class="d"><code>skipped</code> turn status + probe snapshot storage; <code>inbound_events</code> <code>skipped</code> state; UI collapsing of consecutive skips.</td><td><code>turns</code> columns, <code>inbound_events</code> CHECK, audit row, dashboard timeline.</td></tr>
+        <tr><td class="q">C — Guaranteed floor</td><td class="d">Bootstrap arms ungated daily wake times (default 09:00); per-timer <code>always_run</code> opt-out.</td><td><code>always_run</code> column, bootstrap prompt/arming, gate check.</td></tr>
+        <tr><td class="q">D — Advanced config UI</td><td class="d">Per-agent panel: change-gating toggle, wake-times list editor, change-source toggles; wired into the probe.</td><td><code>ai_employees</code> config columns, settings UI, probe reads config.</td></tr>
+        <tr><td class="q">E — Budget doc &amp; audit</td><td class="d">Exclude skips from <code>max_wakeups_per_day</code>; document the exclusion at the counter; per-skip audit.</td><td><code>fire_due_timers</code> counter, autonomy-spec docs, diagnostics.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    Generated with the <code>spec-writer</code> skill · grilled before written.
+  </footer>
+
+</div>
+</body>
+</html>
