@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI Design Guide — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">UI Design Guide</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item active" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin UI Design Guide</h1></header>
+
+<p>Visual and interaction standards for the Pidgin admin UI (<code>src/frontend/</code>). The aesthetic is <strong>Linear-inspired</strong>: dark-first, minimal chrome, keyboard-friendly, and content-focused.</p>
+<p><strong>Audience:</strong> Fullstack dev agents and anyone touching React UI. Read this before adding pages, components, or CSS.</p>
+<p><strong>Related:</strong> <a href="HIRE_UX.html">HIRE_UX.md</a> (product vocabulary), <a href="MVP_USER_STORIES.html">MVP_USER_STORIES.md</a> (acceptance criteria).</p>
+<hr />
+<h2 id="1-design-principles">1. Design principles</h2>
+<table>
+<thead>
+<tr>
+<th>Principle</th>
+<th>What it means in Pidgin</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dark mode first</strong></td>
+<td>True near-black backgrounds; no light theme in MVP</td>
+</tr>
+<tr>
+<td><strong>Content over chrome</strong></td>
+<td>Borders and panels are subtle; hierarchy comes from typography and spacing</td>
+</tr>
+<tr>
+<td><strong>Precision</strong></td>
+<td>1px borders, consistent 4–8px radii, aligned baselines</td>
+</tr>
+<tr>
+<td><strong>Keyboard-aware</strong></td>
+<td>Primary actions show shortcut hints where applicable (e.g. hire, send)</td>
+</tr>
+<tr>
+<td><strong>Functional color</strong></td>
+<td>Color signals status and primary actions — not decoration</td>
+</tr>
+<tr>
+<td><strong>Slack-like IA, Linear look</strong></td>
+<td>Navigation and rooms follow workforce/chat semantics; visuals follow Linear</td>
+</tr>
+</tbody>
+</table>
+<p>We borrow Linear's <strong>visual language</strong>, not its issue-tracker information architecture. Pidgin screens map to workforce concepts (team, hire, chat, templates).</p>
+<hr />
+<h2 id="2-color-tokens">2. Color tokens</h2>
+<p>All colors live as CSS custom properties in <code>src/frontend/src/index.css</code>. <strong>Do not hardcode hex values in components</strong> — use variables.</p>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Value</th>
+<th>Usage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--bg-base</code></td>
+<td><code>#0a0a0a</code></td>
+<td>App shell, main content background</td>
+</tr>
+<tr>
+<td><code>--bg-sidebar</code></td>
+<td><code>#0f0f0f</code></td>
+<td>Left navigation</td>
+</tr>
+<tr>
+<td><code>--bg-elevated</code></td>
+<td><code>#161616</code></td>
+<td>Cards, panels, modals</td>
+</tr>
+<tr>
+<td><code>--bg-hover</code></td>
+<td><code>#1c1c1c</code></td>
+<td>Nav item hover, row hover</td>
+</tr>
+<tr>
+<td><code>--bg-active</code></td>
+<td><code>#222222</code></td>
+<td>Selected nav item, active tab pill</td>
+</tr>
+<tr>
+<td><code>--border</code></td>
+<td><code>#1f1f1f</code></td>
+<td>Dividers, panel outlines</td>
+</tr>
+<tr>
+<td><code>--border-strong</code></td>
+<td><code>#2a2a2a</code></td>
+<td>Input focus, modal edge</td>
+</tr>
+<tr>
+<td><code>--text-primary</code></td>
+<td><code>#ededed</code></td>
+<td>Headings, body</td>
+</tr>
+<tr>
+<td><code>--text-secondary</code></td>
+<td><code>#8a8a8a</code></td>
+<td>Descriptions, timestamps, section labels</td>
+</tr>
+<tr>
+<td><code>--text-tertiary</code></td>
+<td><code>#5c5c5c</code></td>
+<td>Placeholders, disabled</td>
+</tr>
+<tr>
+<td><code>--accent</code></td>
+<td><code>#5e6ad2</code></td>
+<td>Primary buttons, links, brand accent</td>
+</tr>
+<tr>
+<td><code>--accent-hover</code></td>
+<td><code>#6872d9</code></td>
+<td>Primary button hover</td>
+</tr>
+<tr>
+<td><code>--accent-muted</code></td>
+<td><code>rgba(94, 106, 210, 0.15)</code></td>
+<td>Subtle accent backgrounds</td>
+</tr>
+<tr>
+<td><code>--danger</code></td>
+<td><code>#e5484d</code></td>
+<td>Errors</td>
+</tr>
+<tr>
+<td><code>--danger-bg</code></td>
+<td><code>rgba(229, 72, 77, 0.12)</code></td>
+<td>Error banners</td>
+</tr>
+<tr>
+<td><code>--success</code></td>
+<td><code>#46a758</code></td>
+<td>Success states</td>
+</tr>
+<tr>
+<td><code>--success-bg</code></td>
+<td><code>rgba(70, 167, 88, 0.12)</code></td>
+<td>Success banners</td>
+</tr>
+<tr>
+<td><code>--human-msg</code></td>
+<td><code>#1a2332</code></td>
+<td>Human chat bubble</td>
+</tr>
+<tr>
+<td><code>--agent-msg</code></td>
+<td><code>#141a14</code></td>
+<td>Agent chat bubble</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Brand:</strong> Pidgin logo uses navy + teal/purple/green accents. UI accent is indigo (<code>--accent</code>) to match Linear's primary action color; logo colors appear only in the logo asset and optional status dots.</p>
+<hr />
+<h2 id="3-typography">3. Typography</h2>
+<ul>
+<li><strong>Font:</strong> <a href="https://rsms.me/inter/">Inter</a> via Google Fonts (loaded in <code>index.html</code>)</li>
+<li><strong>Fallback:</strong> <code>system-ui, -apple-system, sans-serif</code></li>
+<li><strong>Base size:</strong> 13px (<code>0.8125rem</code>) — Linear uses compact type</li>
+<li><strong>Line height:</strong> 1.5 for body; 1.25 for headings</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Element</th>
+<th>Size</th>
+<th>Weight</th>
+<th>Color</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Page title (h2 in main)</td>
+<td>15px</td>
+<td>600</td>
+<td><code>--text-primary</code></td>
+</tr>
+<tr>
+<td>Section title (h3)</td>
+<td>14px</td>
+<td>600</td>
+<td><code>--text-primary</code></td>
+</tr>
+<tr>
+<td>Body</td>
+<td>13px</td>
+<td>400</td>
+<td><code>--text-primary</code></td>
+</tr>
+<tr>
+<td>Muted / meta</td>
+<td>12px</td>
+<td>400</td>
+<td><code>--text-secondary</code></td>
+</tr>
+<tr>
+<td>Nav item</td>
+<td>14px</td>
+<td>450</td>
+<td><code>--text-secondary</code> (active: <code>--text-primary</code>)</td>
+</tr>
+<tr>
+<td>Section label (sidebar)</td>
+<td>12px</td>
+<td>500</td>
+<td><code>--text-tertiary</code>, uppercase, letter-spacing 0.04em</td>
+</tr>
+<tr>
+<td>Eyebrow / step label</td>
+<td>11px</td>
+<td>500</td>
+<td><code>--text-secondary</code>, uppercase</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Sidebar fonts use <code>px</code>, not <code>rem</code></strong> — the app root is 13px, so <code>rem</code> inside the sidebar compounds and renders smaller than intended. Set sizes in px on <code>.sidebar</code> and its children.</p>
+<hr />
+<h2 id="4-layout">4. Layout</h2>
+<pre><code>┌─────────────────────────────────────────────────────────┐
+│ Sidebar (240px)  │  Main content (flex 1)               │
+│                  │  ┌─ Page header (title + actions) ─┐ │
+│  Logo + workspace│  │                                 │ │
+│  ─────────────── │  │  Content / empty state            │ │
+│  Nav sections    │  │                                 │ │
+│                  │  └─────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Region</th>
+<th>Width / padding</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sidebar</td>
+<td>240px fixed</td>
+<td><code>--bg-sidebar</code>; 1px right border <code>--border</code></td>
+</tr>
+<tr>
+<td>Main</td>
+<td><code>1fr</code></td>
+<td><code>--bg-base</code>; padding <code>24px 32px</code></td>
+</tr>
+<tr>
+<td>Auth screens</td>
+<td>Centered card, max 440px</td>
+<td>Full-viewport <code>--bg-base</code>; elevated card</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Responsive (&lt;768px):</strong> Sidebar stacks above main; split layouts (hire + HR assist) become single column.</p>
+<p><strong>Split layout (hire wizard, agent profile):</strong> Form left (~64%), HR assist panel right (~36%), sticky on desktop.</p>
+<hr />
+<h2 id="5-sidebar-navigation">5. Sidebar navigation</h2>
+<p>Structure (see <code>Layout.tsx</code>):</p>
+<ol>
+<li><strong>Header</strong> — logo + workspace name + optional user email</li>
+<li><strong>Primary</strong> — Team (home)</li>
+<li><strong>Workforce</strong> — Hire a role, Your templates</li>
+<li><strong>System</strong> — Diagnostics</li>
+</ol>
+<p><strong>Active state:</strong> <code>--bg-active</code> rounded rectangle (6px radius); optional 2px left accent bar in <code>--accent</code> (Linear-style indicator).</p>
+<p><strong>Hover:</strong> <code>--bg-hover</code>; no underline on nav links.</p>
+<p>Nav links use React Router <code>NavLink</code> with class <code>active</code> — styled in CSS, not inline.</p>
+<hr />
+<h2 id="6-components">6. Components</h2>
+<h3 id="61-buttons">6.1 Buttons</h3>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Appearance</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>default / <code>.btn</code></td>
+<td>Filled <code>--accent</code>, white text, 6px radius</td>
+<td>Primary CTA</td>
+</tr>
+<tr>
+<td><code>.secondary</code></td>
+<td>Transparent + <code>--border</code> border, <code>--text-primary</code></td>
+<td>Cancel, secondary actions</td>
+</tr>
+<tr>
+<td><code>.ghost</code></td>
+<td>No border, <code>--text-secondary</code>; hover <code>--bg-hover</code></td>
+<td>Tertiary / toolbar</td>
+</tr>
+</tbody>
+</table>
+<p>Padding: <code>6px 12px</code> (compact). Font weight 500. No drop shadows on buttons.</p>
+<p><strong>Shortcut badge:</strong> Optional <code>&lt;kbd&gt;C&lt;/kbd&gt;</code> inside primary buttons for create actions.</p>
+<h3 id="62-panels-cards">6.2 Panels / cards</h3>
+<ul>
+<li>Class: <code>.panel</code></li>
+<li>Background: <code>--bg-elevated</code></li>
+<li>Border: 1px <code>--border</code></li>
+<li>Radius: 8px</li>
+<li>Padding: 16px–20px</li>
+<li><strong>No heavy shadows</strong> on panels; modals only use soft shadow</li>
+</ul>
+<h3 id="63-page-header">6.3 Page header</h3>
+<ul>
+<li>Class: <code>.page-header</code></li>
+<li>Flex row: title left, actions right</li>
+<li>Bottom border 1px <code>--border</code>, margin-bottom 20px</li>
+<li>Title uses page name; breadcrumb optional (<code>Workspace › Team</code>)</li>
+</ul>
+<h3 id="64-empty-states">6.4 Empty states</h3>
+<p>Linear-style centered empty states for lists with no items:</p>
+<ul>
+<li>Class: <code>.empty-state</code></li>
+<li>Optional wireframe-style icon (simple CSS or inline SVG, monochrome <code>--text-tertiary</code>)</li>
+<li>Bold title + muted description</li>
+<li>Primary + secondary button row</li>
+</ul>
+<p>Example: Team page with no agents → "No agents yet" + <strong>Hire a role</strong> button.</p>
+<h3 id="65-forms">6.5 Forms</h3>
+<ul>
+<li>Class: <code>.field</code> — label above input</li>
+<li>Inputs: <code>--bg-base</code> background, 1px <code>--border</code>, 6px radius, no inner shadow</li>
+<li>Focus: <code>--border-strong</code> + 1px <code>--accent</code> outline (or box-shadow ring)</li>
+<li>Placeholder: <code>--text-tertiary</code></li>
+<li><strong>Modal / wizard inputs:</strong> borderless title field (large 18px) inside elevated surface — see hire wizard step 2+</li>
+</ul>
+<h3 id="66-tabs-view-switcher">6.6 Tabs / view switcher</h3>
+<ul>
+<li>Class: <code>.tabs</code> / <code>.tab</code></li>
+<li>Pill shape, <code>--bg-hover</code> inactive, <code>--bg-active</code> active</li>
+<li>Used for wizard steps, future list filters</li>
+</ul>
+<h3 id="67-alerts">6.7 Alerts</h3>
+<table>
+<thead>
+<tr>
+<th>Class</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.error</code></td>
+<td>API failures, validation — <code>--danger</code> text on <code>--danger-bg</code></td>
+</tr>
+<tr>
+<td><code>.success</code></td>
+<td>Confirmations — <code>--success</code> on <code>--success-bg</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="68-chat-messages">6.8 Chat messages</h3>
+<ul>
+<li><code>.message-list</code> — scrollable column</li>
+<li><code>.message.human</code> — right-aligned, <code>--human-msg</code></li>
+<li><code>.message.agent</code> — left-aligned, <code>--agent-msg</code></li>
+<li><code>.meta</code> — sender name, <code>--text-secondary</code>, 11px</li>
+</ul>
+<h3 id="69-tables">6.9 Tables</h3>
+<ul>
+<li>Minimal: bottom border only on rows</li>
+<li>Header: <code>--text-secondary</code>, 12px, font-weight 500</li>
+<li>Row hover: <code>--bg-hover</code></li>
+</ul>
+<h3 id="610-modals-future">6.10 Modals (future)</h3>
+<p>Centered, <code>--bg-elevated</code>, 10px radius, large soft shadow:</p>
+<pre><code class="language-css">box-shadow: 0 16px 70px rgba(0, 0, 0, 0.5);
+</code></pre>
+<p>Header: breadcrumb-style muted path; borderless title + description fields.</p>
+<hr />
+<h2 id="7-spacing-scale">7. Spacing scale</h2>
+<p>Use rem multiples of 4px:</p>
+<table>
+<thead>
+<tr>
+<th>Token</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--space-1</code></td>
+<td>4px</td>
+</tr>
+<tr>
+<td><code>--space-2</code></td>
+<td>8px</td>
+</tr>
+<tr>
+<td><code>--space-3</code></td>
+<td>12px</td>
+</tr>
+<tr>
+<td><code>--space-4</code></td>
+<td>16px</td>
+</tr>
+<tr>
+<td><code>--space-5</code></td>
+<td>20px</td>
+</tr>
+<tr>
+<td><code>--space-6</code></td>
+<td>24px</td>
+</tr>
+<tr>
+<td><code>--space-8</code></td>
+<td>32px</td>
+</tr>
+</tbody>
+</table>
+<p>Stack utility: <code>.stack</code> = <code>flex-direction: column; gap: var(--space-4)</code>.</p>
+<hr />
+<h2 id="8-icons">8. Icons</h2>
+<p>MVP: Unicode or minimal inline SVG — no icon library required yet.</p>
+<p>When adding icons:</p>
+<ul>
+<li>16×16 or 20×20 viewBox</li>
+<li>1.5px stroke, round caps</li>
+<li>Color: <code>--text-secondary</code> (inactive) or <code>--text-primary</code> (active)</li>
+<li>Prefer Lucide-style line icons if introducing a package later</li>
+</ul>
+<hr />
+<h2 id="9-motion">9. Motion</h2>
+<ul>
+<li>Transitions: <code>150ms ease</code> for background, border, color</li>
+<li>No page transitions in MVP</li>
+<li>Respect <code>prefers-reduced-motion: reduce</code> — disable transitions</li>
+</ul>
+<hr />
+<h2 id="10-dos-and-donts-for-agents">10. Do's and don'ts for agents</h2>
+<h3 id="do">Do</h3>
+<ul>
+<li>Extend <code>index.css</code> tokens and utility classes before adding one-off styles</li>
+<li>Keep inline <code>style={{}}</code> to a minimum (layout exceptions only)</li>
+<li>Match empty states and page headers across new pages</li>
+<li>Use product vocabulary from <a href="HIRE_UX.html">HIRE_UX.md</a> — never "recipe" in UI</li>
+<li>Verify UI manually in browser against US-* stories</li>
+</ul>
+<h3 id="dont">Don't</h3>
+<ul>
+<li>Introduce a light theme or toggle without explicit product approval</li>
+<li>Add heavy gradients, drop shadows on every panel, or bright saturated backgrounds</li>
+<li>Use default browser form styling (always use <code>.field</code> inputs)</li>
+<li>Add Tailwind or a component library without updating this guide and TECH_STACK_SPEC</li>
+<li>Copy Linear's issue-specific UI (priority pills, cycles, labels) unless Pidgin gains equivalent features</li>
+</ul>
+<hr />
+<h2 id="11-file-map">11. File map</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>src/frontend/src/index.css</code></td>
+<td>All design tokens + component classes</td>
+</tr>
+<tr>
+<td><code>src/frontend/index.html</code></td>
+<td>Inter font link</td>
+</tr>
+<tr>
+<td><code>src/frontend/public/logo.png</code></td>
+<td>Static copy of wordmark (optional)</td>
+</tr>
+<tr>
+<td><code>src/frontend/src/assets/logo-icon.svg</code></td>
+<td>Square sidebar icon (bundled by Vite)</td>
+</tr>
+<tr>
+<td><code>src/frontend/src/components/PidginLogo.tsx</code></td>
+<td>Sidebar logo component</td>
+</tr>
+<tr>
+<td><code>src/frontend/src/components/Layout.tsx</code></td>
+<td>App shell + sidebar</td>
+</tr>
+<tr>
+<td><code>specs/UI_DESIGN_GUIDE.md</code></td>
+<td>This document</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-implementation-checklist-new-page">12. Implementation checklist (new page)</h2>
+<ol>
+<li>Wrap content in existing <code>Layout</code> route</li>
+<li>Add <code>.page-header</code> if the page has a title + actions</li>
+<li>Use <code>.panel</code> + <code>.stack</code> for sections</li>
+<li>Empty list → <code>.empty-state</code> with primary CTA</li>
+<li>Forms → <code>.field</code> labels + inputs; errors → <code>.error</code></li>
+<li>Manual browser pass + screenshot for the matching US-* story</li>
+</ol>
+<hr />
+<h2 id="13-reference">13. Reference</h2>
+<p>Visual reference: Linear app (dark mode) — sidebar density, empty states, modal create flow, and indigo primary actions. Pidgin screenshots for regression should be compared against the patterns above, not pixel-perfect Linear parity.</p>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

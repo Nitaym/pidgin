@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Product Spec — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Product Spec</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item active" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>AI-Native Workspace -- Product Spec</h1></header>
+
+<blockquote>
+<p><strong>One-liner:</strong> A Slack-like internal workspace where companies hire AI employees, communicate with them by text, voice, calls, and meetings, assign them work, and ask what happened across the company.</p>
+<p><strong>Positioning:</strong> Slack was built for companies where only humans work. This is the workspace for companies where humans and AI employees work side by side.</p>
+<p><strong>Short version:</strong> The internal workspace for AI-native companies.</p>
+<p><strong>Product claim:</strong> Hire AI employees, onboard them, communicate naturally, assign work, and ask what happened across the business.</p>
+</blockquote>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#product-vision">Product Vision</a></li>
+<li><a href="#key-distinctions">Key Distinctions</a></li>
+<li><a href="#recipes">Recipes</a></li>
+<li><a href="#core-problem">Core Problem</a></li>
+<li><a href="#target-users">Target Users</a></li>
+<li><a href="#core-product-loop">Core Product Loop</a></li>
+<li><a href="#core-feature-pillars">Core Feature Pillars</a></li>
+<li><a href="#core-entities">Core Entities</a></li>
+<li><a href="#ai-employee-object">AI Employee Object</a></li>
+<li><a href="#security-model">Security Model</a></li>
+<li><a href="#company-pulse">Company Pulse</a></li>
+<li><a href="#user-flows">User Flows</a></li>
+<li><a href="#information-architecture">Information Architecture</a></li>
+<li><a href="#mvp-scope">MVP Scope</a></li>
+<li><a href="#success-criteria">Success Criteria</a></li>
+<li><a href="#competitive-framing">Competitive Framing</a></li>
+<li><a href="#strategic-moat">Strategic Moat</a></li>
+<li><a href="#open-decisions">Open Decisions</a></li>
+<li><a href="#roadmap-tiers">Roadmap Tiers</a></li>
+</ol>
+<hr />
+<h2 id="product-vision">Product Vision</h2>
+<p>Companies are starting to use AI agents as workers, but current tools still assume every worker is human. Agents are usually bolted onto Slack, Jira, Gmail, or CRMs as bots.</p>
+<p>This product treats AI agents as <strong>first-class organizational participants</strong> with roles, memory, responsibility, permissions, and accountability.</p>
+<p>The product is not just a chatbot, agent framework, or Slack plugin. It is the <strong>communication and operating layer for AI-native companies</strong>.</p>
+<p>Unlike generic agent builders that hand you a blank canvas, this product ships with <strong>premade recipes</strong> -- opinionated blueprints for how a company should be organized and how specific human roles should be performed by AI employees.</p>
+<hr />
+<h2 id="key-distinctions">Key Distinctions</h2>
+<p>These are the ideas that separate this product from "Slack with bots" or "build your own agent."</p>
+<table>
+<thead>
+<tr>
+<th>Distinction</th>
+<th>Generic agent tools</th>
+<th>This product</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Starting point</td>
+<td>Blank prompt + tool list</td>
+<td>Premade <strong>recipes</strong> for org structure and roles</td>
+</tr>
+<tr>
+<td>Unit of value</td>
+<td>One agent</td>
+<td>A <strong>workforce</strong> -- hierarchy + roles + coordination</td>
+</tr>
+<tr>
+<td>Role definition</td>
+<td>Ad-hoc system prompt</td>
+<td>Full <strong>role recipe</strong>: prompts, boundaries, tools, interview, onboarding</td>
+</tr>
+<tr>
+<td>Company setup</td>
+<td>Manual configuration</td>
+<td><strong>Hierarchy recipe</strong> instantiates rooms, reporting lines, workflows</td>
+</tr>
+<tr>
+<td>Improvement loop</td>
+<td>Edit prompt yourself</td>
+<td><strong>Reviewer agent</strong> improves recipes from interview and performance data</td>
+</tr>
+<tr>
+<td>Trust model</td>
+<td>Turn it on and hope</td>
+<td>Hire -&gt; interview -&gt; shadow -&gt; approve, baked into every role recipe</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-recipe-means">What "recipe" means</h3>
+<p>A <strong>recipe</strong> is not a loose template or a snippet. It is a complete, tested, versioned package that can be instantiated into a live workspace. Recipes are the unit of product IP -- curated by the platform, customized by the company, and refined over time.</p>
+<p>There are two recipe layers:</p>
+<ol>
+<li><strong>Company hierarchy recipes</strong> -- how the org is structured</li>
+<li><strong>Role recipes</strong> -- how a specific human job is performed by one or more AI employees</li>
+</ol>
+<hr />
+<h2 id="recipes">Recipes</h2>
+<h3 id="company-hierarchy-recipes">Company Hierarchy Recipes</h3>
+<p>A hierarchy recipe defines <strong>how a type of company should be organized</strong> when humans and AI employees work together.</p>
+<p>It is more than a workspace template. It specifies the operating model:</p>
+<table>
+<thead>
+<tr>
+<th>Included</th>
+<th>Example (SaaS Company Recipe)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Org chart</td>
+<td>Founder -&gt; CS Lead (human or AI) -&gt; Support Agent, Onboarding Agent</td>
+</tr>
+<tr>
+<td>Default rooms</td>
+<td><code>#general</code>, <code>#customer-success</code>, <code>#product-feedback</code>, <code>#incidents</code></td>
+</tr>
+<tr>
+<td>Reporting lines</td>
+<td>Support Agent reports to CS Lead; Product Assistant reports to Founder</td>
+</tr>
+<tr>
+<td>Cross-role workflows</td>
+<td>Support escalates product bugs to Product Assistant; CS feeds churn signals to Founder</td>
+</tr>
+<tr>
+<td>Coordination rules</td>
+<td>Who gets @mentioned for what; which decisions require human approval</td>
+</tr>
+<tr>
+<td>Recommended hires</td>
+<td>Suggested role recipes to activate first based on company stage</td>
+</tr>
+<tr>
+<td>Policies</td>
+<td>Default permission posture, approval gates, audit requirements</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Hierarchy recipes answer:</strong> "If I run a SaaS company (or agency, sales-led org, etc.), what should my AI-augmented team look like on day one?"</p>
+<p>Available hierarchy recipes (initial set):</p>
+<ul>
+<li>SaaS / web product</li>
+<li>Sales-led B2B</li>
+<li>Agency / services</li>
+<li>Physical product / ops-heavy</li>
+<li>Technical product company</li>
+</ul>
+<hr />
+<h3 id="role-recipes">Role Recipes</h3>
+<p>A role recipe defines <strong>everything needed for an AI employee (or team of agents) to perform a specific human role</strong>.</p>
+<p>It is the full job package -- not just a name and a one-line prompt.</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>What it contains</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Role definition</strong></td>
+<td>Title, mission, scope, responsibilities, boundaries, what this role does <em>not</em> do</td>
+</tr>
+<tr>
+<td><strong>Prompts</strong></td>
+<td>System prompt, behavioral guidelines, tone, decision framework, escalation logic</td>
+</tr>
+<tr>
+<td><strong>Agent configuration</strong></td>
+<td>Single agent vs. multi-agent decomposition for one human role (see below)</td>
+</tr>
+<tr>
+<td><strong>Tools</strong></td>
+<td>Which integrations the role uses and how (read, draft, execute)</td>
+</tr>
+<tr>
+<td><strong>Permissions</strong></td>
+<td>Default access level; what requires human approval</td>
+</tr>
+<tr>
+<td><strong>Memory scope</strong></td>
+<td>What organizational context this role retains and references</td>
+</tr>
+<tr>
+<td><strong>Rooms</strong></td>
+<td>Which channels the role joins and participates in</td>
+</tr>
+<tr>
+<td><strong>Interview scenarios</strong></td>
+<td>Role-specific tests run before hire (e.g. angry customer, ambiguous refund request)</td>
+</tr>
+<tr>
+<td><strong>Onboarding checklist</strong></td>
+<td>Shadow-mode tasks, docs to ingest, trial assignments</td>
+</tr>
+<tr>
+<td><strong>Example outputs</strong></td>
+<td>Sample messages, drafts, and decisions showing good performance</td>
+</tr>
+<tr>
+<td><strong>KPIs / review criteria</strong></td>
+<td>How the reviewer agent evaluates this role over time</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Role recipes answer:</strong> "If I hire a Customer Success Manager (or Support Agent, Sales Assistant, QA Agent), exactly how should that AI employee behave, what can they do, and how do I know they're ready?"</p>
+<h4 id="one-human-role-one-or-many-agents">One human role -&gt; one or many agents</h4>
+<p>A role recipe may instantiate as:</p>
+<ul>
+<li><strong>Single agent</strong> -- one AI employee covers the full role (e.g. "Maya, Customer Success Agent")</li>
+<li><strong>Agent team</strong> -- multiple cooperating agents under one human role title (e.g. "Support" = Triage Agent + Response Agent + Escalation Agent)</li>
+</ul>
+<p>The recipe defines the decomposition. The user hires the role; the platform resolves the agent topology.</p>
+<h4 id="example-role-recipes-initial-set">Example role recipes (initial set)</h4>
+<table>
+<thead>
+<tr>
+<th>Role Recipe</th>
+<th>Primary function</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Customer Success Agent</td>
+<td>Onboard and retain customers</td>
+</tr>
+<tr>
+<td>Support Agent</td>
+<td>Resolve tickets, triage issues, escalate</td>
+</tr>
+<tr>
+<td>Sales Assistant</td>
+<td>Qualify leads, draft outreach, update CRM</td>
+</tr>
+<tr>
+<td>Product Assistant</td>
+<td>Synthesize feedback, draft specs, track requests</td>
+</tr>
+<tr>
+<td>QA Agent</td>
+<td>Run test scenarios, report bugs, verify fixes</td>
+</tr>
+<tr>
+<td>Ops Agent</td>
+<td>Monitor workflows, flag blockers, coordinate handoffs</td>
+</tr>
+<tr>
+<td>Engineering Assistant</td>
+<td>Triage bugs, draft PRs, summarize code changes</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="recipes-vs-templates-vs-custom">Recipes vs. Templates vs. Custom</h3>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>What it is</th>
+<th>User action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Hierarchy recipe</strong></td>
+<td>Company-type org blueprint</td>
+<td>"Create workspace from SaaS recipe"</td>
+</tr>
+<tr>
+<td><strong>Role recipe</strong></td>
+<td>Hireable job package</td>
+<td>"Hire from Support Agent recipe"</td>
+</tr>
+<tr>
+<td><strong>Customization</strong></td>
+<td>Company-specific overrides</td>
+<td>Adjust prompts, permissions, tools after hire</td>
+</tr>
+<tr>
+<td><strong>Custom role</strong></td>
+<td>Build from scratch</td>
+<td>Defer to v0.2+; MVP is recipe-first</td>
+</tr>
+</tbody>
+</table>
+<p>Users start from recipes, then customize. They do not start from a blank agent config.</p>
+<hr />
+<h3 id="recipe-library">Recipe Library</h3>
+<p>Recipes are a <strong>first-class product surface</strong>, not internal config:</p>
+<ul>
+<li>Browsable library of hierarchy and role recipes</li>
+<li>Versioned (recipe v1.2 improves interview scenarios based on aggregate performance)</li>
+<li>Instantiated into live workspaces and AI employees</li>
+<li>Improved by reviewer agent feedback across customers (anonymized patterns)</li>
+<li>Eventually: community-contributed recipes (post-MVP)</li>
+</ul>
+<hr />
+<h2 id="core-problem">Core Problem</h2>
+<table>
+<thead>
+<tr>
+<th>Missing Concept</th>
+<th>Why It Matters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AI employee identity</td>
+<td>Agents need names, roles, managers, responsibilities, and status</td>
+</tr>
+<tr>
+<td>Premade org and role definitions</td>
+<td>Founders shouldn't have to invent prompts, hierarchies, and workflows from scratch</td>
+</tr>
+<tr>
+<td>Hiring and onboarding</td>
+<td>Companies need to test, train, and limit agents before trusting them</td>
+</tr>
+<tr>
+<td>Human-agent communication</td>
+<td>Work is not only text; teams use voice, calls, meetings, and screen-share</td>
+</tr>
+<tr>
+<td>Shared company memory</td>
+<td>Agents need organizational context, not isolated personal chat history</td>
+</tr>
+<tr>
+<td>Task ownership</td>
+<td>Conversations need to become structured work with owners and outcomes</td>
+</tr>
+<tr>
+<td>Permissions and audit</td>
+<td>Agent actions need approval gates, limits, and reviewability</td>
+</tr>
+<tr>
+<td>Company recall</td>
+<td>Users should ask what happened today, this week, or this year</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="target-users">Target Users</h2>
+<table>
+<thead>
+<tr>
+<th>User</th>
+<th>Pain</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Founder / CEO</td>
+<td>Too many functions to coordinate; wants leverage from an AI workforce</td>
+</tr>
+<tr>
+<td>Team lead</td>
+<td>Needs to coordinate humans and agents across tasks and decisions</td>
+</tr>
+<tr>
+<td>Small SaaS company</td>
+<td>Needs support, product, sales, and ops capacity without hiring full teams</td>
+</tr>
+<tr>
+<td>Agency / service company</td>
+<td>Repeated workflows and communication-heavy delivery</td>
+</tr>
+<tr>
+<td>Technical product company</td>
+<td>Needs help across support, engineering, product, and customer success</td>
+</tr>
+</tbody>
+</table>
+<h3 id="personas-expanded">Personas (Expanded)</h3>
+<table>
+<thead>
+<tr>
+<th>Persona</th>
+<th>Job to Be Done</th>
+<th>Success Metric</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Founder / CEO</td>
+<td>Get leverage across functions without hiring a full team</td>
+<td>"I picked the SaaS recipe and had a working AI team in an hour"</td>
+</tr>
+<tr>
+<td>Team lead</td>
+<td>Coordinate humans and agents on shared work</td>
+<td>Tasks have clear owners; nothing falls through cracks</td>
+</tr>
+<tr>
+<td>Ops / admin</td>
+<td>Hire, configure, and govern agents safely</td>
+<td>Agents pass interview; risky actions require approval</td>
+</tr>
+<tr>
+<td>Individual contributor</td>
+<td>Talk to AI coworkers naturally</td>
+<td>Faster than switching between three different tools</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="core-product-loop">Core Product Loop</h2>
+<ol>
+<li><strong>Create workspace</strong> -- choose a <strong>hierarchy recipe</strong>: SaaS, web product, sales-led, physical product, agency, etc.</li>
+<li><strong>Talk to company operator</strong> -- a chief-of-staff-like AI maps goals, team, gaps, tools, and workflows; recommends which <strong>role recipes</strong> to hire first</li>
+<li><strong>Hire AI employees</strong> -- instantiate <strong>role recipes</strong> such as Support, Product, Sales, QA, Ops, Engineering Assistant</li>
+<li><strong>Interview and improve</strong> -- run scenarios from the role recipe; reviewer agent improves prompts, tools, and guardrails</li>
+<li><strong>Onboard</strong> -- follow the role recipe's onboarding checklist; agents learn docs, join rooms, enter shadow mode</li>
+<li><strong>Communicate</strong> -- humans message, voice-note, call, meet with, or screen-share with agents</li>
+<li><strong>Assign and govern</strong> -- conversations become tasks; actions require permission, approval, and audit trails</li>
+<li><strong>Recall</strong> -- ask "What did I do today?" or "What happened in the company this week?"</li>
+</ol>
+<hr />
+<h2 id="core-feature-pillars">Core Feature Pillars</h2>
+<table>
+<thead>
+<tr>
+<th>Pillar</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Hierarchy recipes</strong></td>
+<td>Premade org structures: reporting lines, rooms, workflows, policies, and recommended hires by company type</td>
+</tr>
+<tr>
+<td><strong>Role recipes</strong></td>
+<td>Premade job packages: role definition, prompts, tools, permissions, interview, onboarding, and examples</td>
+</tr>
+<tr>
+<td>Recipe library</td>
+<td>Browsable, versioned collection of hierarchy and role recipes</td>
+</tr>
+<tr>
+<td>Company operator</td>
+<td>A CEO/chief-of-staff style setup and routing agent that helps configure the workspace</td>
+</tr>
+<tr>
+<td>Hire AI employees</td>
+<td>Agents are hired from role recipes into real roles with identity, manager, responsibilities, and permissions</td>
+</tr>
+<tr>
+<td>Interview agents</td>
+<td>Candidates are tested with scenarios defined in the role recipe</td>
+</tr>
+<tr>
+<td>Reviewer agent</td>
+<td>Evaluates interviews and improves role recipe prompts, tools, escalation rules, and permissions</td>
+</tr>
+<tr>
+<td>Onboarding</td>
+<td>Agents follow the role recipe's onboarding path: context, rooms, shadow mode, trial tasks</td>
+</tr>
+<tr>
+<td>AI-first communication</td>
+<td>Text, voice notes, calls, meetings, standups, and screen-share with AI coworkers</td>
+</tr>
+<tr>
+<td>Rooms</td>
+<td>Internal spaces where humans and AI employees collaborate and agents can be mentioned</td>
+</tr>
+<tr>
+<td>Tasks and actions</td>
+<td>Conversations become work with buttons: Investigate, Draft, Fix, Review, Execute, Escalate</td>
+</tr>
+<tr>
+<td>Company Pulse</td>
+<td>Ask what happened today/week/year, what changed, what is blocked, and what needs attention</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="core-entities">Core Entities</h2>
+<p>These are first-class objects, not metadata on chat messages.</p>
+<table>
+<thead>
+<tr>
+<th>Entity</th>
+<th>Purpose</th>
+<th>Key Fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Workspace</strong></td>
+<td>Company container</td>
+<td>Hierarchy recipe, settings, integrations</td>
+</tr>
+<tr>
+<td><strong>Hierarchy Recipe</strong></td>
+<td>Org blueprint</td>
+<td>Company type, org chart, rooms, workflows, policies, recommended roles</td>
+</tr>
+<tr>
+<td><strong>Role Recipe</strong></td>
+<td>Hireable job package</td>
+<td>Definition, prompts, tools, permissions, interview scenarios, onboarding, examples</td>
+</tr>
+<tr>
+<td><strong>AI Employee</strong></td>
+<td>Instantiated agent</td>
+<td>Role recipe source, name, manager, status, rooms, tools, permissions, memory scope</td>
+</tr>
+<tr>
+<td><strong>Human Member</strong></td>
+<td>Real user</td>
+<td>Role, permissions, managed agents</td>
+</tr>
+<tr>
+<td><strong>Room</strong></td>
+<td>Collaboration space</td>
+<td>Members (human + AI), purpose, visibility</td>
+</tr>
+<tr>
+<td><strong>Conversation</strong></td>
+<td>Message thread</td>
+<td>Participants, modality (text/voice/call/meeting), linked task</td>
+</tr>
+<tr>
+<td><strong>Task</strong></td>
+<td>Structured work</td>
+<td>Owner, status, source conversation, action buttons, outcome</td>
+</tr>
+<tr>
+<td><strong>Action</strong></td>
+<td>Agent attempt</td>
+<td>Type, approval state, audit log, tool calls</td>
+</tr>
+<tr>
+<td><strong>Interview</strong></td>
+<td>Pre-hire test</td>
+<td>Role recipe scenarios, scores, reviewer feedback</td>
+</tr>
+<tr>
+<td><strong>Onboarding</strong></td>
+<td>Ramp-up</td>
+<td>Role recipe checklist, shadow mode, trial tasks, docs learned</td>
+</tr>
+<tr>
+<td><strong>Pulse Event</strong></td>
+<td>Recall unit</td>
+<td>Timestamped activity from messages, tasks, approvals, tool use</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="ai-employee-object">AI Employee Object</h2>
+<p>An AI employee is a <strong>live instance of a role recipe</strong>, customized for a specific workspace.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Source recipe</td>
+<td><code>support-agent-v1.2</code></td>
+</tr>
+<tr>
+<td>Name / role</td>
+<td>Maya -- Customer Success Agent</td>
+</tr>
+<tr>
+<td>Mission</td>
+<td>Help onboard and retain customers</td>
+</tr>
+<tr>
+<td>Manager</td>
+<td>Founder / Head of CS / Company Operator</td>
+</tr>
+<tr>
+<td>Rooms</td>
+<td><code>#customer-success</code>, <code>#onboarding</code>, <code>#product-feedback</code></td>
+</tr>
+<tr>
+<td>Tools</td>
+<td>CRM, docs, tickets, calendar, analytics</td>
+</tr>
+<tr>
+<td>Permissions</td>
+<td>Can read and draft; needs approval to send or change records</td>
+</tr>
+<tr>
+<td>Memory scope</td>
+<td>Per-agent journal (<code>memory/&lt;handle&gt;/journal.md</code>) + granted company docs (<code>docs/*.txt</code>)</td>
+</tr>
+<tr>
+<td>Prompt (resolved)</td>
+<td>Base role recipe prompt + company-specific overrides</td>
+</tr>
+</tbody>
+</table>
+<h3 id="status-lifecycle">Status Lifecycle</h3>
+<pre><code>Draft -&gt; Interviewing -&gt; Onboarding (shadow) -&gt; Active -&gt; Paused -&gt; Offboarded
+</code></pre>
+<hr />
+<h2 id="security-model">Security Model</h2>
+<p>Because AI employees are reachable from outside the company (routed email addresses, shared rooms, ingested documents, vendor replies), Pidgin needs an explicit rule for whose instructions an agent will follow.</p>
+<p>The core principle:</p>
+<blockquote>
+<p>Agents follow instructions only from authenticated peers and superiors inside the workspace. Everything else is data, triage, or a request awaiting human review.</p>
+</blockquote>
+<p>In practice this means every inbound message is resolved to a <strong>principal</strong> by the Pidgin runtime, tagged with a <strong>trust label</strong>, and checked against an <strong>invocation policy</strong> derived from the hierarchy recipe before the agent is allowed to act on it. Content the agent merely <em>reads</em> (PDFs, tickets, email bodies) is treated as data and can never originate tool calls on its own.</p>
+<p>The full model — principals, trust labels, invocation policy, instructions-vs-data separation, approval gates, attribution, cross-tenant isolation, and agent-to-agent trust — is defined in <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a>.</p>
+<hr />
+<h2 id="company-pulse">Company Pulse</h2>
+<p>A first-class recall feature that summarizes reality from communication logs: messages, voice notes, calls, meetings, tasks, approvals, agent actions, docs, decisions, and tool activity.</p>
+<h3 id="supported-queries">Supported Queries</h3>
+<ul>
+<li>What happened today?</li>
+<li>What did I do today?</li>
+<li>What changed this week?</li>
+<li>What is blocked?</li>
+<li>What did the AI workforce do while I was away?</li>
+</ul>
+<h3 id="mvp-constraints">MVP Constraints</h3>
+<ul>
+<li>Start with <strong>today</strong> and <strong>this week</strong> scopes</li>
+<li>In-app activity only (no external tool ingestion in v0.1)</li>
+<li>Responses include links to source events</li>
+</ul>
+<hr />
+<h2 id="user-flows">User Flows</h2>
+<h3 id="flow-1-workspace-setup-day-0">Flow 1: Workspace Setup (Day 0)</h3>
+<pre><code>Choose hierarchy recipe (SaaS, agency, etc.)
+  -&gt; Company Operator asks: goals, team size, gaps, existing tools
+  -&gt; Proposes: org chart, rooms, role recipes to hire, workflows
+  -&gt; User confirms -&gt; workspace instantiated from hierarchy recipe
+</code></pre>
+<p><strong>MVP detail:</strong> Hierarchy recipe instantiates rooms, reporting lines, and a recommended hire list. Company Operator is a guided setup wizard, not open-ended chat on day one.</p>
+<hr />
+<h3 id="flow-2-hire-interview-onboard">Flow 2: Hire -&gt; Interview -&gt; Onboard</h3>
+<pre><code>Browse role recipes -&gt; select &quot;Support Agent&quot;
+  -&gt; Recipe pre-fills: mission, prompts, tools, permissions, rooms
+  -&gt; User adjusts overrides (optional) -&gt; assign manager
+  -&gt; Interview: scenarios from role recipe (e.g. angry customer, refund request)
+  -&gt; Reviewer agent scores + suggests prompt/tool/guardrail changes
+  -&gt; User approves -&gt; Onboarding: role recipe checklist, shadow mode in #support
+  -&gt; Trial tasks -&gt; Full access (with approval gates)
+</code></pre>
+<p><strong>MVP detail:</strong> The user hires a role, not a blank agent. Interview scenarios and onboarding steps come from the recipe.</p>
+<hr />
+<h3 id="flow-3-daily-work">Flow 3: Daily Work</h3>
+<pre><code>Human posts in #customer-success or DMs Maya (CS Agent)
+  -&gt; Text or voice note
+  -&gt; Conversation -&gt; task extracted (&quot;Investigate churn for Acme Corp&quot;)
+  -&gt; Action buttons: Investigate | Draft | Fix | Review | Execute | Escalate
+  -&gt; Agent acts within permissions -&gt; approval if needed -&gt; audit logged
+</code></pre>
+<p><strong>MVP detail:</strong> Start with explicit action buttons and manual task creation. Auto-extraction from conversation is a v0.2 feature.</p>
+<hr />
+<h3 id="flow-4-company-pulse">Flow 4: Company Pulse</h3>
+<pre><code>User asks: &quot;What happened this week?&quot; / &quot;What's blocked?&quot;
+  -&gt; Pulse aggregates: messages, tasks, approvals, agent actions, decisions
+  -&gt; Returns structured summary with links to source
+</code></pre>
+<hr />
+<h2 id="information-architecture">Information Architecture</h2>
+<pre><code>Workspace
++-- Home / Pulse              (what happened today?)
++-- Rooms
+|   +-- #general
+|   +-- #customer-success
+|   +-- DM with Maya (CS Agent)
++-- AI Team                   (roster of hired agents + status)
+|   +-- Maya (CS)             -&gt; profile, source recipe, permissions, memory, audit
+|   +-- [Hire from recipe]
++-- Recipe Library            (browse hierarchy + role recipes)
+|   +-- Hierarchy Recipes
+|   +-- Role Recipes
++-- Tasks                     (all work with owners and status)
++-- Interviews                (pending / completed)
++-- Settings
+    +-- Workspace
+    +-- Integrations
+    +-- Permissions
+</code></pre>
+<hr />
+<h2 id="mvp-scope">MVP Scope</h2>
+<p>Start as an <strong>AI workforce workspace next to existing tools</strong>, not a full Slack replacement on day one.</p>
+<h3 id="must-include">Must Include</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 hierarchy recipe</td>
+<td>SaaS company</td>
+</tr>
+<tr>
+<td>1 role recipe (end-to-end)</td>
+<td>Support / CS Agent -- full definition, prompts, interview, onboarding</td>
+</tr>
+<tr>
+<td>Recipe instantiation</td>
+<td>Hire from role recipe; workspace from hierarchy recipe</td>
+</tr>
+<tr>
+<td>Company operator</td>
+<td>Setup wizard + routing (not full chief-of-staff)</td>
+</tr>
+<tr>
+<td>Hire, interview, reviewer agent, onboarding</td>
+<td>Driven by role recipe assets</td>
+</tr>
+<tr>
+<td>Rooms with humans + agents</td>
+<td>Defined by hierarchy recipe: <code>#general</code>, <code>#support</code>, DM</td>
+</tr>
+<tr>
+<td>Text + voice-note communication</td>
+<td>No calls or meetings in v0.1</td>
+</tr>
+<tr>
+<td>Task extraction, action buttons, permissions</td>
+<td>Manual task creation + 3 action buttons</td>
+</tr>
+<tr>
+<td>Company Pulse</td>
+<td>Today and this week; in-app only</td>
+</tr>
+</tbody>
+</table>
+<h3 id="defer">Defer</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Full Slack replacement</td>
+<td>Wedge first, replace later</td>
+</tr>
+<tr>
+<td>Custom roles (build from scratch)</td>
+<td>Recipe-first; custom builder in v0.2</td>
+</tr>
+<tr>
+<td>Multi-agent role decomposition</td>
+<td>Single-agent role recipes first</td>
+</tr>
+<tr>
+<td>Full browser/computer control</td>
+<td>High risk, complex</td>
+</tr>
+<tr>
+<td>External customer communication</td>
+<td>Internal workforce focus first</td>
+</tr>
+<tr>
+<td>Large open agent marketplace</td>
+<td>Curated recipe library first</td>
+</tr>
+<tr>
+<td>Autonomous high-risk actions</td>
+<td>Approval gates required from day one</td>
+</tr>
+<tr>
+<td>Complex enterprise admin surface</td>
+<td>Small team focus first</td>
+</tr>
+<tr>
+<td>Deep BI/analytics suite</td>
+<td>Pulse is sufficient for v0.1</td>
+</tr>
+<tr>
+<td>Vector / semantic search</td>
+<td>File journals + grep for MVP; see <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a></td>
+</tr>
+<tr>
+<td>OS keychain / secret store integration</td>
+<td>User supplies workspace password externally; K8s secrets post-MVP</td>
+</tr>
+<tr>
+<td>Full DB encryption (SQLCipher)</td>
+<td>Plain SQLite per workspace for MVP; see <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md §4</a></td>
+</tr>
+<tr>
+<td>Recipe marketplace app</td>
+<td>Separate app; runtime consumes bundles at hire time</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mvp-goal">MVP Goal</h3>
+<p>A founder picks the <strong>SaaS hierarchy recipe</strong>, hires a <strong>Support Agent from its role recipe</strong>, passes interview, onboard in shadow mode, communicates by text/voice, assigns a task with approval gates, and asks "what happened today."</p>
+<h3 id="wedge-role-recipe-support-cs-agent">Wedge Role Recipe: Support / CS Agent</h3>
+<p>Best first role recipe because:</p>
+<ul>
+<li>Clear, realistic interview scenarios</li>
+<li>Measurable outcomes (response quality, escalation correctness)</li>
+<li>Contained permissions (read + draft, approve before send)</li>
+<li>High value for target users (SaaS founders)</li>
+<li>Exercises the full recipe lifecycle: definition -&gt; prompts -&gt; interview -&gt; onboarding -&gt; active work</li>
+</ul>
+<hr />
+<h2 id="success-criteria">Success Criteria</h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Target</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Time to first hired agent</td>
+<td>&lt; 30 minutes (recipe pre-fills most config)</td>
+</tr>
+<tr>
+<td>Interview -&gt; onboard -&gt; first real task</td>
+<td>&lt; 1 day</td>
+</tr>
+<tr>
+<td>Pulse utility</td>
+<td>User can answer "what did the AI do today?" without reading every message</td>
+</tr>
+<tr>
+<td>Trust signal</td>
+<td>User approves agent for full access after shadow mode</td>
+</tr>
+<tr>
+<td>Recipe clarity</td>
+<td>User can explain what their AI employee does without reading the prompt</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="competitive-framing">Competitive Framing</h2>
+<table>
+<thead>
+<tr>
+<th>Product</th>
+<th>What It Is</th>
+<th>Gap We Fill</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Slack + bots</td>
+<td>Chat with bolted-on agents</td>
+<td>No recipes, no hire/onboard/audit lifecycle</td>
+</tr>
+<tr>
+<td>Cursor / Devin</td>
+<td>Individual AI workers</td>
+<td>Not org-wide; no hierarchy or role packages</td>
+</tr>
+<tr>
+<td>Relevance AI / agent platforms</td>
+<td>Build and deploy agents</td>
+<td>Blank canvas; no premade org or role recipes</td>
+</tr>
+<tr>
+<td>Notion AI / Copilot</td>
+<td>Assistive AI in existing tools</td>
+<td>AI isn't an "employee" with a recipe-backed role</td>
+</tr>
+<tr>
+<td>Prompt marketplaces</td>
+<td>Sell prompt snippets</td>
+<td>Snippets, not full role packages with lifecycle</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Our lane:</strong> The HR + ops + comms layer for AI labor -- powered by <strong>recipes</strong> that define how companies and roles actually work.</p>
+<hr />
+<h2 id="strategic-moat">Strategic Moat</h2>
+<p>The moat is the <strong>operating layer around AI labor</strong>, with <strong>recipes as the core IP</strong>:</p>
+<ul>
+<li><strong>Hierarchy recipes</strong> -- how AI-native companies are organized</li>
+<li><strong>Role recipes</strong> -- how human jobs are performed by AI employees (definition + prompts + lifecycle)</li>
+<li>Identity, hiring, interviews, onboarding</li>
+<li>Permissions, memory, task history</li>
+<li>Reviews, audit trail</li>
+<li>Recipe improvement loop (reviewer agent -&gt; better recipes over time)</li>
+</ul>
+<p>Chat and agent frameworks are commoditizing. Curated, tested recipes for org structure and job performance are not.</p>
+<hr />
+<h2 id="open-decisions">Open Decisions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Options</th>
+<th>Recommendation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Comms layer</td>
+<td>Custom chat UI vs. embed/bridge Slack</td>
+<td>Custom UI for MVP (full control over AI employee UX)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Agent runtime</td>
+<td>Own framework vs. orchestrate existing</td>
+<td><strong>Own runtime in Python</strong> — see <a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a>, <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a></td>
+</tr>
+<tr>
+<td>3</td>
+<td>Recipe format</td>
+<td>YAML/JSON files vs. DB-backed with UI editor</td>
+<td>Files in repo for MVP; UI editor in v0.2</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Recipe versioning</td>
+<td>Semantic versioning vs. immutable snapshots</td>
+<td>Snapshots on hire; recipe library gets semver</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Pulse data source</td>
+<td>In-app only vs. ingest Slack/email</td>
+<td>In-app only for MVP</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Pricing model</td>
+<td>Per seat / per agent / per recipe / workspace tier</td>
+<td>TBD</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Product name</td>
+<td>Working title: Pidgin</td>
+<td>Pidgin fits (human -&gt; AI communication layer)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="roadmap-tiers">Roadmap Tiers</h2>
+<table>
+<thead>
+<tr>
+<th>Pillar</th>
+<th>MVP (v0.1)</th>
+<th>v0.2</th>
+<th>Later</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Hierarchy recipes</td>
+<td>1 (SaaS)</td>
+<td>3-5 company types</td>
+<td>Custom hierarchy builder</td>
+</tr>
+<tr>
+<td>Role recipes</td>
+<td>1 (Support Agent)</td>
+<td>5-7 roles</td>
+<td>Community recipe marketplace</td>
+</tr>
+<tr>
+<td>Recipe library UI</td>
+<td>Browse + hire</td>
+<td>Preview scenarios, compare versions</td>
+<td>Publish and share recipes</td>
+</tr>
+<tr>
+<td>Company Operator</td>
+<td>Setup wizard + routing</td>
+<td>Ongoing chief-of-staff</td>
+<td>Proactive suggestions</td>
+</tr>
+<tr>
+<td>Hire / Interview / Reviewer</td>
+<td>Full flow via role recipe</td>
+<td>Multi-agent role decomposition</td>
+<td>Custom role builder</td>
+</tr>
+<tr>
+<td>Onboarding</td>
+<td>Role recipe checklist + shadow</td>
+<td>Doc ingestion, room assignment</td>
+<td>Auto-ramp</td>
+</tr>
+<tr>
+<td>Communication</td>
+<td>Text + voice notes</td>
+<td>Calls, meetings</td>
+<td>Screen-share</td>
+</tr>
+<tr>
+<td>Rooms</td>
+<td>From hierarchy recipe</td>
+<td>@mentions, threads</td>
+<td>Full Slack parity</td>
+</tr>
+<tr>
+<td>Tasks &amp; actions</td>
+<td>Manual task creation + action buttons</td>
+<td>Auto-extraction from chat</td>
+<td>Workflow automation</td>
+</tr>
+<tr>
+<td>Permissions &amp; audit</td>
+<td>Read/draft/approve gates</td>
+<td>Role-based policies</td>
+<td>Enterprise admin</td>
+</tr>
+<tr>
+<td>Company Pulse</td>
+<td>Today / this week, in-app only</td>
+<td>Cross-tool ingestion</td>
+<td>BI / analytics</td>
+</tr>
+<tr>
+<td>Agent memory &amp; recall</td>
+<td>Per-agent <code>journal.md</code> + grep</td>
+<td>FTS on file corpus</td>
+<td>Semantic / vector search</td>
+</tr>
+<tr>
+<td>Workspace storage</td>
+<td>Plain SQLite + files; external password</td>
+<td>SQLCipher; K8s secret injection</td>
+<td>Multi-tenant Postgres</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="next-spec-documents">Next Spec Documents</h2>
+<h3 id="product-and-integration">Product and integration</h3>
+<ul>
+<li>[x] <a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a> — connector model, virtual agent identities, attribution</li>
+<li>[x] <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a> — principals, trust labels, invocation policy, approval gates</li>
+</ul>
+<h3 id="runtime-and-platform-done">Runtime and platform (done)</h3>
+<ul>
+<li>[x] <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> — triggers, actions, turn lifecycle, gate, MVP process model</li>
+<li>[x] <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> — 26 tables, file-based memory, workspace storage</li>
+<li>[x] <a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a> — Python stack, libraries, explicit MVP omissions</li>
+</ul>
+<h3 id="still-to-write">Still to write</h3>
+<ul>
+<li>[ ] <code>RECIPES_SPEC.md</code> — hierarchy recipe schema, role recipe schema, example recipes</li>
+<li>[ ] <code>INTERVIEW_SPEC.md</code> — scenarios, scoring rubric, reviewer output format</li>
+<li>[ ] <code>AI_EMPLOYEE_SCHEMA.md</code> — full object model + API shape</li>
+<li>[ ] <code>MVP_USER_STORIES.md</code> — epics and acceptance criteria for v0.1</li>
+<li>[ ] <code>ARCHITECTURE.md</code> — how recipes, agents, rooms, and Pulse connect (may fold into existing specs)</li>
+<li>[ ] <code>SECURITY_PROTOCOLS_SPEC.md</code> — DKIM/DMARC, OAuth, mTLS, signed A2A, MCP auth, SSO/SCIM</li>
+</ul>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

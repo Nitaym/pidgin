@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hire UX — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Hire UX</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item active" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Hire UX — vocabulary, flows, templates, HR assist</h1></header>
+
+<p>Product-owned UX spec for the hire sequence. Internal engineering may still use <strong>role recipe</strong> / <strong>recipe snapshot</strong> in code and <a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a>; <strong>never</strong> expose “recipe” in operator UI.</p>
+<p><strong>Related:</strong> <a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> §Flow 2, <a href="MVP_USER_STORIES.html">MVP_USER_STORIES.md</a> US-6–US-11.</p>
+<hr />
+<h2 id="1-user-facing-vocabulary-naming-a-locked">1. User-facing vocabulary (Naming A — locked)</h2>
+<table>
+<thead>
+<tr>
+<th>Internal</th>
+<th>UI label</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Role recipe (bundled)</td>
+<td><strong>Candidate profile</strong> (page header "Hire a role"; section "Candidate Profiles")</td>
+</tr>
+<tr>
+<td>Workspace-saved template</td>
+<td><strong>Your saved profile</strong></td>
+</tr>
+<tr>
+<td>Recipe library</td>
+<td><strong>Hire a role</strong></td>
+</tr>
+<tr>
+<td>Job definition fields</td>
+<td><strong>Job requirements</strong></td>
+</tr>
+<tr>
+<td>Prompt / behavioral fields</td>
+<td><strong>Ideal candidate profile</strong></td>
+</tr>
+<tr>
+<td>Operator freeform additions</td>
+<td><strong>Your take</strong></td>
+</tr>
+<tr>
+<td>Permissions</td>
+<td><strong>Access &amp; approvals</strong></td>
+</tr>
+<tr>
+<td>Recipe snapshot on employee</td>
+<td>Shown as “Based on <em>{template name}</em> v{version}”</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-template-sources-and-storage">2. Template sources and storage</h2>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Scope</th>
+<th>Storage</th>
+<th>Editable by operator</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pidgin role templates</strong></td>
+<td>Shipped in repo</td>
+<td><code>recipes/*.json</code> (versioned semver)</td>
+<td>No — duplicate into workspace template to edit</td>
+</tr>
+<tr>
+<td><strong>Your role templates</strong></td>
+<td>Per workspace</td>
+<td><strong>Text files</strong> under workspace dir (see §2.1)</td>
+<td>Yes — create, edit, save new version, delete</td>
+</tr>
+<tr>
+<td><strong>Agent → template</strong></td>
+<td>Created from hired agent</td>
+<td>New workspace template file</td>
+<td>Does not modify source agent</td>
+</tr>
+</tbody>
+</table>
+<p>All workspace template creates and edits <strong>must persist</strong> to disk (no ephemeral-only drafts). Auto-save on field blur or explicit <strong>Save template</strong> — implementer chooses; operator must never lose work on navigation away.</p>
+<h3 id="21-workspace-template-files-locked-no-db">2.1 Workspace template files (locked — no DB)</h3>
+<p><strong>Your role templates</strong> live as text files inside the workspace directory, not in SQLite.</p>
+<p>Layout (<a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §4.1.1):</p>
+<pre><code>~/.pidgin/workspaces/&lt;id&gt;/
+  role-templates/
+    &lt;template-slug&gt;/
+      manifest.json          # name, slug, current_version, created_at, updated_at, optional lineage
+      v1.md                    # Markdown + YAML frontmatter (locked format)
+      v2.md
+      ...
+</code></pre>
+<ul>
+<li><strong>Format (locked):</strong> Markdown with YAML frontmatter — human-readable role brief sections (Job requirements, Ideal candidate profile, Your take).</li>
+<li><strong>Versioning:</strong> Each save under the <strong>same template slug</strong> appends a new version file (<code>v1</code> → <code>v2</code> → …). UI shows latest as current; older versions remain browsable. Prior version files are <strong>never overwritten</strong>.</li>
+<li><strong>Same name, new version:</strong> Operator may keep the display name unchanged; saving promotes <strong>latest version</strong> in <code>manifest.current_version</code>.</li>
+<li><strong>Pidgin role templates</strong> remain bundled JSON with semver (<code>0.1.0</code>, <code>0.2.0</code>); duplicating into workspace starts at <code>v1.md</code> for that workspace copy.</li>
+</ul>
+<p>Hire still creates an immutable <strong>snapshot</strong> on the employee row at hire time (existing <code>ai_employee_recipe_snapshots</code>); workspace template files are the editable library, not the runtime snapshot.</p>
+<hr />
+<h2 id="3-hire-flow">3. Hire flow</h2>
+<pre><code class="language-mermaid">flowchart TD
+  E[Hire a role: how do you want to start?] --&gt; S[Consult a specialist → HR chat]
+  E --&gt; M[Choose from marketplace]
+  E --&gt; F[Write from scratch → blank brief]
+  M --&gt; P[Candidate profile page]
+  P --&gt; D[Agent details + brief]
+  F --&gt; D
+  D --&gt; L[Lifecycle: interview → onboard → active]
+</code></pre>
+<p><strong>Step 0 — Hire entry (<code>/hire</code>)</strong></p>
+<p>An onboarding-style chooser, not a grid. Large heading <strong>"What position are you looking to hire?"</strong>
+with three cards:</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Consult a specialist</strong></td>
+<td>Opens the HR agent's full chat (<code>/agents/hr/chat</code>) to talk it through</td>
+</tr>
+<tr>
+<td><strong>Choose from marketplace</strong></td>
+<td>→ the marketplace (<code>/hire/marketplace</code>)</td>
+</tr>
+<tr>
+<td><strong>Write a profile from scratch</strong></td>
+<td>→ marketplace with a blank brief (<code>/hire/marketplace?fresh=1</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Step 1 — Marketplace (<code>/hire/marketplace</code>)</strong></p>
+<ul>
+<li>Well-separated and chat-free: just <strong>search</strong> (black input) over <strong>Candidate Profiles</strong> (bundled)</li>
+<li><strong>Your saved profiles</strong> (workspace), plus a <strong>Show archived profiles</strong> toggle. The HR chat is the
+  global floating launcher (§5), not embedded here.</li>
+<li>Each candidate links to its <strong>candidate profile page</strong> (<code>hire/marketplace/candidates/{template_id}</code>)
+  — mission, responsibilities, out-of-scope, ideal candidate profile, and access &amp; approvals, with
+  <strong>Hire {name}</strong> (deep-links via <code>?template={id}</code>, preselecting + jumping to details), <strong>Duplicate to
+  your profiles</strong>, and <strong>Archive / Unarchive</strong> (archive lives <em>only</em> on the profile page).</li>
+<li>Card descriptions are clamped to two lines; full text lives on the profile page.</li>
+<li><strong>Archive</strong> is a per-workspace hide flag (bundled profiles ship read-only, so archive ≠ delete),
+  stored in <code>marketplace/archived.json</code>; archived profiles appear only when <strong>Show archived</strong> is on.</li>
+</ul>
+<blockquote>
+<p>The standalone "Your templates" page was <strong>removed</strong>; saved profiles live in the marketplace under
+<em>Your saved profiles</em> (created via Duplicate or <em>Create template from this agent</em>).</p>
+</blockquote>
+<p><strong>Steps 2–3 — Editable brief</strong></p>
+<ul>
+<li>Pre-filled from template defaults</li>
+<li>Fields: see <a href="MVP_USER_STORIES.html">MVP_USER_STORIES.md</a> US-6</li>
+<li>HR assist panel always visible</li>
+</ul>
+<p><strong>Step 4 — Identity</strong></p>
+<ul>
+<li>Agent display name, handle, manager (default: logged-in user)</li>
+</ul>
+<p><strong>Step 5 — Review</strong></p>
+<ul>
+<li>Summarize template source, job requirements, ideal candidate, your take, identity</li>
+<li>CTA: <strong>Hire and continue</strong></li>
+</ul>
+<hr />
+<h2 id="4-agent-profile-post-hire">4. Agent profile (post-hire)</h2>
+<p>Route: <code>/{workspace}/agents/{handle}</code></p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Status + lifecycle CTAs</td>
+<td>draft → interviewing → onboarding → active</td>
+</tr>
+<tr>
+<td>Job requirements</td>
+<td><strong>Editable</strong>; save persists + audit</td>
+</tr>
+<tr>
+<td>Ideal candidate profile</td>
+<td><strong>Editable</strong>; save persists + audit</td>
+</tr>
+<tr>
+<td>Your take</td>
+<td><strong>Editable</strong></td>
+</tr>
+<tr>
+<td>Access &amp; approvals</td>
+<td>Read-only summary in MVP (overrides UI later)</td>
+</tr>
+<tr>
+<td>Template lineage</td>
+<td>“Based on Support Agent template v0.1”</td>
+</tr>
+<tr>
+<td><strong>Create template from this agent</strong></td>
+<td>Copies brief + permissions posture into new <strong>Your role template</strong></td>
+</tr>
+<tr>
+<td>HR assist</td>
+<td>Same chat panel as hire wizard</td>
+</tr>
+</tbody>
+</table>
+<p>Post-hire edits update <code>hire_customization_json</code> on the employee row and append to <code>audit/brief-edits/&lt;employee_id&gt;.jsonl</code> — they do <strong>not</strong> mutate the immutable hire-time snapshot. See <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §7.1, §4.1.3.</p>
+<hr />
+<h2 id="5-pidgin-hr-assist">5. Pidgin HR assist</h2>
+<p>The hiring coach is the <strong>pre-hired HR agent</strong> (<code>hr-onboarding</code> recipe), seeded as a workspace
+singleton at workspace creation (handle <code>@hr</code>). HR is now <strong>hiring only</strong> — coaching the owner
+through the wizard. Stewardship of the company onboarding material has moved to a separate
+pre-seeded <strong><code>@enablement</code></strong> agent (<a href="AGENT_ONBOARDING.html">AGENT_ONBOARDING.md</a>); at hire completion
+HR simply points the new agent at Enablement's material. The chat panel renders HR's persona;
+suggestions come from the agent, not a hardcoded script.</p>
+<blockquote>
+<p>Reverses the original MVP rule ("<em>not</em> a hired AI employee"). A keyword <strong>stub</strong> remains as the
+offline fallback so the panel still answers and <strong>hiring never blocks</strong> when the LLM backend is
+<code>stub</code> or unavailable.</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Backed by</td>
+<td>Pre-hired HR agent (<code>@hr</code>, singleton, <strong>hiring only</strong>); keyword stub is the fallback only</td>
+</tr>
+<tr>
+<td>Always available</td>
+<td>A <strong>floating launcher</strong> (bottom-right) is present on every workspace page and opens a docked HR chat. Hidden only on the HR agent's own full chat screen.</td>
+</tr>
+<tr>
+<td>Dedicated screen</td>
+<td>"Consult a specialist" and the launcher both open the HR agent (<code>/agents/hr/chat</code>) — same agent, same thread</td>
+</tr>
+<tr>
+<td>Persona</td>
+<td>HR / hiring advisor: clarifies role scope, recommends candidates, tightens wording</td>
+</tr>
+<tr>
+<td>Onboarding</td>
+<td><strong>Not HR's job</strong> — the pre-seeded <code>@enablement</code> agent owns the onboarding material; HR only points new hires to it (<a href="AGENT_ONBOARDING.html">AGENT_ONBOARDING.md</a>)</td>
+</tr>
+<tr>
+<td>Form coach</td>
+<td>On the brief steps the in-form <strong>Discuss with Pidgin</strong> panel still emits <code>pidgin-suggestion</code> → <strong>Apply to form</strong> / <strong>Append to your take</strong></td>
+</tr>
+<tr>
+<td>Runtime</td>
+<td>Real backend → agent persona reply; <code>stub</code> backend or any failure → keyword fallback; never blocks save/hire</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Out of scope for assist:</strong> changing access &amp; approvals without explicit operator action; auto-hire without review step.</p>
+<hr />
+<h2 id="6-create-template-from-agent">6. Create template from agent</h2>
+<p><strong>Trigger:</strong> Agent profile → <strong>Create template from this agent</strong></p>
+<p><strong>Copies:</strong></p>
+<ul>
+<li>Job requirements, ideal candidate profile, your take (current values)</li>
+<li>Access &amp; approvals summary (as template defaults)</li>
+<li>Source lineage note: “Derived from @{handle}”</li>
+</ul>
+<p><strong>Does not copy:</strong> agent display name, handle, manager, status, interview/onboarding progress.</p>
+<p><strong>Result:</strong> New <strong>Your role template</strong> opens in editor; operator names it and saves.</p>
+<hr />
+<h2 id="7-custom-template-lifecycle">7. Custom template lifecycle</h2>
+<pre><code class="language-mermaid">flowchart LR
+  A[Create blank] --&gt; B[Edit + HR assist]
+  C[Duplicate Pidgin template] --&gt; B
+  D[Create from agent] --&gt; B
+  B --&gt; E[Save workspace template]
+  E --&gt; F[Use in hire wizard]
+</code></pre>
+<ul>
+<li><strong>Create blank:</strong> empty job requirements + ideal candidate; operator fills with HR assist</li>
+<li><strong>Duplicate Pidgin template:</strong> creates editable workspace copy; Pidgin original unchanged</li>
+<li><strong>Delete:</strong> workspace templates only; confirm if template was used for hires (show hire count)</li>
+</ul>
+<hr />
+<h2 id="8-architect-handoffs-resolved-pid-6">8. Architect handoffs — resolved (PID-6)</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Resolution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>hire_customization_json</code> + prompt merge</td>
+<td><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §7.1 (JSON shape), §7.2 (turn-time merge with snapshot <code>system_prompt_template</code>); migration <code>002_hire_customization</code> in §15.1</td>
+</tr>
+<tr>
+<td>Workspace template file layout + API</td>
+<td><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §4.1.1; routes in <a href="IMPLEMENTATION_PLAN.html">IMPLEMENTATION_PLAN.md</a> Hire UX API table</td>
+</tr>
+<tr>
+<td>Version promotion (same slug → new <code>v&lt;N&gt;.md</code>)</td>
+<td>§4.1.1 — manifest <code>current_version</code> bumped; prior files retained</td>
+</tr>
+<tr>
+<td>HR assist session storage + messages API</td>
+<td><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §4.1.2 (<code>hr-assist/sessions/&lt;ulid&gt;/</code>); routes in <a href="IMPLEMENTATION_PLAN.html">IMPLEMENTATION_PLAN.md</a></td>
+</tr>
+<tr>
+<td>Suggestion payload (Apply / Append)</td>
+<td>§4.1.2 — <code>suggestion.action</code>: <code>apply</code> | <code>append_your_take</code></td>
+</tr>
+<tr>
+<td>Audit: post-hire brief edits + template version creates</td>
+<td><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §4.1.3 — <code>audit/brief-edits/</code>, <code>audit/template-versions/</code> JSONL</td>
+</tr>
+<tr>
+<td>Bundled <code>default_job_requirements</code> / <code>default_ideal_candidate</code></td>
+<td><a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a> §2.1</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Implementation phases:</strong> <a href="IMPLEMENTATION_PLAN.html">IMPLEMENTATION_PLAN.md</a> Phase 1B (hire wizard), 1B2 (workspace templates), 1B3 (post-hire edit), 1C (HR assist).</p>
+<hr />
+<h2 id="9-phased-delivery">9. Phased delivery</h2>
+<table>
+<thead>
+<tr>
+<th>Slice</th>
+<th>Delivers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B</td>
+<td>Hire wizard + Pidgin templates + customization persist at hire</td>
+</tr>
+<tr>
+<td>B2</td>
+<td>Workspace templates CRUD + create from agent</td>
+</tr>
+<tr>
+<td>B3</td>
+<td>Post-hire edit + audit</td>
+</tr>
+<tr>
+<td>C</td>
+<td>HR assist chat (stub LLM)</td>
+</tr>
+<tr>
+<td>D</td>
+<td>Interview scenarios</td>
+</tr>
+<tr>
+<td>E</td>
+<td>Onboarding + activate</td>
+</tr>
+</tbody>
+</table>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

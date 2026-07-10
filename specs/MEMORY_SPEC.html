@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Memory</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item active" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Memory management</h1></header>
+
+<blockquote>
+<p><strong>Scope:</strong> How Pidgin stores, recalls, and maintains agent memory. Pairs with <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md §5</a> (scopes and recall) and <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md §4</a> (file layout).</p>
+</blockquote>
+<h2 id="summary">Summary</h2>
+<p>Agent memory is <strong>append-only text</strong> — one <code>journal.md</code> per hired agent under <code>memory/&lt;handle&gt;/</code>. Agents write via <code>remember</code>; the runtime injects context via <code>recall</code> (tail + grep). There is <strong>no vector DB</strong> and no automatic deduplication in MVP.</p>
+<p>Because journals only grow, <strong>memory cleaning is required</strong>. Without it, recall quality degrades, disk use grows, and grep hits stale or contradictory facts.</p>
+<h2 id="what-lives-where">What lives where</h2>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Path</th>
+<th>Writer</th>
+<th>Recall (MVP)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent memory</td>
+<td><code>memory/&lt;handle&gt;/journal.md</code></td>
+<td>Agent (<code>remember</code>)</td>
+<td>Tail (~8 KB) + keyword grep</td>
+</tr>
+<tr>
+<td>Company context</td>
+<td><code>docs/&lt;id&gt;.txt</code> + DB catalog</td>
+<td>Runtime / admin</td>
+<td>Grep or whole file if small (~32 KB)</td>
+</tr>
+<tr>
+<td>Conversation state</td>
+<td>DB (<code>conversations</code>, <code>messages</code>)</td>
+<td>Runtime + agent</td>
+<td>Per-turn from DB, not the journal</td>
+</tr>
+</tbody>
+</table>
+<p>Per-agent isolation is strict: Jane's journal is invisible to Max. Cross-agent context flows only through granted documents or explicit <code>delegate</code>.</p>
+<h2 id="why-cleaning-is-required">Why cleaning is required</h2>
+<ol>
+<li><strong>Recall is bounded</strong> — only the journal tail and grep matches enter a turn. Old entries fall out of the default context even though they remain on disk.</li>
+<li><strong>Journals are append-only</strong> — every <code>remember</code> adds material; nothing is removed unless something explicitly cleans.</li>
+<li><strong>Stale facts accumulate</strong> — decisions change, contacts leave, policies update. Uncleaned journals mix current and obsolete notes.</li>
+<li><strong>Operational cost</strong> — large files slow grep and make human inspection harder.</li>
+</ol>
+<p>Cleaning is a <strong>first-class lifecycle concern</strong>, not an optional optimization.</p>
+<h2 id="what-cleaning-means-outcomes-not-mechanism">What cleaning means (outcomes, not mechanism)</h2>
+<p>Cleaning should produce one or more of:</p>
+<ul>
+<li><strong>Smaller active journal</strong> — fewer bytes/lines in the file used for recall.</li>
+<li><strong>Consolidated facts</strong> — many dated blocks replaced by fewer up-to-date summaries.</li>
+<li><strong>Archived history</strong> — superseded content moved out of the hot path but retained for audit if needed.</li>
+<li><strong>Explicit tombstones</strong> — removed or invalidated entries recorded so agents do not re-remember the same stale fact.</li>
+</ul>
+<p>The MVP does <strong>not</strong> define how cleaning runs. Implementation is deferred; options below are proposals only.</p>
+<h2 id="cleaning-options-proposals-not-decided">Cleaning options (proposals — not decided)</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Trigger</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Agent self-maintenance</strong></td>
+<td>Recipe behavior or periodic <code>schedule_self</code> turn</td>
+<td>Context-aware; agent knows what is obsolete</td>
+<td>Unreliable if not prompted; uses LLM budget</td>
+</tr>
+<tr>
+<td><strong>Summarize-and-replace</strong></td>
+<td>Job or admin action runs LLM over old blocks → writes consolidated <code>remember</code> entries → archives or deletes source blocks</td>
+<td>Keeps journal human-readable; improves recall signal</td>
+<td>Needs gate/audit for destructive edits; summary quality risk</td>
+</tr>
+<tr>
+<td><strong>Retention by age</strong></td>
+<td>Background job drops or archives entries older than N days</td>
+<td>Simple, predictable</td>
+<td>May delete still-relevant long-tail facts</td>
+</tr>
+<tr>
+<td><strong>Operator manual trim</strong></td>
+<td>Admin UI or CLI on <code>journal.md</code></td>
+<td>Full human control</td>
+<td>Does not scale; easy to break format</td>
+</tr>
+<tr>
+<td><strong>Offboarding archive</strong></td>
+<td>On agent fire/pause: move <code>journal.md</code> → <code>journal.archive.md</code>, start empty journal on re-hire</td>
+<td>Clean separation per employment period</td>
+<td>Re-hired agent loses hot memory unless restored</td>
+</tr>
+<tr>
+<td><strong>Tiered storage</strong></td>
+<td>Hot <code>journal.md</code> + cold <code>journal.archive.md</code>; recall searches both with lower priority on archive</td>
+<td>Preserves history without bloating tail</td>
+<td>Two-file recall logic; archive search cost</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommendation for planning:</strong> treat <strong>summarize-and-replace</strong> plus <strong>offboarding archive</strong> as the likely long-term shape; start MVP with <strong>operator visibility</strong> (journal size, last cleaned) and document that automatic cleaning is post-MVP.</p>
+<h2 id="open-decisions">Open decisions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Who may trigger cleaning (agent, operator, runtime job only)</td>
+<td>TBD</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Whether cleaned content is deleted, archived, or superseded in-place</td>
+<td>TBD</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Default retention / compaction schedule</td>
+<td>TBD</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Audit requirement for cleaning actions (<code>agent_action_log</code> entries)</td>
+<td>TBD — likely required</td>
+</tr>
+</tbody>
+</table>
+<p>Record resolved choices in <a href="IMPLEMENTATION_PLAN.html">IMPLEMENTATION_PLAN.md §Open decisions</a>.</p>
+<h2 id="related-specs">Related specs</h2>
+<ul>
+<li><a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md §5</a> — <code>remember</code> / <code>recall</code> behavior</li>
+<li><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md §4</a> — workspace file layout</li>
+<li><a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a> — trust labels on recalled content</li>
+<li><a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> — memory in the AI employee model</li>
+</ul>
+<h2 id="handoff">Handoff</h2>
+<ul>
+<li><strong>Fullstack dev</strong> — when implementing cleaning: add tests for journal integrity, gate any destructive path, log to <code>agent_action_log</code>.</li>
+<li><strong>Product</strong> — if operator-facing controls are needed, add US-* acceptance criteria for journal health and manual archive.</li>
+<li><strong>Recipes writer</strong> — optional recipe fields for maintenance cadence or self-cleaning instructions once option (1) or (2) is chosen.</li>
+</ul>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

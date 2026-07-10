@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Onboarding — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Agent Onboarding</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item active" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Agent Onboarding Documentation</h1></header>
+
+<blockquote>
+<p><strong>Scope:</strong> How every hired agent learns about the company before doing productive work, where
+that knowledge lives, and who is responsible for keeping it correct.
+<strong>Pairs with:</strong> <a href="MEMORY_SPEC.html">MEMORY_SPEC.md</a> (company-context vs agent-journal scopes),
+<a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> (<code>read</code>/<code>recall</code>/<code>remember</code>/<code>draft</code>/<code>request_approval</code>/<code>execute</code>),
+<a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a> (Google Drive as company storage),
+<a href="HIRE_UX.html">HIRE_UX.md</a> §5 (HR hiring coach), <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a> (trust labels).</p>
+</blockquote>
+<h2 id="summary">Summary</h2>
+<p>Before an agent does anything productive, it must know the company: mission, products, customers,
+brand voice, <strong>team structure and hierarchy</strong>, the tools in use, who's who, and the <strong>norms — the
+do's and don'ts and what's expected of an agent</strong>. That knowledge is the company's onboarding
+material — a <strong>single shared, canonical body of documents, not a per-agent fact</strong>.</p>
+<p>It lives where a real company keeps its documents: <strong>the company's own storage</strong> (Google Drive, or
+whatever the company uses), mirrored under <code>docs/</code> so it stays accessible even when a connector is
+down. Agents read and contribute to it like any other employee would.</p>
+<p>Design in one line: <strong>two pre-seeded agents — Enablement produces and stewards the company-wide
+material; HR runs hiring — and every shared document is owner-approved before it becomes canon.</strong></p>
+<h2 id="two-roles-enablement-and-hr">Two roles — Enablement and HR</h2>
+<p>The platform pre-seeds <strong>two distinct agents</strong> at install (see <em>What ships today</em>). They were one
+agent in an earlier draft; they are split because the jobs have different lifecycles.</p>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Owns</th>
+<th>Lifecycle</th>
+<th>Why separate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><code>@enablement</code></strong> ("Agent Enablement")</td>
+<td>The <strong>company-wide onboarding material</strong> — mission, products, customers, brand voice, hierarchy, tools, norms. The onboarding <strong>plan</strong> (the reading list a new hire works through).</td>
+<td>Continuous — grows and stays current as the company and team change</td>
+<td>Every agent depends on company context, even a lone agent that never hires. Enablement is the <strong>more fundamental</strong> of the two.</td>
+</tr>
+<tr>
+<td><strong><code>@hr</code></strong> ("HR &amp; Hiring")</td>
+<td><strong>Hiring</strong> — coaching the owner through the hire wizard, tightening role briefs, the <code>pidgin-suggestion</code> panel (<a href="HIRE_UX.html">HIRE_UX.md</a> §5).</td>
+<td>Episodic — active when the owner grows the team through Pidgin</td>
+<td>Recruiting is a different job from stewarding what new hires read.</td>
+</tr>
+</tbody>
+</table>
+<p>Enablement is <strong>not</strong> the author of <em>all</em> shared knowledge — it stewards the <strong>company-wide</strong>
+material. Team-specific knowledge is authored bottom-up by the team that needs it (see below).</p>
+<h2 id="where-shared-knowledge-lives-three-layers">Where shared knowledge lives — three layers</h2>
+<p>There is <strong>no special Pidgin "team memory" primitive</strong>. Shared knowledge is just <strong>company
+documents in storage</strong>, organized into folders exactly as a real company would, with folder
+permissions doing the scoping. Per-agent memory (<a href="MEMORY_SPEC.html">MEMORY_SPEC.md</a>) is unchanged.</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Where</th>
+<th>Who reads</th>
+<th>Who drafts</th>
+<th>Write gate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Company context</strong></td>
+<td>Drive / company-wide folder (mirrored to <code>docs/</code>)</td>
+<td>every agent</td>
+<td><strong>Enablement</strong> (steward, top-down)</td>
+<td><strong>owner-approved</strong></td>
+</tr>
+<tr>
+<td><strong>Team knowledge / SOPs</strong></td>
+<td>Drive / team folder</td>
+<td>that team/role</td>
+<td><strong>any agent on that team</strong>, when a gap exists (bottom-up)</td>
+<td><strong>owner-approved</strong></td>
+</tr>
+<tr>
+<td><strong>Per-agent journal</strong></td>
+<td><code>memory/&lt;handle&gt;/journal.md</code></td>
+<td>just that agent</td>
+<td>the agent itself (<code>remember</code>)</td>
+<td>none (private cache)</td>
+</tr>
+</tbody>
+</table>
+<p>Example: a Support agent that needs a refund policy and finds none <strong>drafts</strong> one into the Support
+team folder; the owner approves; every future Support agent then onboards from it. The team folder
+is both a working reference <em>and</em> the onboarding reading for the next hire on that team. Top-down
+(Enablement) and bottom-up (teams) meet in the same Drive, under one approval rule.</p>
+<p>Per-agent journals stay strictly isolated, so they are the wrong home for shared truth — N agents
+would each learn a divergent version. A journal only <strong>caches</strong> the parts of the shared docs
+relevant to one agent's role for fast recall; the Drive docs stay authoritative.</p>
+<h2 id="one-write-rule-owner-approved">One write rule — owner-approved</h2>
+<p>Anything that lands in shared company storage — whether Enablement editing the company-wide doc or a
+Support agent adding a refund policy — goes through the same gate: <code>draft</code> → <code>request_approval</code> →
+<strong>owner approves</strong> → <code>execute</code> writes it, with an audit entry. Private-journal writes are ungated.</p>
+<p>This is the guard against contradictions and poisoning: an agent influenced by untrusted content
+could otherwise write a bad fact that every other agent then trusts. The blast radius differs (a
+team doc misleads one team; the company doc misleads everyone), but the rule is uniform, so there is
+one thing to reason about. Agents <strong>never</strong> self-commit to shared storage.</p>
+<h2 id="lifecycle">Lifecycle</h2>
+<h3 id="1-bootstrap-first-time-the-company-sets-up">1. Bootstrap (first time the company sets up)</h3>
+<p><strong>Enablement interviews the owner</strong> — mission, products, customers, brand voice, team structure and
+hierarchy, tools, key people, and norms (do's and don'ts) — and <code>draft</code>s the initial company-wide
+material. Nothing becomes canon until the owner approves it. The material is never auto-published.</p>
+<h3 id="2-handoff-at-hire-hr-new-agent">2. Handoff at hire (HR → new agent)</h3>
+<p>When a hire completes, <strong>HR hands the new agent off by pointing it at the material Enablement
+maintains</strong> — "before any productive work, read the onboarding material here → \&lt;pointer into
+Drive&gt;." There is no HR→Enablement coordination per hire: Enablement's output already exists; HR
+just points to it. The reading list <em>is</em> the onboarding plan.</p>
+<h3 id="3-read-once-then-cache-every-agent-on-first-run">3. Read-once-then-cache (every agent, on first run)</h3>
+<p>The <strong>first thing</strong> a newly hired agent does is read the company-wide material (and its team folder,
+if any), then distill the parts relevant to its role into its journal via <code>remember</code>. Subsequent
+turns recall from the journal (cheap), not the whole doc set. Each agent records the <strong>version it
+onboarded against</strong> (a content hash or version tag) in its journal.</p>
+<h3 id="4-refresh-on-change">4. Refresh-on-change</h3>
+<p>When shared material changes, its version/hash changes. On turn start the runtime compares the
+agent's onboarded version to the current canon; if stale, the agent re-reads and updates its journal
+cache. The canon, not the cache, wins whenever they disagree.</p>
+<h3 id="5-gap-fill-any-agent-any-time">5. Gap-fill (any agent, any time)</h3>
+<p>If an agent needs a fact that is missing, it does <strong>not</strong> invent it. For <strong>company-wide</strong> facts it
+asks the owner or proposes the fact, routed to <strong>Enablement</strong>, who consolidates it for owner
+approval. For <strong>team</strong> facts the agent drafts directly into its team folder for owner approval. Both
+end at the same gate; approved facts trigger a refresh for everyone in scope.</p>
+<h2 id="responsibilities">Responsibilities</h2>
+<table>
+<thead>
+<tr>
+<th>Actor</th>
+<th>Reads canon</th>
+<th>Drafts / proposes</th>
+<th>Commits to shared storage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Every agent</td>
+<td><strong>yes (mandatory, first)</strong></td>
+<td>yes — gap-fill to Enablement (company) or own team folder</td>
+<td>no — owner-gated</td>
+</tr>
+<tr>
+<td><strong>Enablement</strong> (steward)</td>
+<td>yes</td>
+<td><strong>yes — owns the company-wide material</strong>; consolidates gap-fills</td>
+<td><strong>prepares</strong>, then owner-approved</td>
+</tr>
+<tr>
+<td><strong>HR</strong> (hiring)</td>
+<td>n/a for stewardship</td>
+<td>proposes role briefs in the hire wizard</td>
+<td>n/a — does not steward canon</td>
+</tr>
+<tr>
+<td>Workspace owner (human)</td>
+<td>n/a</td>
+<td>n/a</td>
+<td><strong>approves every change</strong></td>
+</tr>
+</tbody>
+</table>
+<p>This is deliberately <strong>not</strong> "each agent owns its own onboarding" (isolation defeats sharing) and
+<strong>not</strong> "any agent writes company truth freely" (contradictions + poisoning). Writes to shared
+storage are always human-approved.</p>
+<h2 id="trust-safety">Trust &amp; safety</h2>
+<ul>
+<li>The onboarding material is <strong>trusted instruction context</strong> once approved, so the approval gate is
+  what protects it. Gap-fill proposals derived from untrusted content (emails, scraped pages) must
+  carry their trust label so Enablement/owner reviews them as untrusted before they become canon
+  (<a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a>).</li>
+<li>Agents must never publish or commit to shared storage without owner approval — <code>execute</code> is gated.</li>
+</ul>
+<h2 id="what-ships-today-vs-needs-runtime-work">What ships today vs. needs runtime work</h2>
+<p><strong>Ships today (no runtime change):</strong>
+- <strong>Two pre-seeded agents.</strong> The starting team is <strong>data, not code</strong>: workspace creation reads a
+  seed manifest (<a href="../recipes/workspace-seed.json">workspace-seed.json</a>) and hires each listed recipe
+  — <strong><code>@enablement</code></strong> (<a href="../recipes/enablement-v0.1.json">enablement-v0.1.json</a>) and <strong><code>@hr</code></strong>
+  (<a href="../recipes/hr-onboarding-v0.1.json">hr-onboarding-v0.1.json</a>). Seeding is idempotent (singleton
+  roles / taken handles are skipped).
+- <strong>Reconciliation backfill.</strong> Because the manifest is the desired state and seeding is idempotent, a
+  reconciliation pass runs over every registered workspace at API startup (and is callable on
+  demand), so workspaces created before an agent was added to the manifest — e.g. Enablement — gain
+  it without manual migration.
+- <strong>Recipe-prompt instruction</strong> in every role telling agents to read company context first and to
+  propose (not invent) missing facts. Company-context recall already exists in MEMORY_SPEC.</p>
+<p><strong>Needs runtime work (specced here, not yet built):</strong>
+1. <strong>First-read bootstrap</strong> — runtime ensures a new agent's first action reads the onboarding
+   material (or injects it) before productive work, rather than relying on the prompt alone.
+2. <strong>Versioned canon + refresh signal</strong> — a content hash/version on the material, an
+   <code>onboarded_version</code> marker per agent, and a turn-start staleness check that triggers re-read.
+3. <strong>Shared-storage write path with approval</strong> — committing approved content to <code>docs/</code> + Drive as a
+   gated <code>execute</code>, with an audit entry, for both company-wide and team folders.
+4. <strong>Gap-fill routing</strong> — a company-wide proposal reaches Enablement's queue; a team proposal lands
+   in the team folder's approval queue.</p>
+<h2 id="open-decisions">Open decisions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Canon format — single Markdown doc vs. sectioned docs (mission / brand / <strong>hierarchy</strong> / <strong>norms</strong> / people / tools)</td>
+<td>TBD; lean sectioned for targeted recall</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Hierarchy representation — freeform prose vs. a structured roster the runtime can also use for routing/delegation</td>
+<td>TBD; structured roster lets Enablement keep the org map current as a byproduct of every hire</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Refresh granularity — whole-doc hash vs. per-section</td>
+<td>TBD</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Where Drive sits vs. the <code>docs/</code> mirror — Drive as source with local cache, or local as source synced to Drive</td>
+<td>TBD</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Whether first-read is a hard runtime gate or an auto-injection</td>
+<td>Leaning auto-inject + prompt; gate is heavier</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Team-folder curation — does a team lead agent curate its folder, or only the owner approves</td>
+<td>TBD; owner-approval holds today</td>
+</tr>
+</tbody>
+</table>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marketing Team Sketch — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Marketing Team Sketch</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item active" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Marketing Team — Design Sketch</h1></header>
+
+<p><strong>Status:</strong> Exploratory. Not MVP. The three specialist recipes below ship today; the <em>team</em> layer
+depends on multi-agent delegation that the runtime supports as an action (<code>delegate</code>) but does not
+yet orchestrate as a hierarchy. See <a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a> §7 ("Hierarchy recipes are
+out of scope for MVP").</p>
+<p><strong>Related:</strong> <a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a>, <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a>
+(<code>delegate</code>, <code>escalate</code>, requester chain), <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a>.</p>
+<hr />
+<h2 id="1-what-ships-today-three-independent-specialists">1. What ships today (three independent specialists)</h2>
+<table>
+<thead>
+<tr>
+<th>Recipe</th>
+<th><code>recipe_id</code></th>
+<th>Drafts</th>
+<th>Publishes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Content Marketing Writer</td>
+<td><code>marketing-content-writer</code></td>
+<td>emails, newsletters, blog, landing pages</td>
+<td>never — owner approves</td>
+</tr>
+<tr>
+<td>Campaign Manager</td>
+<td><code>marketing-campaign-manager</code></td>
+<td>plans, briefs, calendars, status</td>
+<td>never — owner approves</td>
+</tr>
+<tr>
+<td>Social Media Manager</td>
+<td><code>marketing-social-manager</code></td>
+<td>social posts, reply drafts</td>
+<td>never — owner approves</td>
+</tr>
+</tbody>
+</table>
+<p>All three are <strong>draft-only</strong>: <code>execute</code> is in <code>requires_approval</code>, and <code>delegate</code> is <code>blocked</code>. A
+human is always the publisher. Each can be hired independently and used standalone today.</p>
+<h2 id="2-the-team-layer-sketch">2. The team layer (sketch)</h2>
+<p>The idea: instead of the owner coordinating three specialists by hand, hire a <strong>Marketing Lead</strong> that
+receives the goal, decomposes it, and delegates to the specialists — with the owner still approving
+every outbound action.</p>
+<pre><code>                 owner (commander)
+                      │  goal: &quot;launch campaign for Feature X&quot;
+                      ▼
+            ┌──────────────────────┐
+            │   Marketing Lead     │  plans, decomposes, delegates, consolidates
+            │  (can_write: delegate)│  → stages everything for owner approval
+            └──────────┬───────────┘
+          delegate     │     delegate            delegate
+        ┌──────────────┼────────────────────┬───────────────┐
+        ▼              ▼                     ▼
+  Content Writer   Campaign Manager     Social Manager
+   (drafts copy)   (plan + calendar)    (social drafts)
+        │              │                     │
+        └──────────────┴─────────────────────┘
+                       │ drafts bubble up
+                       ▼
+              owner approves → publish
+</code></pre>
+<h3 id="21-proposed-marketing-lead-recipe-not-yet-bundled">2.1 Proposed Marketing Lead recipe (not yet bundled)</h3>
+<p>Same draft-only safety posture, but <strong><code>delegate</code> moves from <code>blocked</code> to <code>can_write</code></strong>:</p>
+<pre><code class="language-json">{
+  &quot;recipe_id&quot;: &quot;marketing-lead&quot;,
+  &quot;role_title&quot;: &quot;Head of Marketing&quot;,
+  &quot;permissions&quot;: {
+    &quot;can_read&quot;: [&quot;read&quot;, &quot;recall&quot;, &quot;watch&quot;],
+    &quot;can_write&quot;: [&quot;say&quot;, &quot;post&quot;, &quot;remember&quot;, &quot;draft&quot;, &quot;open_task&quot;,
+                  &quot;schedule_self&quot;, &quot;request_approval&quot;, &quot;delegate&quot;, &quot;escalate&quot;, &quot;close&quot;],
+    &quot;requires_approval&quot;: [&quot;execute&quot;],
+    &quot;blocked&quot;: []
+  }
+}
+</code></pre>
+<p>The lead's prompt would: turn a goal into a plan, delegate discrete pieces to the right specialist,
+preserve the original requester chain on each handoff, consolidate the returned drafts, and present
+the owner a single approve/reject surface instead of three.</p>
+<h2 id="3-what-the-runtime-needs-before-the-team-is-real">3. What the runtime needs before the team is real</h2>
+<p>The <code>delegate</code> action type exists, but for a hierarchy to work end to end we need:</p>
+<ol>
+<li><strong>Addressing</strong> — how the Lead names a target specialist (handle? role? a registered roster on the
+   Lead's employee row). MVP recipes have no roster field.</li>
+<li><strong>Requester-chain propagation</strong> — the executive-assistant prompt already references "preserve the
+   original requester chain"; the team needs this enforced so a delegated draft is still attributed to
+   the owner's original request for approval/audit.</li>
+<li><strong>Trust on peer handoffs</strong> — a <code>PEER_DELEGATION</code> trigger already exists
+   (<a href="../src/pidgin/types/enums.py">enums.py</a> <code>TriggerType.PEER_DELEGATION</code>); the gate must decide how a
+   peer-delegated instruction is trusted vs. an owner instruction.</li>
+<li><strong>Consolidated approval UX</strong> — one owner approval over a bundle of specialist drafts, not N
+   separate prompts.</li>
+</ol>
+<h2 id="4-recommended-path">4. Recommended path</h2>
+<ol>
+<li><strong>Now:</strong> ship the three specialists; let the owner coordinate them manually. Validates the prompts
+   and the draft-only posture with zero new runtime work.</li>
+<li><strong>Next:</strong> add a roster concept to the recipe/employee schema and a <code>marketing-lead</code> recipe; wire
+   <code>delegate</code> addressing + requester-chain propagation.</li>
+<li><strong>Later:</strong> consolidated multi-draft approval UX, and per-specialist connectors (social platforms,
+   analytics) so "publish" and "report" become real instead of hand-back-to-owner.</li>
+</ol>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

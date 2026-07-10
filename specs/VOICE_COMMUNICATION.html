@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice & Comms — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Voice & Comms</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item active" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Product Split:</h1></header>
+
+<h3 id="1-direct-conversation">1. Direct Conversation</h3>
+<pre><code>Every agent should be reachable like a person:
+text them, call them, email them, or summon them from Pidgin.
+</code></pre>
+<h3 id="2-meeting-participation">2. Meeting Participation</h3>
+<pre><code>Agents are invited to meetings like coworkers.
+</code></pre>
+<p>Both modes are needed for the MVP. However, to simplify, we'll focus on only one option for each.</p>
+<ol>
+<li>Web Voice Button for immediate conversation</li>
+<li>Recall.ai or equivalent for meeting joining</li>
+</ol>
+<h1 id="reference">Reference</h1>
+<p>Part of what makes an agent useful is that you could talk to it. This is a must for the MVP phase</p>
+<p>Our options are these:
+| Option                       |    Simplicity | Good for                       | Notes                                                                                                                                                                                                                      |
+| ---------------------------- | ------------: | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <strong>Phone call</strong>               |   <strong>Easiest</strong> | Real voice conversation        | Twilio has bidirectional media streams: your server receives call audio and sends generated audio back into the call. Good fit for AI voice agents. (<a href="https://www.twilio.com/docs/voice/media-streams?utm_source=chatgpt.com" title="Media Streams Overview">Twilio</a>)                                                          |
+| <strong>Web voice button</strong>         | <strong>Very easy</strong> | “Talk to Jane” inside your app | Browser mic → STT → agent → TTS. No telecom, no Zoom, no install.                                                                                                                                                          |
+| <strong>Slack text / audio clips</strong> |          Easy | Workplace agent UX             | Slack is great for text, but live Huddles are not cleanly programmable as a voice-agent surface; Slack Huddles are designed for human real-time coworking. (<a href="https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack?utm_source=chatgpt.com" title="Use huddles in Slack">Slack</a>)                                                    |
+| <strong>WhatsApp voice</strong>           |        Medium | Consumer-like UX               | WhatsApp Business Calling API exists, but platform policy and availability are moving targets. (<a href="https://business.whatsapp.com/blog/whatsapp-business-calling-api?utm_source=chatgpt.com" title="Announcing Launch of the WhatsApp Business Calling API">WhatsApp for Business</a>)                                                                                                |
+| <strong>Google Meet / Zoom</strong>       |        Harder | Formal meetings                | Better when the agent joins scheduled meetings, not for quick “talk to my agent.” Google Meet now has a Media API for real-time meeting media, but it’s still a meeting-platform integration. (<a href="https://developers.google.com/workspace/meet/media-api/guides/overview?utm_source=chatgpt.com" title="Meet Media API overview">Google for Developers</a>) |</p>
+<p>Options:
+Deepgram - Not great on quality
+ElevenLabs - actually great! Saw some post regarding latency when scaling up
+OpenAI voice - </p>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

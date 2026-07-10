@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recipes — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Recipes</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item active" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Role Recipe Spec (MVP)</h1></header>
+
+<p>Defines the JSON bundle format for <strong>role recipes</strong> consumed by the Pidgin runtime at hire time. Hierarchy recipes are out of scope for MVP.</p>
+<p><strong>Related:</strong> <a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> §Recipes, <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> (<code>ai_employee_recipe_snapshots</code>), <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a> (permission profiles).</p>
+<hr />
+<h2 id="1-bundle-lifecycle">1. Bundle lifecycle</h2>
+<ol>
+<li>Operator selects a role recipe (bundled JSON file or marketplace URL).</li>
+<li>Runtime loads and validates the bundle.</li>
+<li>Runtime computes <code>bundle_sha256 = SHA256(canonical_json)</code>.</li>
+<li>Runtime inserts an immutable row in <code>ai_employee_recipe_snapshots</code> and links <code>ai_employees.recipe_snapshot_id</code>.</li>
+<li>Upgrades create a <strong>new</strong> snapshot row; old snapshots are never edited.</li>
+</ol>
+<p>Marketplace is a separate app. MVP ships bundled role recipes:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th><code>recipe_id</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>recipes/support-agent-v0.1.json</code></td>
+<td><code>support-agent</code></td>
+</tr>
+<tr>
+<td><code>recipes/executive-assistant-v0.1.json</code></td>
+<td><code>executive-assistant</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-json-schema-role-recipe-v01">2. JSON schema (role recipe v0.1)</h2>
+<p>Top-level object:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>recipe_id</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Stable slug, kebab-case (e.g. <code>support-agent</code>)</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Semver (e.g. <code>0.1.0</code>)</td>
+</tr>
+<tr>
+<td><code>display_name</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Default agent display name at hire</td>
+</tr>
+<tr>
+<td><code>role_title</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Job title shown in UI</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>string</td>
+<td>no</td>
+<td>Human-readable summary</td>
+</tr>
+<tr>
+<td><code>permissions</code></td>
+<td>object</td>
+<td>yes</td>
+<td>See §3</td>
+</tr>
+<tr>
+<td><code>default_channels</code></td>
+<td>string[]</td>
+<td>no</td>
+<td>Suggested rooms/channels (e.g. <code>#support</code>)</td>
+</tr>
+<tr>
+<td><code>system_prompt_template</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Jinja-style <code>{{display_name}}</code>, <code>{{role_title}}</code></td>
+</tr>
+<tr>
+<td><code>default_job_requirements</code></td>
+<td>object</td>
+<td>no</td>
+<td>Pre-fill for hire wizard <strong>Job requirements</strong> (see §2.1)</td>
+</tr>
+<tr>
+<td><code>default_ideal_candidate</code></td>
+<td>object</td>
+<td>no</td>
+<td>Pre-fill for <strong>Ideal candidate profile</strong> (see §2.1)</td>
+</tr>
+<tr>
+<td><code>tools</code></td>
+<td>string[]</td>
+<td>no</td>
+<td>Tool IDs enabled for this role (empty in MVP stub)</td>
+</tr>
+</tbody>
+</table>
+<p>Examples: <code>recipes/support-agent-v0.1.json</code>, <code>recipes/executive-assistant-v0.1.json</code>.</p>
+<h3 id="21-hire-wizard-pre-fill-objects">2.1 Hire wizard pre-fill objects</h3>
+<p>Bundled Pidgin role templates may include defaults that seed the hire wizard (<a href="MVP_USER_STORIES.html">MVP_USER_STORIES.md</a> US-6). Values map directly to <code>ai_employees.hire_customization_json</code> (<a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §7.1).</p>
+<p><strong><code>default_job_requirements</code>:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mission</code></td>
+<td>string</td>
+<td>Primary purpose</td>
+</tr>
+<tr>
+<td><code>responsibilities</code></td>
+<td>string[]</td>
+<td>Ordered bullet list</td>
+</tr>
+<tr>
+<td><code>out_of_scope</code></td>
+<td>string[]</td>
+<td>Explicit boundaries</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>default_ideal_candidate</code>:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tone</code></td>
+<td>string</td>
+<td>Communication style</td>
+</tr>
+<tr>
+<td><code>decision_framework</code></td>
+<td>string</td>
+<td>How the agent should decide</td>
+</tr>
+<tr>
+<td><code>escalation_rules</code></td>
+<td>string</td>
+<td>When and how to escalate</td>
+</tr>
+</tbody>
+</table>
+<p>Example fragment:</p>
+<pre><code class="language-json">{
+  &quot;default_job_requirements&quot;: {
+    &quot;mission&quot;: &quot;Resolve customer issues quickly and empathetically.&quot;,
+    &quot;responsibilities&quot;: [
+      &quot;Triage inbound support messages&quot;,
+      &quot;Draft replies for operator approval&quot;
+    ],
+    &quot;out_of_scope&quot;: [
+      &quot;Billing refunds without approval&quot;,
+      &quot;Legal commitments&quot;
+    ]
+  },
+  &quot;default_ideal_candidate&quot;: {
+    &quot;tone&quot;: &quot;Professional, warm, concise&quot;,
+    &quot;decision_framework&quot;: &quot;Prioritize customer impact, then SLA, then effort&quot;,
+    &quot;escalation_rules&quot;: &quot;Escalate billing disputes and angry VIPs to the owner&quot;
+  }
+}
+</code></pre>
+<p>Omitted objects or fields mean empty wizard sections. Workspace <strong>Your role templates</strong> store the same content in versioned Markdown files instead of JSON (<a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §4.1.1).</p>
+<hr />
+<h2 id="3-permissions-object">3. Permissions object</h2>
+<p>Maps to runtime <code>PermissionProfile</code> (see <code>src/pidgin/types/models.py</code>). Values are <strong>action type strings</strong> from <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> (14 actions).</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>can_read</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td>Read actions allowed when trust permits</td>
+</tr>
+<tr>
+<td><code>can_write</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td>Write actions allowed when trust permits</td>
+</tr>
+<tr>
+<td><code>requires_approval</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td>Staged for human approval</td>
+</tr>
+<tr>
+<td><code>blocked</code></td>
+<td>string[]</td>
+<td><code>[]</code></td>
+<td>Always refused by policy gate</td>
+</tr>
+</tbody>
+</table>
+<p>Validation rules:</p>
+<ul>
+<li>Every listed action must be one of the 14 locked action types.</li>
+<li>An action must not appear in more than one bucket (<code>blocked</code> wins over <code>requires_approval</code> over read/write lists at resolve time).</li>
+<li>Empty <code>can_read</code> / <code>can_write</code> means "no extra restriction" for that bucket (gate still applies trust rules).</li>
+</ul>
+<p>At hire time, <code>ai_employees.permission_overrides_json</code> may merge on top of recipe permissions (company customization). Resolved profile is computed at gate time, not stored on the employee row.</p>
+<hr />
+<h2 id="4-canonical-json-and-checksum">4. Canonical JSON and checksum</h2>
+<p><code>bundle_sha256</code> is SHA-256 hex of UTF-8 bytes of:</p>
+<pre><code class="language-python">json.dumps(bundle_dict, sort_keys=True, separators=(&quot;,&quot;, &quot;:&quot;))
+</code></pre>
+<p>The full canonical JSON is stored in <code>ai_employee_recipe_snapshots.bundle_json</code>. <code>bundle_sha256</code> is a cache column (recomputable).</p>
+<hr />
+<h2 id="5-snapshot-row-mapping">5. Snapshot row mapping</h2>
+<table>
+<thead>
+<tr>
+<th>DB column</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>recipe_id</code></td>
+<td><code>recipe_id</code></td>
+</tr>
+<tr>
+<td><code>recipe_version</code></td>
+<td><code>version</code></td>
+</tr>
+<tr>
+<td><code>bundle_json</code></td>
+<td>canonical JSON string</td>
+</tr>
+<tr>
+<td><code>bundle_sha256</code></td>
+<td>§4</td>
+</tr>
+<tr>
+<td><code>source_url</code></td>
+<td>File path or marketplace URL at load time</td>
+</tr>
+<tr>
+<td><code>fetched_at</code></td>
+<td>UTC ISO timestamp at hire</td>
+</tr>
+<tr>
+<td><code>ai_employee_id</code></td>
+<td>Hired agent ULID</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-immutability">6. Immutability</h2>
+<ul>
+<li>Snapshots are append-only. No <code>UPDATE</code> on <code>ai_employee_recipe_snapshots</code>.</li>
+<li>Recipe library may publish new semver versions; hired agents keep their snapshot unless explicitly upgraded (future).</li>
+</ul>
+<hr />
+<h2 id="7-mvp-omissions">7. MVP omissions</h2>
+<ul>
+<li>Interview scenarios, onboarding checklists, multi-agent decomposition</li>
+<li>Hierarchy recipes</li>
+<li>JSON Schema file on disk (Pydantic validation in <code>src/pidgin/recipes/</code> for now)</li>
+<li>Marketplace fetch/auth</li>
+</ul>
+<hr />
+<h2 id="8-open-decisions">8. Open decisions</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Recommendation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Handle default</td>
+<td>Derive from hired <code>display_name</code>: lowercased, non-alphanumeric → <code>-</code></td>
+</tr>
+<tr>
+<td><code>display_name</code> at hire</td>
+<td>Recipe JSON <code>display_name</code> is a catalog default only; operator sets the live name when hiring (e.g. personal name). Prompts use <code>{{display_name}}</code> from the hired employee.</td>
+</tr>
+<tr>
+<td>Initial employee status</td>
+<td><code>draft</code> until interview completes</td>
+</tr>
+<tr>
+<td>Upgrade flow</td>
+<td>New snapshot + pointer update (Phase 4+)</td>
+</tr>
+<tr>
+<td>Hire pre-fill</td>
+<td><code>default_job_requirements</code> / <code>default_ideal_candidate</code> optional; recipes writer adds when updating bundled templates (PID-8)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="9-mvp-positions">9. MVP Positions</h2>
+<ol>
+<li>HR</li>
+<li>Executive Assistant</li>
+<li>R&amp;D Ops</li>
+<li>Project Manager (Inbound)</li>
+<li>Project Manager (Inbound / Outbound)</li>
+</ol>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

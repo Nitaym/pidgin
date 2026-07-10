@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Integration Workflow — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Integration Workflow</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item active" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin Company Service Integration Spec</h1></header>
+
+<h2 id="1-purpose">1. Purpose</h2>
+<p>Pidgin enables companies to deploy AI agents as reachable, accountable participants in the organization without creating a full SaaS account for every agent in every company system.</p>
+<p>Instead of requiring accounts like:</p>
+<pre><code class="language-text">jane@company.com in Gmail
+Jane in Slack
+Jane in Jira
+Jane in Confluence
+Jane in NetSuite
+</code></pre>
+<p>Pidgin connects to company services through a small number of approved <strong>integration accounts</strong>, <strong>bots</strong>, <strong>apps</strong>, or <strong>service accounts</strong>.</p>
+<p>Pidgin then manages virtual agent identities, such as Jane, on top of those integrations.</p>
+<hr />
+<h1 id="2-core-model">2. Core model</h1>
+<p>Pidgin separates three concepts:</p>
+<pre><code class="language-text">Technical identity:
+The real account, app, bot, token, or service account used to access a company system.
+
+Virtual agent identity:
+The AI agent managed by Pidgin, such as Jane, the AI Accounting Agent.
+
+Attribution:
+The visible and auditable record that Jane performed the work via Pidgin, possibly requested or approved by a human.
+</code></pre>
+<p>Example:</p>
+<pre><code class="language-text">Target system sees:
+Pidgin Jira Connector
+
+Company users see:
+Jane, AI Accounting Agent via Pidgin
+
+Pidgin audit log records:
+Jane acted through Pidgin, requested by Nitay, approved by policy or human approval.
+</code></pre>
+<hr />
+<h1 id="3-integration-principle">3. Integration principle</h1>
+<p>The company admin supplies <strong>connector access</strong>, not <strong>agent accounts</strong>.</p>
+<pre><code class="language-text">Company provides:
+- ai@company.com mailbox or routing rule
+- Pidgin Slack app installation
+- Google Workspace / Microsoft 365 integration
+- Jira / Confluence connector account or app
+- optional ERP / CRM / accounting-system service accounts
+
+Pidgin provides:
+- agent identities
+- routing
+- permissions
+- approval policies
+- audit logs
+- cross-system context
+- per-agent attribution
+</code></pre>
+<p>This allows many AI agents to operate through a controlled set of company-approved integrations.</p>
+<hr />
+<h1 id="4-required-integrations">4. Required integrations</h1>
+<h2 id="41-email-integration">4.1 Email integration</h2>
+<h3 id="purpose">Purpose</h3>
+<p>Allow employees, vendors, customers, and systems to communicate with Pidgin agents through email.</p>
+<h3 id="company-provided-access">Company-provided access</h3>
+<p>The company admin provides one of the following:</p>
+<pre><code class="language-text">ai@company.com mailbox
+shared mailbox
+Google Workspace group
+email alias
+catch-all routing rule
+inbound mail forwarding rule
+SMTP/IMAP access
+Gmail API / Microsoft Graph access
+</code></pre>
+<h3 id="routing-model">Routing model</h3>
+<p>Pidgin supports routed email addresses:</p>
+<pre><code class="language-text">ai+jane@company.com
+ai+accounting@company.com
+ai+legal@company.com
+ai+research@company.com
+ai+invoice-approval@company.com
+</code></pre>
+<p>Pidgin parses the address suffix and routes the message to the correct agent, team, workflow, or context.</p>
+<p>Example:</p>
+<pre><code class="language-text">To: ai+jane@company.com
+Subject: Reconcile April invoices
+</code></pre>
+<p>Pidgin interprets:</p>
+<pre><code class="language-json">{
+  &quot;channel&quot;: &quot;email&quot;,
+  &quot;agent&quot;: &quot;jane&quot;,
+  &quot;sender&quot;: &quot;nitay@company.com&quot;,
+  &quot;intent&quot;: &quot;reconcile_invoices&quot;,
+  &quot;context&quot;: &quot;email_thread&quot;
+}
+</code></pre>
+<h3 id="outbound-email">Outbound email</h3>
+<p>Pidgin can send emails using the company-provided mailbox.</p>
+<p>Example:</p>
+<pre><code class="language-text">From: Pidgin &lt;ai@company.com&gt;
+Reply-To: ai+jane@company.com
+
+Hi Dana,
+
+Jane, the AI Accounting Agent, reviewed the invoice and found one missing PO number.
+</code></pre>
+<h3 id="key-requirement">Key requirement</h3>
+<p>Jane does not need her own email account. Jane is reachable through email routing and represented through Pidgin attribution.</p>
+<hr />
+<h2 id="42-slack-integration">4.2 Slack integration</h2>
+<h3 id="purpose_1">Purpose</h3>
+<p>Allow employees to communicate with agents from Slack.</p>
+<h3 id="company-provided-access_1">Company-provided access</h3>
+<p>The company admin installs the Pidgin Slack app.</p>
+<pre><code class="language-text">Real Slack identity:
+@Pidgin
+
+Virtual agents:
+Jane, Max, Otto, Legal, Research, Ops
+</code></pre>
+<h3 id="mvp-mode-one-slack-bot-many-agents">MVP mode: one Slack bot, many agents</h3>
+<p>Employees address agents through the Pidgin bot:</p>
+<pre><code class="language-text">@Pidgin jane, check this invoice
+@Pidgin ask legal to review this clause
+@Pidgin accounting, summarize unpaid vendors
+</code></pre>
+<p>Pidgin parses the message, identifies the target agent, and routes the task internally.</p>
+<p>Response example:</p>
+<pre><code class="language-text">Jane · AI Accounting Agent via Pidgin
+
+I found 7 unpaid vendor invoices. 3 require approval.
+</code></pre>
+<h3 id="advanced-mode-pidgin-managed-slack-agent-bots">Advanced mode: Pidgin-managed Slack agent bots</h3>
+<p>For high-usage agents, Pidgin may create or manage dedicated Slack bot presences:</p>
+<pre><code class="language-text">@Jane Accounting
+@Max Sales
+@Otto Ops
+</code></pre>
+<p>These bots are still centrally managed by Pidgin.</p>
+<h3 id="key-requirement_1">Key requirement</h3>
+<p>Slack identity can work in two ways:</p>
+<pre><code class="language-text">MVP:
+One real Slack bot: @Pidgin
+Many virtual agents behind it
+
+Advanced:
+Pidgin-managed Slack bot presences for selected agents
+</code></pre>
+<p>The admin should not need to manually create or manage a separate Slack user for every AI agent.</p>
+<hr />
+<h2 id="43-google-workspace-microsoft-365-integration">4.3 Google Workspace / Microsoft 365 integration</h2>
+<h3 id="purpose_2">Purpose</h3>
+<p>Allow agents to read, draft, summarize, and create work across company productivity systems.</p>
+<h3 id="company-provided-access_2">Company-provided access</h3>
+<p>The company admin connects Pidgin through one or more of:</p>
+<pre><code class="language-text">OAuth app authorization
+admin-approved marketplace app
+service account
+domain-wide delegation
+shared mailbox access
+Microsoft Graph app registration
+Google Workspace app authorization
+</code></pre>
+<h3 id="services-covered">Services covered</h3>
+<p>For Google Workspace:</p>
+<pre><code class="language-text">Gmail
+Google Drive
+Google Docs
+Google Sheets
+Google Calendar
+Google Groups
+</code></pre>
+<p>For Microsoft 365:</p>
+<pre><code class="language-text">Outlook
+OneDrive
+SharePoint
+Teams
+Word files
+Excel files
+PowerPoint files
+Calendar
+</code></pre>
+<h3 id="example-permissions-for-jane">Example permissions for Jane</h3>
+<p>Jane, the AI Accounting Agent, might receive:</p>
+<pre><code class="language-text">Read:
+- invoice folders
+- vendor records
+- accounting spreadsheets
+- relevant email threads
+
+Write:
+- draft emails
+- draft reports
+- create spreadsheet summaries
+- create internal notes
+
+Requires approval:
+- send external emails
+- share files externally
+- modify official accounting records
+</code></pre>
+<h3 id="key-requirement_2">Key requirement</h3>
+<p>Pidgin should support least-privilege access. Jane should not inherit full company-wide permissions just because Pidgin is connected.</p>
+<p>Pidgin must map company-level integration access into per-agent permissions.</p>
+<hr />
+<h2 id="44-jira-confluence-integration">4.4 Jira / Confluence integration</h2>
+<h3 id="purpose_3">Purpose</h3>
+<p>Allow agents to interact with tickets, projects, documentation, decisions, and internal knowledge.</p>
+<h3 id="company-provided-access_3">Company-provided access</h3>
+<p>The company admin provides one of:</p>
+<pre><code class="language-text">Atlassian app installation
+OAuth connection
+API token
+service account
+bot user
+</code></pre>
+<p>Example technical identity:</p>
+<pre><code class="language-text">pidgin@company.com
+</code></pre>
+<h3 id="jira-actions">Jira actions</h3>
+<p>Pidgin agents may be allowed to:</p>
+<pre><code class="language-text">read issues
+summarize issues
+create issues
+comment on issues
+update issue fields
+link related issues
+suggest assignees
+generate status reports
+</code></pre>
+<p>Example Jira comment:</p>
+<pre><code class="language-text">Jane · AI Accounting Agent via Pidgin
+
+I checked the April vendor invoices. Three need approval:
+- Acme Ltd — $4,200
+- BlueOps — $1,150
+- OfficeCo — $780
+
+Requested by: Nitay
+Run ID: pg_8f31
+</code></pre>
+<h3 id="confluence-actions">Confluence actions</h3>
+<p>Pidgin agents may be allowed to:</p>
+<pre><code class="language-text">read pages
+search internal documentation
+draft pages
+summarize spaces
+comment on pages
+prepare meeting notes
+maintain team knowledge bases
+</code></pre>
+<p>Example Confluence attribution:</p>
+<pre><code class="language-text">Draft prepared by Jane, AI Accounting Agent via Pidgin.
+
+Source: April invoices folder.
+Human owner: Nitay.
+Audit log: pg_8f31
+</code></pre>
+<h3 id="key-requirement_3">Key requirement</h3>
+<p>The target system may only see the Pidgin connector account, but the content and Pidgin audit log must clearly identify the virtual agent, requester, and approval status.</p>
+<hr />
+<h2 id="45-erp-crm-accounting-system-integrations">4.5 ERP / CRM / accounting-system integrations</h2>
+<h3 id="purpose_4">Purpose</h3>
+<p>Allow role-specific agents to work with business systems such as finance, sales, support, HR, and operations tools.</p>
+<h3 id="example-systems">Example systems</h3>
+<pre><code class="language-text">NetSuite
+QuickBooks
+SAP
+Priority
+Salesforce
+HubSpot
+Zendesk
+Monday
+Linear
+GitHub
+GitLab
+Stripe
+Notion
+Airtable
+</code></pre>
+<h3 id="company-provided-access_4">Company-provided access</h3>
+<p>The company admin provides system-specific access, usually through:</p>
+<pre><code class="language-text">API key
+OAuth app
+service account
+read-only user
+limited-scope integration user
+webhook
+export/import permission
+</code></pre>
+<h3 id="example-jane-accounting-agent">Example: Jane, accounting agent</h3>
+<p>Jane may need access to:</p>
+<pre><code class="language-text">Accounting system:
+- read invoices
+- read vendors
+- read payment status
+- export reports
+
+Google Drive / SharePoint:
+- read invoice folders
+- read accounting files
+
+Email:
+- draft vendor emails
+- receive invoice-related requests
+
+Jira:
+- create finance tasks
+- comment on finance tickets
+
+Confluence:
+- draft monthly accounting summaries
+</code></pre>
+<h3 id="risk-based-permissions">Risk-based permissions</h3>
+<p>Low-risk actions may be automatic:</p>
+<pre><code class="language-text">read invoice
+summarize vendor status
+draft email
+create internal task
+comment in Slack
+</code></pre>
+<p>Higher-risk actions require approval:</p>
+<pre><code class="language-text">send external email
+change vendor information
+create payment batch
+share files externally
+update official records
+</code></pre>
+<p>Blocked actions:</p>
+<pre><code class="language-text">send payments
+approve payments
+change bank details
+delete financial records
+modify audit logs
+</code></pre>
+<hr />
+<h1 id="5-agent-identity-object">5. Agent identity object</h1>
+<p>Pidgin should model every agent as a virtual identity.</p>
+<p>Example:</p>
+<pre><code class="language-json">{
+  &quot;agent_id&quot;: &quot;jane&quot;,
+  &quot;display_name&quot;: &quot;Jane&quot;,
+  &quot;role&quot;: &quot;AI Accounting Agent&quot;,
+  &quot;handle&quot;: &quot;jane&quot;,
+  &quot;human_owner&quot;: &quot;finance-lead@company.com&quot;,
+  &quot;channels&quot;: {
+    &quot;email&quot;: {
+      &quot;address&quot;: &quot;ai+jane@company.com&quot;
+    },
+    &quot;slack&quot;: {
+      &quot;mode&quot;: &quot;virtual_agent&quot;,
+      &quot;primary_bot&quot;: &quot;@Pidgin&quot;,
+      &quot;dedicated_bot&quot;: &quot;@Jane Accounting&quot;
+    }
+  },
+  &quot;connectors&quot;: {
+    &quot;gmail&quot;: &quot;pidgin-google-workspace-connector&quot;,
+    &quot;drive&quot;: &quot;pidgin-google-workspace-connector&quot;,
+    &quot;jira&quot;: &quot;pidgin-atlassian-connector&quot;,
+    &quot;confluence&quot;: &quot;pidgin-atlassian-connector&quot;,
+    &quot;accounting&quot;: &quot;pidgin-accounting-readonly-connector&quot;
+  },
+  &quot;permissions&quot;: {
+    &quot;can_read&quot;: [
+      &quot;invoices&quot;,
+      &quot;vendors&quot;,
+      &quot;accounting_reports&quot;,
+      &quot;finance_jira_project&quot;
+    ],
+    &quot;can_write&quot;: [
+      &quot;draft_emails&quot;,
+      &quot;jira_comments&quot;,
+      &quot;confluence_drafts&quot;,
+      &quot;slack_replies&quot;
+    ],
+    &quot;requires_approval&quot;: [
+      &quot;external_emails&quot;,
+      &quot;payment_files&quot;,
+      &quot;vendor_record_changes&quot;
+    ],
+    &quot;blocked&quot;: [
+      &quot;send_payments&quot;,
+      &quot;approve_payments&quot;,
+      &quot;change_bank_details&quot;,
+      &quot;delete_financial_records&quot;
+    ]
+  }
+}
+</code></pre>
+<hr />
+<h1 id="6-attribution-and-audit-requirements">6. Attribution and audit requirements</h1>
+<p>Every Pidgin action must preserve four identities:</p>
+<pre><code class="language-text">Technical actor:
+The real account, app, bot, or service account used.
+
+Virtual actor:
+The AI agent, such as Jane.
+
+Requester:
+The human, workflow, or system that asked the agent to act.
+
+Approver:
+The person or policy that authorized the action.
+</code></pre>
+<p>Example audit record:</p>
+<pre><code class="language-json">{
+  &quot;run_id&quot;: &quot;pg_8f31&quot;,
+  &quot;technical_actor&quot;: &quot;pidgin-jira-connector&quot;,
+  &quot;virtual_actor&quot;: &quot;jane&quot;,
+  &quot;virtual_actor_role&quot;: &quot;AI Accounting Agent&quot;,
+  &quot;requester&quot;: &quot;nitay@company.com&quot;,
+  &quot;approver&quot;: &quot;auto-policy:low-risk-accounting-comments&quot;,
+  &quot;target_system&quot;: &quot;jira&quot;,
+  &quot;action&quot;: &quot;comment&quot;,
+  &quot;target&quot;: &quot;FIN-123&quot;,
+  &quot;timestamp&quot;: &quot;2026-05-25T20:30:00Z&quot;
+}
+</code></pre>
+<p>This allows the company to answer:</p>
+<pre><code class="language-text">Who technically performed the action?
+Pidgin.
+
+Which AI agent performed the work?
+Jane.
+
+Who requested it?
+Nitay.
+
+Who approved it?
+A human or policy.
+
+Where is the full audit trail?
+Pidgin.
+</code></pre>
+<h3 id="trust-label-and-policy-decision">Trust label and policy decision</h3>
+<p>In addition to the four identities above, every audit record carries a <code>trust_label</code> (how the inbound was classified — <code>internal-authenticated</code>, <code>external-verified</code>, <code>external-unverified</code>, or <code>untrusted-content</code>) and a <code>policy_decision</code> (how Pidgin handled it — <code>accepted_as_instruction</code>, <code>routed_to_inbox</code>, <code>quarantined</code>, <code>auto_approved</code>, <code>awaiting_human_approval</code>, or <code>refused_by_policy</code>).</p>
+<p>Together these answer not only <em>who</em> acted, but also <em>why the action was allowed to happen</em>. The full model — principals, trust labels, invocation policy derived from the hierarchy recipe, and instructions-vs-data separation — is defined in <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a>.</p>
+<hr />
+<h1 id="7-admin-onboarding-flow">7. Admin onboarding flow</h1>
+<h2 id="step-1-connect-communication-channels">Step 1 — Connect communication channels</h2>
+<p>Admin connects:</p>
+<pre><code class="language-text">Email mailbox / route
+Slack workspace app
+Optional Teams integration
+</code></pre>
+<p>This allows employees to talk to agents.</p>
+<h2 id="step-2-connect-work-systems">Step 2 — Connect work systems</h2>
+<p>Admin connects:</p>
+<pre><code class="language-text">Google Workspace / Microsoft 365
+Jira / Confluence
+CRM
+ERP
+Accounting system
+GitHub / GitLab
+Support tools
+</code></pre>
+<p>This allows agents to perform work.</p>
+<h2 id="step-3-define-agents">Step 3 — Define agents</h2>
+<p>Admin creates virtual agents:</p>
+<pre><code class="language-text">Jane — Accounting
+Max — Sales
+Otto — Operations
+Lex — Legal
+Rex — Research
+</code></pre>
+<p>Each agent gets:</p>
+<pre><code class="language-text">name
+role
+handle
+owner
+default channels
+connected tools
+permission profile
+approval policy
+</code></pre>
+<h2 id="step-4-define-access-policies">Step 4 — Define access policies</h2>
+<p>Admin configures:</p>
+<pre><code class="language-text">what each agent can read
+what each agent can write
+what requires approval
+what is blocked
+who owns the agent
+who can invoke the agent
+where the audit log is stored
+</code></pre>
+<h2 id="step-5-deploy-to-employees">Step 5 — Deploy to employees</h2>
+<p>Employees can now interact with agents through:</p>
+<pre><code class="language-text">email
+Slack
+business tools
+internal workflows
+</code></pre>
+<p>Example:</p>
+<pre><code class="language-text">Email:
+ai+jane@company.com
+
+Slack:
+@Pidgin jane, check this invoice
+
+Jira:
+Jane via Pidgin comments on finance tickets
+
+Confluence:
+Jane via Pidgin drafts accounting summaries
+</code></pre>
+<hr />
+<h1 id="8-minimum-viable-integration-set">8. Minimum viable integration set</h1>
+<p>For an MVP, Pidgin should require only:</p>
+<pre><code class="language-text">1. One email identity:
+   ai@company.com
+
+2. One Slack app:
+   @Pidgin
+
+3. One document integration:
+   Google Drive or Microsoft OneDrive / SharePoint
+
+4. One task/documentation integration:
+   Jira / Confluence, Linear, Notion, or Monday
+
+5. Pidgin audit log:
+   internal system of record
+</code></pre>
+<p>With this, Pidgin can already support:</p>
+<pre><code class="language-text">agent communication
+task creation
+document reading
+draft generation
+Slack interaction
+email interaction
+basic auditability
+</code></pre>
+<hr />
+<h1 id="9-later-enterprise-integrations">9. Later enterprise integrations</h1>
+<p>After MVP, Pidgin can add:</p>
+<pre><code class="language-text">SCIM / directory sync
+SAML / SSO
+RBAC groups
+DLP integration
+SIEM export
+audit log export
+approval workflows
+data retention policies
+eDiscovery support
+dedicated Slack agent bots
+Teams bot identities
+advanced ERP / CRM connectors
+</code></pre>
+<p>This moves Pidgin from a collaboration layer into a full enterprise AI workforce identity layer.</p>
+<hr />
+<h1 id="10-spec-summary">10. Spec summary</h1>
+<pre><code class="language-text">Pidgin integrates with company services through a small number of admin-approved connector accounts, apps, bots, and service accounts.
+
+These integrations provide the real technical access to systems such as email, Slack, Google Workspace, Microsoft 365, Jira, Confluence, ERP, CRM, and accounting tools.
+
+On top of these integrations, Pidgin manages virtual AI agent identities. Employees can contact agents through routed email addresses, Slack commands, or dedicated Pidgin-managed bot presences. When agents act inside company systems, the action is technically performed by a Pidgin connector but semantically attributed to the relevant agent.
+
+This architecture avoids the need to create full SaaS user accounts for every AI agent, while preserving clear permissions, human ownership, approval policies, and audit trails.
+</code></pre>
+<p>The short product line:</p>
+<pre><code class="language-text">Pidgin connects once to company tools, then gives every AI agent a governed identity across them.
+</code></pre>
+<p>Related specs: <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a>, <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a>, <a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a>, <a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a> (implementation contract).</p>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

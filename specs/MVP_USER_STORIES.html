@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MVP User Stories — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">MVP User Stories</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item active" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>MVP User Stories</h1></header>
+
+<p>Acceptance criteria for the first shippable slice. Phase 0 covers foundation; Phase 1 covers hire, templates, and first turn.</p>
+<p><strong>Hire UX vocabulary and flows:</strong> <a href="HIRE_UX.html">HIRE_UX.md</a> (operator-facing labels; internal code may still say “recipe”).</p>
+<hr />
+<h2 id="us-1-create-workspace">US-1: Create workspace</h2>
+<p><strong>As</strong> an operator<br />
+<strong>I want</strong> to create a password-protected workspace directory<br />
+<strong>So that</strong> agent data is isolated on disk</p>
+<p><strong>Phase:</strong> 0</p>
+<p><strong>Acceptance</strong>
+- React UI: create workspace form with name + slug (or <code>POST /api/workspace</code>)
+- Creates workspace directory with <code>auth.json</code> (bcrypt hash only), <code>memory/</code>, <code>docs/</code>, <code>blobs/</code>
+- Registers workspace in registry
+- Applies DB migration and inserts <code>workspace</code> row</p>
+<hr />
+<h2 id="us-2-open-workspace">US-2: Open workspace</h2>
+<p><strong>As</strong> an operator<br />
+<strong>I want</strong> to unlock a workspace with its password in the admin UI<br />
+<strong>So that</strong> diagnostics and commands can access DB and files</p>
+<p><strong>Phase:</strong> 0</p>
+<p><strong>Acceptance</strong>
+- Wrong password → clear error on unlock form, no diagnostics shown
+- Correct password → session unlocked; workspace dashboard shows events/turns/audit</p>
+<hr />
+<h2 id="us-3-process-inbound-event-stub">US-3: Process inbound event (stub)</h2>
+<p><strong>As</strong> the runtime<br />
+<strong>I want</strong> to dequeue pending <code>inbound_events</code> and create a turn<br />
+<strong>So that</strong> agent work is traceable</p>
+<p><strong>Phase:</strong> 0</p>
+<p><strong>Acceptance</strong>
+- Diagnostics: <strong>Inject test event</strong> then <strong>Run once</strong> (or <code>POST /api/.../inject-event</code> + <code>run-once</code>)
+- Event moves <code>pending</code> → <code>dispatching</code> → <code>done</code> — visible in Events table
+- A <code>turns</code> row and <code>agent_action_log</code> row are created (stub read action) — visible in Turns + Audit</p>
+<hr />
+<h2 id="us-4-policy-gate">US-4: Policy gate</h2>
+<p><strong>As</strong> the system<br />
+<strong>I want</strong> every proposed action checked against permissions and trust<br />
+<strong>So that</strong> unsafe actions are refused or staged</p>
+<p><strong>Phase:</strong> post-MVP (skeleton only in MVP)</p>
+<p><strong>Acceptance</strong>
+- Blocked actions → <code>refused_by_policy</code>
+- Approval-required actions → <code>awaiting_human_approval</code> / staged
+- Internal trusted actions → <code>accepted_as_instruction</code></p>
+<hr />
+<h2 id="us-5-agent-memory-file-based">US-5: Agent memory (file-based)</h2>
+<p><strong>As</strong> an agent<br />
+<strong>I want</strong> to append to <code>memory/&lt;handle&gt;/journal.md</code> and recall via tail/grep<br />
+<strong>So that</strong> long-term notes persist without vectors</p>
+<p><strong>Phase:</strong> 0</p>
+<p><strong>Acceptance</strong>
+- <code>remember</code> appends timestamped markdown section
+- <code>recall_tail</code> returns last N lines</p>
+<hr />
+<h2 id="us-6-hire-from-role-template-with-customizable-brief">US-6: Hire from role template with customizable brief</h2>
+<p><strong>As</strong> a workspace operator<br />
+<strong>I want</strong> to pick a role template, edit job requirements and ideal candidate profile (including my own take), and hire<br />
+<strong>So that</strong> the agent matches our company rather than a generic default</p>
+<p><strong>Phase:</strong> 1B</p>
+<p><strong>Acceptance</strong>
+- <strong>Hire a role</strong> flow never uses the word “recipe” in UI (see <a href="HIRE_UX.html">HIRE_UX.md</a>)
+- Step 1 lists <strong>Pidgin role templates</strong> (minimum: Support Agent) and <strong>Your role templates</strong>
+- Steps 2–3 pre-fill <strong>Job requirements</strong> (mission, responsibilities, out of scope) and <strong>Ideal candidate profile</strong> (tone, decision framework, escalation rules) from template defaults
+- Operator can edit all pre-filled fields and add <strong>Your take</strong> freeform text
+- Step 4: agent display name, handle, manager (default: logged-in user)
+- Step 5: review summary in operator language; <strong>Hire and continue</strong> creates employee in <code>draft</code>, immutable template snapshot, default rooms, memory dir
+- Operator customization (job requirements, ideal candidate, your take) persisted on the employee record separately from the snapshot
+- Duplicate handle → clear error; MVP allows one Support Agent instance unless product rule changes
+- Agent appears on Team with status badge</p>
+<p><strong>API path (illustrative):</strong> <code>GET .../role-templates</code>, <code>POST .../hire</code> with <code>template_id</code> + <code>customization</code> + identity fields</p>
+<hr />
+<h2 id="us-7-pidgin-hr-assist-while-defining-the-role">US-7: Pidgin HR assist while defining the role</h2>
+<p><strong>As</strong> a workspace operator<br />
+<strong>I want</strong> to chat with Pidgin while editing job requirements and ideal candidate profile<br />
+<strong>So that</strong> I get help curating and optimizing the brief even without an HR agent hired</p>
+<p><strong>Phase:</strong> 1C (may ship stub LLM after US-6 form UI)</p>
+<p><strong>Acceptance</strong>
+- <strong>Discuss with Pidgin</strong> chat panel on hire wizard steps 2–3, agent profile edit, and workspace template editor
+- Assist available without any HR agent hired (built-in Pidgin coach, not an <code>ai_employees</code> row)
+- Operator can send messages; assist replies with clarifying questions and suggested copy
+- <strong>Apply to form</strong> applies a suggestion to the targeted field(s); <strong>Append to your take</strong> adds text without overwriting other fields
+- Chat history persisted per hire session, agent, or template edit context — survives page refresh
+- If assist backend unavailable, form save and hire still succeed; UI shows degraded state, not a hard block</p>
+<p><strong>Deferred</strong>
+- Routing assist to a hired HR agent instead of Pidgin default</p>
+<hr />
+<h2 id="us-8-your-role-templates-create-edit-version-persist">US-8: Your role templates (create, edit, version, persist)</h2>
+<p><strong>As</strong> a workspace operator<br />
+<strong>I want</strong> to create and save my own role templates as versioned files and edit them later<br />
+<strong>So that</strong> I can reuse and evolve our company’s hiring standards</p>
+<p><strong>Phase:</strong> 1B2</p>
+<p><strong>Acceptance</strong>
+- <strong>Create blank template</strong> opens editor with empty job requirements and ideal candidate sections
+- <strong>Duplicate</strong> a Pidgin role template into <strong>Your role templates</strong> (Pidgin original unchanged)
+- Workspace templates stored as <strong>text files</strong> under workspace <code>role-templates/</code> — <strong>not in SQLite</strong> (see <a href="HIRE_UX.html">HIRE_UX.md</a> §2.1)
+- Saving under the <strong>same template name</strong> promotes a <strong>new version</strong> (<code>v1</code>, <code>v2</code>, …); prior version files remain on disk
+- UI shows current (latest) version; operator can view version history
+- All creates and edits persist to disk; navigating away does not lose unsaved work (auto-save or explicit save with warning)
+- Template list shows name, current version, last updated, optional “used for N hires”
+- Delete workspace template (latest or entire slug folder) with confirmation; Pidgin templates cannot be deleted
+- Saved template appears in hire wizard step 1</p>
+<p><strong>Architect handoff:</strong> file layout, manifest schema, <code>GET/POST/PATCH .../role-templates</code> mapping to files</p>
+<hr />
+<h2 id="us-9-edit-agent-brief-after-hire">US-9: Edit agent brief after hire</h2>
+<p><strong>As</strong> a workspace operator<br />
+<strong>I want</strong> to edit job requirements, ideal candidate profile, and your take on a hired agent<br />
+<strong>So that</strong> the agent can improve as our needs change</p>
+<p><strong>Phase:</strong> 1B3</p>
+<p><strong>Acceptance</strong>
+- Agent profile exposes editable sections for job requirements, ideal candidate profile, and your take
+- <strong>Save</strong> persists changes to the employee record (not the immutable hire snapshot)
+- Each save writes an audit entry (who, when, what changed — field-level or diff summary)
+- HR assist panel available on profile edit (US-7)
+- Resolved agent behavior uses updated brief on subsequent turns (once runtime reads customization)</p>
+<hr />
+<h2 id="us-10-create-template-from-agent">US-10: Create template from agent</h2>
+<p><strong>As</strong> a workspace operator<br />
+<strong>I want</strong> to save a hired agent’s brief as a new role template<br />
+<strong>So that</strong> I can hire similar agents or share our tuned definition</p>
+<p><strong>Phase:</strong> 1B2</p>
+<p><strong>Acceptance</strong>
+- Agent profile → <strong>Create template from this agent</strong> opens template editor pre-filled from current brief + access summary
+- Does not copy agent identity (display name, handle, manager, lifecycle status)
+- Operator names the new template and saves to <strong>Your role templates</strong>
+- Saved template is immediately usable in hire wizard step 1 (starts at workspace <code>v1</code>)
+- Lineage note stored in template manifest: derived from agent handle and source template name/version</p>
+<hr />
+<h2 id="us-11-complete-interview-before-activation">US-11: Complete interview before activation</h2>
+<p><strong>As</strong> a workspace operator<br />
+<strong>I want</strong> to run interview scenarios from the role template before activating the agent<br />
+<strong>So that</strong> I only promote agents I trust</p>
+<p><strong>Phase:</strong> 1D</p>
+<p><strong>Acceptance</strong>
+- Starting interview sets status <code>interviewing</code>
+- Scenarios defined on template (when <a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a> extended); Support Agent: minimum 2 scenarios
+- Each scenario: brief + interaction surface; completion recorded
+- Pass all → status <code>onboarding</code>; fail allows retry
+- Optional operator skip with explicit confirm + audit entry (dev escape hatch)</p>
+<p><strong>Depends on:</strong> <code>INTERVIEW_SPEC.md</code>, architect scenario schema</p>
+<hr />
+<h2 id="us-12-onboard-in-shadow-mode-and-activate">US-12: Onboard in shadow mode and activate</h2>
+<p><strong>As</strong> a workspace operator<br />
+<strong>I want</strong> an onboarding checklist and explicit activation<br />
+<strong>So that</strong> agents ramp safely before full access</p>
+<p><strong>Phase:</strong> 1E</p>
+<p><strong>Acceptance</strong>
+- Onboarding checklist from template; items completable manually in MVP
+- Agent visible in assigned rooms during onboarding; risky actions labeled or staged in UI
+- <strong>Activate agent</strong> → status <code>active</code>; Team page enables primary chat CTA</p>
+<hr />
+<h2 id="deferred-not-active-acceptance">Deferred (not active acceptance)</h2>
+<ul>
+<li>Real LLM turn with full tool calls (Phase 2)</li>
+<li>Human approval inbox UI (Phase 3)</li>
+<li>Hired HR agent replaces Pidgin assist (post-MVP)</li>
+<li>Permission override UI on hire/profile (post-MVP; read-only summary in MVP)</li>
+<li>Hierarchy recipe picker on workspace create (silent SaaS defaults for now)</li>
+<li>Custom roles from absolute scratch without template structure (v0.2)</li>
+</ul>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

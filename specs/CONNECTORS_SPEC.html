@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connectors — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Connectors</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item active" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin Connectors Spec</h1></header>
+
+<p>Implementation contract for workspace integrations. Product model (virtual agents, attribution, permission buckets) lives in <a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a>. Runtime placement (triggers, actions, gate) lives in <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> §9.4.</p>
+<p><strong>Scope:</strong> How to add and operate connectors in the runtime + admin UI. <strong>Out of scope:</strong> Marketplace recipe fields, SSO/SCIM, credential encryption (post-MVP).</p>
+<hr />
+<h2 id="1-summary">1. Summary</h2>
+<pre><code class="language-text">One connector_installations row per workspace install.
+Each connector_type implements ingress (→ inbound_events) and egress (read / draft / execute / post / watch).
+Agents never hold credentials — the connector layer does, keyed by installation id.
+Every side effect goes through gate() → agent_action_log with technical_actor = connector id.
+</code></pre>
+<p><strong>MVP build order (locked):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Order</th>
+<th><code>connector_type</code></th>
+<th>Primary capability</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td><code>pidgin_chat</code></td>
+<td>In-process chat (refactor existing <code>services/chat.py</code>)</td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>slack</code></td>
+<td><code>@Pidgin &lt;agent&gt;, …</code> ingress + thread reply egress</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>gmail</code></td>
+<td>Inbound email + draft/send egress</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>google_drive</code></td>
+<td>Read files/folders (agent <code>read</code> action)</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>google_meet</code></td>
+<td>Read upcoming meetings; draft calendar holds (execute gated)</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>zoom</code></td>
+<td>Read meetings; create/update via API (execute gated)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-storage">2. Storage</h2>
+<p>Uses existing <code>connector_installations</code> (<a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §6):</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>connector_type</code></td>
+<td>Stable slug — see §3</td>
+</tr>
+<tr>
+<td><code>display_name</code></td>
+<td>Operator label, e.g. "Acme Slack"</td>
+</tr>
+<tr>
+<td><code>credentials_json</code></td>
+<td>OAuth tokens, API keys, bot tokens (plaintext MVP)</td>
+</tr>
+<tr>
+<td><code>config_json</code></td>
+<td>Non-secret: team IDs, webhook URLs, routing defaults</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>active</code> | <code>disabled</code> | <code>errored</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>One active installation per <code>(connector_type, display_name)</code></strong> per workspace. Multiple Gmail installs are allowed if <code>display_name</code> differs (e.g. shared mailbox vs personal).</p>
+<h3 id="21-credentials_json-shape-by-auth-mode">2.1 <code>credentials_json</code> shape (by auth mode)</h3>
+<p><strong>OAuth (refreshable):</strong></p>
+<pre><code class="language-json">{
+  &quot;auth_mode&quot;: &quot;oauth2&quot;,
+  &quot;access_token&quot;: &quot;...&quot;,
+  &quot;refresh_token&quot;: &quot;...&quot;,
+  &quot;expires_at&quot;: &quot;2026-06-02T12:00:00Z&quot;,
+  &quot;scopes&quot;: [&quot;https://www.googleapis.com/auth/gmail.readonly&quot;],
+  &quot;provider_account_id&quot;: &quot;...&quot;
+}
+</code></pre>
+<p><strong>Manual (operator paste):</strong></p>
+<pre><code class="language-json">{
+  &quot;auth_mode&quot;: &quot;manual&quot;,
+  &quot;fields&quot;: {
+    &quot;bot_token&quot;: &quot;xoxb-...&quot;,
+    &quot;signing_secret&quot;: &quot;...&quot;
+  }
+}
+</code></pre>
+<p>Field names are per-connector — see §8. Manual mode is <strong>dev / fallback only</strong> in UI copy unless the connector row in §8 marks it production-supported.</p>
+<hr />
+<h2 id="3-connector-types">3. Connector types</h2>
+<table>
+<thead>
+<tr>
+<th><code>connector_type</code></th>
+<th>Auth modes</th>
+<th>Ingress triggers</th>
+<th>Egress actions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pidgin_chat</code></td>
+<td>none</td>
+<td><code>direct_address</code>, <code>channel_activity</code></td>
+<td><code>say</code>, <code>post</code>, <code>read</code></td>
+</tr>
+<tr>
+<td><code>slack</code></td>
+<td>oauth2, manual</td>
+<td><code>direct_address</code></td>
+<td><code>say</code>, <code>post</code>, <code>read</code>, <code>watch</code></td>
+</tr>
+<tr>
+<td><code>gmail</code></td>
+<td>oauth2, manual</td>
+<td><code>inbound_external</code></td>
+<td><code>read</code>, <code>draft</code>, <code>execute</code></td>
+</tr>
+<tr>
+<td><code>google_drive</code></td>
+<td>oauth2, manual</td>
+<td>— (egress only MVP)</td>
+<td><code>read</code>, <code>draft</code></td>
+</tr>
+<tr>
+<td><code>google_meet</code></td>
+<td>oauth2</td>
+<td>—</td>
+<td><code>read</code>, <code>draft</code>, <code>execute</code></td>
+</tr>
+<tr>
+<td><code>zoom</code></td>
+<td>oauth2, manual</td>
+<td>—</td>
+<td><code>read</code>, <code>draft</code>, <code>execute</code></td>
+</tr>
+</tbody>
+</table>
+<p>Shared Google OAuth app may back <code>gmail</code>, <code>google_drive</code>, and <code>google_meet</code> — one installation row per type, tokens may share refresh via same Google account connect flow.</p>
+<hr />
+<h2 id="4-resource-uris">4. Resource URIs</h2>
+<p>Actions reference resources with a typed URI string:</p>
+<pre><code class="language-text">&lt;prefix&gt;:&lt;kind&gt;/&lt;id&gt;[?&lt;query&gt;]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Prefix</th>
+<th>Examples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pidgin_chat</code></td>
+<td><code>pidgin_chat:conversation/&lt;ulid&gt;</code>, <code>pidgin_chat:room/&lt;ulid&gt;</code></td>
+</tr>
+<tr>
+<td><code>slack</code></td>
+<td><code>slack:channel/C0123</code>, <code>slack:thread/C0123:1234567890.123456</code></td>
+</tr>
+<tr>
+<td><code>gmail</code></td>
+<td><code>gmail:thread/&lt;id&gt;</code>, <code>gmail:message/&lt;id&gt;</code></td>
+</tr>
+<tr>
+<td><code>google_drive</code></td>
+<td><code>gdrive:file/&lt;id&gt;</code>, <code>gdrive:folder/&lt;id&gt;</code></td>
+</tr>
+<tr>
+<td><code>google_meet</code></td>
+<td><code>gmeet:event/&lt;id&gt;</code>, <code>gmeet:calendar/primary</code></td>
+</tr>
+<tr>
+<td><code>zoom</code></td>
+<td><code>zoom:meeting/&lt;id&gt;</code>, <code>zoom:user/me</code></td>
+</tr>
+</tbody>
+</table>
+<p>Parser lives in <code>src/pidgin/connectors/resources.py</code>. Unknown prefix → gate refuses with <code>refused</code>.</p>
+<hr />
+<h2 id="5-python-module-contract">5. Python module contract</h2>
+<p>Each connector is a package under <code>src/pidgin/connectors/&lt;connector_type&gt;/</code>:</p>
+<pre><code>connectors/
+  base.py              # ConnectorProtocol, ConnectorRegistry
+  resources.py         # parse_resource_uri()
+  pidgin_chat/
+    __init__.py        # register()
+    connector.py       # egress
+    ingress.py         # optional — pidgin uses API layer
+  slack/
+    connector.py
+    ingress.py         # webhook handler
+    oauth.py
+  ...
+</code></pre>
+<h3 id="51-connectorprotocol-egress">5.1 <code>ConnectorProtocol</code> (egress)</h3>
+<pre><code class="language-python">class ConnectorProtocol(Protocol):
+    connector_type: str
+    installation_id: str
+
+    def metadata(self) -&gt; ConnectorMetadata: ...
+
+    async def read(
+        self, resource: ResourceUri, *, principal: PrincipalContext
+    ) -&gt; ReadResult: ...
+
+    async def write(
+        self,
+        resource: ResourceUri,
+        payload: WritePayload,
+        *,
+        principal: PrincipalContext,
+        mode: Literal[&quot;draft&quot;, &quot;execute&quot;],
+    ) -&gt; WriteResult: ...
+
+    async def subscribe(
+        self, resource: ResourceUri, *, callback: WatcherCallback
+    ) -&gt; str: ...  # watcher handle
+
+    async def unsubscribe(self, handle: str) -&gt; None: ...
+
+    async def health_check(self) -&gt; HealthStatus: ...
+</code></pre>
+<ul>
+<li><strong><code>write(..., mode="draft")</code></strong> maps to action <code>draft</code>; <strong><code>mode="execute"</code></strong> maps to action <code>execute</code>.</li>
+<li><strong><code>post</code></strong> action resolves target channel to a resource URI and calls <code>write</code> on the owning connector.</li>
+<li>All methods are invoked <strong>only after</strong> <code>gate()</code> accepts the action.</li>
+</ul>
+<h3 id="52-ingress-adapter">5.2 Ingress adapter</h3>
+<p>Ingress code <strong>never</strong> runs turns directly. It:</p>
+<ol>
+<li>Resolves or creates <code>principals</code> (Slack user, email From, etc.)</li>
+<li>Classifies <code>trust_label</code> (<a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a>)</li>
+<li>Routes to target <code>ai_employee_id</code> (handle in text, <code>ai+handle@</code> alias, room membership)</li>
+<li>Inserts <code>inbound_events</code> with normalized payload (§6)</li>
+<li>Calls <code>run_once()</code> or leaves for scheduler</li>
+</ol>
+<h3 id="53-registry">5.3 Registry</h3>
+<pre><code class="language-python">registry.get(installation_id) -&gt; ConnectorProtocol
+registry.for_type(connector_type) -&gt; list[ConnectorProtocol]  # active only
+registry.resolve_resource(uri) -&gt; (installation_id, ConnectorProtocol)
+</code></pre>
+<p>Recipe <code>permissions.can_read</code> / <code>can_write</code> buckets use <strong>logical resource names</strong> (e.g. <code>finance_jira_project</code>) mapped in <code>config_json</code> per installation — not raw URIs. Mapping table format TBD per connector in §8.</p>
+<hr />
+<h2 id="6-normalized-ingress-payload">6. Normalized ingress payload</h2>
+<p>Every connector must populate <code>inbound_events.payload_json</code> with at least:</p>
+<pre><code class="language-json">{
+  &quot;connector_type&quot;: &quot;slack&quot;,
+  &quot;connector_installation_id&quot;: &quot;01J...&quot;,
+  &quot;external_channel_id&quot;: &quot;C0123&quot;,
+  &quot;external_thread_id&quot;: &quot;1234567890.123456&quot;,
+  &quot;message_text&quot;: &quot;...&quot;,
+  &quot;raw_ref&quot;: { &quot;ts&quot;: &quot;...&quot;, &quot;team_id&quot;: &quot;...&quot; },
+  &quot;room_id&quot;: &quot;01J...&quot;,
+  &quot;conversation_id&quot;: &quot;01J...&quot;
+}
+</code></pre>
+<p>Optional keys: <code>attachment_refs[]</code>, <code>mentioned_handles[]</code>, <code>subject</code> (email).</p>
+<p>Runtime turn builder uses these keys — do not invent parallel shapes per connector.</p>
+<hr />
+<h2 id="7-admin-api">7. Admin API</h2>
+<p>Base: <code>/api/workspaces/{workspace_id}/integrations</code></p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/integrations</code></td>
+<td>List installations + status + capabilities</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/integrations/catalog</code></td>
+<td>Supported types, auth modes, required scopes</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/integrations/{connector_type}/oauth/start</code></td>
+<td>Returns <code>{ authorization_url, state }</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/integrations/oauth/callback</code></td>
+<td>Global callback; exchanges code; redirects to UI</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/integrations/{connector_type}/manual</code></td>
+<td>Body: <code>{ display_name, fields: {...} }</code></td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/integrations/{id}/health</code></td>
+<td>Run health_check; update status</td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/integrations/{id}</code></td>
+<td>Enable/disable, update config_json</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/integrations/{id}</code></td>
+<td>Disable + clear credentials (soft delete optional)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Webhook ingress (no session cookie):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Connector</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /hooks/slack/events</code></td>
+<td>Slack Events API</td>
+</tr>
+<tr>
+<td><code>POST /hooks/gmail/push</code></td>
+<td>Gmail Pub/Sub push (post-MVP polling OK for MVP)</td>
+</tr>
+</tbody>
+</table>
+<p>Webhook routes verify signatures using secrets from <code>credentials_json</code> / env.</p>
+<hr />
+<h2 id="8-frontend-integrations-ui">8. Frontend — Integrations UI</h2>
+<p>Follow <a href="UI_DESIGN_GUIDE.html">UI_DESIGN_GUIDE.md</a> and match the hire wizard visual system (<code>brief-section</code>, <code>template-grid</code>, <code>eyebrow</code>, <code>hire-page-main</code>).</p>
+<h3 id="routes">Routes</h3>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Component</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/{workspace}/integrations</code></td>
+<td><code>IntegrationsPage</code></td>
+<td>Catalog grid — links only, no inline connect</td>
+</tr>
+<tr>
+<td><code>/{workspace}/integrations/{connector_type}</code></td>
+<td><code>IntegrationDetailPage</code></td>
+<td>Dedicated setup page per integration</td>
+</tr>
+</tbody>
+</table>
+<p>Legacy <code>/{workspace}/settings/integrations</code> redirects to <code>/integrations</code>.</p>
+<h3 id="index-page-integrationspage">Index page (<code>IntegrationsPage</code>)</h3>
+<ul>
+<li>Grid of catalog cards (like hire template picker)</li>
+<li>Each card: brand monogram, description, capability chips, connection status, “Configure →”</li>
+<li><strong>No</strong> collapsible panels, <strong>no</strong> inline OAuth/manual forms</li>
+</ul>
+<h3 id="detail-page-integrationdetailpage">Detail page (<code>IntegrationDetailPage</code>)</h3>
+<p>Shared shell for every <code>connector_type</code>. Sections:</p>
+<ol>
+<li><strong>Hero</strong> — name, tagline, description, capabilities</li>
+<li><strong>Connect</strong> — OAuth button and/or manual credential fields (always visible)
+   - When both auth modes supported: <code>.tabs</code> toggle (OAuth | Manual setup), not an accordion</li>
+<li><strong>Manage</strong> — when connected: status, health check, disconnect</li>
+</ol>
+<p>Add per-type copy/colors in <code>src/frontend/src/utils/integrationMeta.ts</code>.</p>
+<p>OAuth callback redirects to <code>/{workspace}/integrations/{connector_type}</code>.</p>
+<p>Copy uses "integration" / "connection", not "connector" in user-facing strings.</p>
+<hr />
+<h2 id="9-attribution">9. Attribution</h2>
+<p><code>agent_action_log.technical_actor</code> = <code>connector_installations.id</code> or stable slug <code>slack:01J...</code>.</p>
+<p>Virtual actor fields unchanged (<a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a> §6). Slack/Jira comments prepend virtual agent line in <strong>content</strong>, not only in Pidgin audit.</p>
+<hr />
+<h2 id="10-gate-and-approvals">10. Gate and approvals</h2>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Slack / Gmail external send</th>
+<th>Drive read</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>read</code></td>
+<td>Gate + recipe <code>can_read</code></td>
+<td>Gate + <code>can_read</code></td>
+</tr>
+<tr>
+<td><code>draft</code></td>
+<td>Gate + <code>can_write</code></td>
+<td>Gate + <code>can_write</code></td>
+</tr>
+<tr>
+<td><code>execute</code></td>
+<td><strong><code>requires_approval</code> default</strong> until Phase 3 inbox wired</td>
+<td>Same for file create/share</td>
+</tr>
+</tbody>
+</table>
+<p>Ingress from <code>external-unverified</code> cannot originate <code>execute</code> in the same turn (<a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a> §6).</p>
+<hr />
+<h2 id="11-per-connector-notes">11. Per-connector notes</h2>
+<h3 id="111-slack-slack">11.1 Slack (<code>slack</code>)</h3>
+<ul>
+<li><strong>Libraries:</strong> <code>slack-sdk</code>, <code>slack-bolt</code> (<a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a>)</li>
+<li><strong>OAuth:</strong> workspace install → bot token + team_id in credentials</li>
+<li><strong>Manual:</strong> <code>bot_token</code>, <code>signing_secret</code>, <code>app_token</code> (socket mode dev)</li>
+<li><strong>Ingress:</strong> Events API <code>app_mention</code>, <code>message.im</code>; parse <code>@Pidgin &lt;handle&gt;, …</code></li>
+<li><strong>Egress <code>say</code>:</strong> <code>chat.postMessage</code> in source channel; prefix attribution block</li>
+<li><strong>Principal:</strong> upsert on <code>slack_user_id</code></li>
+</ul>
+<h3 id="112-gmail-gmail">11.2 Gmail (<code>gmail</code>)</h3>
+<ul>
+<li><strong>Libraries:</strong> <code>google-api-python-client</code>, <code>google-auth</code></li>
+<li><strong>OAuth scopes (MVP):</strong> <code>gmail.readonly</code>, <code>gmail.compose</code>, <code>gmail.send</code> (send gated)</li>
+<li><strong>Manual (dev):</strong> app password + IMAP host — flagged deprecated in UI</li>
+<li><strong>Ingress:</strong> polling or webhook; trigger <code>inbound_external</code>; route <code>ai+&lt;handle&gt;@domain</code></li>
+<li><strong>Principal:</strong> upsert on <code>email_address</code></li>
+</ul>
+<h3 id="113-google-drive-google_drive">11.3 Google Drive (<code>google_drive</code>)</h3>
+<ul>
+<li><strong>OAuth scopes:</strong> <code>drive.readonly</code> for reads; full <code>drive</code> for writes. Reads
+  and writes mint separately-scoped tokens, so both scopes must be authorised for
+  domain-wide delegation.</li>
+<li><strong>Manual:</strong> service account JSON + delegated user email (domain-wide delegation)</li>
+<li><strong>Egress <code>read</code>:</strong> exports Google Docs/Sheets/Slides → text/CSV and downloads
+  other files via <code>alt=media</code>; folder reads list children as <code>gdrive:file/&lt;id&gt;</code>
+  lines. Output capped at ~32 KB (<a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> §5.3).</li>
+<li><strong>Egress <code>execute</code> (write):</strong> creates <strong>new</strong> content only — a file
+  (<code>gdrive:folder/&lt;id&gt;</code> + <code>name</code> + <code>content</code>) or a subfolder (<code>kind: folder</code>).
+  Surfaced via the <code>execute</code> tool, gated by <code>can_write</code>. <strong>Creation is additive
+  and not owner-approved.</strong> Editing or deleting an existing file is a gated
+  mutation — the connector refuses a file-target write until the Phase 3 approval
+  inbox (§10) is wired, so no ungated edit/delete path exists.</li>
+<li><strong>Resource prefix:</strong> URIs use <code>gdrive:</code> (§4); the registry maps it to the
+  <code>google_drive</code> connector_type via <code>connector_type_for_prefix()</code> in <code>resources.py</code>.</li>
+</ul>
+<p><strong>Implementation status:</strong> Manual (service account) auth is wired first — the
+catalog advertises <code>auth_modes: ["manual"]</code> until the shared Google OAuth flow
+(reused by <code>gmail</code> / <code>google_meet</code>) lands in <code>start_oauth</code> / <code>complete_oauth</code>.
+Service-account tokens are minted by signing an RS256 JWT (<code>PyJWT[crypto]</code>) and
+exchanging it at Google's <code>jwt-bearer</code> token endpoint — no token-refresh state.</p>
+<h3 id="114-google-meet-google_meet">11.4 Google Meet (<code>google_meet</code>)</h3>
+<ul>
+<li><strong>OAuth scopes:</strong> <code>calendar.readonly</code>, <code>calendar.events</code> (execute gated)</li>
+<li><strong>Manual:</strong> not supported MVP</li>
+<li><strong>Egress:</strong> read upcoming events linked to Meet conferences; draft = calendar hold</li>
+</ul>
+<h3 id="115-zoom-zoom">11.5 Zoom (<code>zoom</code>)</h3>
+<ul>
+<li><strong>OAuth:</strong> standard Zoom OAuth app</li>
+<li><strong>Manual:</strong> Server-to-Server OAuth account ID + client ID + secret</li>
+<li><strong>Egress:</strong> read meetings; draft/create meeting via API (execute gated)</li>
+</ul>
+<hr />
+<h2 id="12-testing">12. Testing</h2>
+<p>Each connector ships:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Location</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Unit</td>
+<td><code>tests/unit/connectors/test_&lt;type&gt;.py</code> — URI parse, payload normalize, signature verify</td>
+</tr>
+<tr>
+<td>Integration</td>
+<td><code>tests/integration/connectors/test_&lt;type&gt;.py</code> — simulated ingress → event row</td>
+</tr>
+<tr>
+<td>Manual</td>
+<td>Integrations UI connect → health green → inject test message (document in PR)</td>
+</tr>
+</tbody>
+</table>
+<p>Use <strong>simulated connector</strong> (in-memory) for turn executor tests before real OAuth (<a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> §9.4).</p>
+<hr />
+<h2 id="13-dependencies">13. Dependencies</h2>
+<table>
+<thead>
+<tr>
+<th>Needs</th>
+<th>Phase</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Turn executor + action dispatcher</td>
+<td>Phase 2.4</td>
+</tr>
+<tr>
+<td><code>pidgin_chat</code> refactor</td>
+<td>Phase 2.2 / 2I.1</td>
+</tr>
+<tr>
+<td>External <code>execute</code> / send</td>
+<td>Phase 3 approvals (can ship read + ingress earlier)</td>
+</tr>
+<tr>
+<td>Gate wired</td>
+<td>Before any production external write</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cross-references">Cross-references</h2>
+<ul>
+<li><a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a> — product model</li>
+<li><a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> — triggers, actions, §9.4</li>
+<li><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> — <code>connector_installations</code>, <code>principals</code>, <code>rooms.modality</code></li>
+<li><a href="IMPLEMENTATION_PLAN.html">IMPLEMENTATION_PLAN.md</a> — Phase 2I tasks</li>
+<li><a href="UI_DESIGN_GUIDE.html">UI_DESIGN_GUIDE.md</a> — Integrations page</li>
+<li>Project skill: <code>.cursor/skills/add-pidgin-connector/SKILL.md</code></li>
+</ul>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

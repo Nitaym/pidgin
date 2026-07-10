@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Security</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item active" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin Security Spec -- Trust, Authority, and Attribution</h1></header>
+
+<h2 id="summary">Summary</h2>
+<pre><code class="language-text">Every inbound message is resolved to a principal by the Pidgin runtime and tagged with a trust label.
+
+The agent's invocation policy, derived from the hierarchy recipe, decides whether a sender may issue instructions, produce work items, or only be quarantined.
+
+Content the agent reads is wrapped as untrusted data and can never originate tool calls.
+
+Approval gates from the integration spec layer on top, gating high-risk actions regardless of who asked.
+
+Every action is attributed with the four identities plus the trust label and the policy decision, so the security posture is fully auditable without reading the transcript.
+</code></pre>
+<p>The short product line:</p>
+<pre><code class="language-text">Pidgin agents listen to their org, triage the outside world, and read everything else as data.
+</code></pre>
+<blockquote>
+<p><strong>Scope:</strong> Policy- and governance-level security model for Pidgin. Defines how AI employees decide whose instructions to follow, how inbound traffic is classified, and how authorization is derived from the org hierarchy.</p>
+<p><strong>Out of scope (for now):</strong> Specific protocols (DKIM/DMARC, OAuth, mTLS, signed tokens, MCP auth), key management, SSO/SCIM, DLP, and SIEM integrations. These will be covered in a follow-up <code>SECURITY_PROTOCOLS_SPEC.md</code>.</p>
+</blockquote>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-purpose">Purpose</a></li>
+<li><a href="#2-the-trust-problem-in-one-picture">The Trust Problem in One Picture</a></li>
+<li><a href="#3-principals-and-the-workspace-directory">Principals and the Workspace Directory</a></li>
+<li><a href="#4-trust-labels">Trust Labels</a></li>
+<li><a href="#5-the-invocation-policy-the-peers-and-superiors-rule">The Invocation Policy</a></li>
+<li><a href="#6-instructions-vs-data">Instructions vs Data</a></li>
+<li><a href="#7-approval-gates-as-the-safety-net">Approval Gates as the Safety Net</a></li>
+<li><a href="#8-attribution-and-audit">Attribution and Audit</a></li>
+<li><a href="#9-cross-tenant-isolation">Cross-Tenant Isolation</a></li>
+<li><a href="#10-agent-to-agent-trust-inside-pidgin">Agent-to-Agent Trust Inside Pidgin</a></li>
+<li><a href="#11-out-of-scope-for-now">Out of Scope (For Now)</a></li>
+<li><a href="#12-open-decisions">Open Decisions</a></li>
+</ol>
+<hr />
+<h2 id="1-purpose">1. Purpose</h2>
+<p>An AI employee in Pidgin is <strong>reachable from outside the organization</strong>. Anyone who learns <code>ai+jane@company.com</code> can send Jane an email. Tickets, PDFs, Slack Connect guests, and vendor replies all reach agents through the same surfaces that legitimate coworkers do.</p>
+<p>Without a defined trust model, Jane has no way to distinguish:</p>
+<pre><code class="language-text">&quot;Pay invoice #4421&quot;     - from her CFO
+&quot;Pay invoice #4421&quot;     - from an attacker spoofing a vendor
+&quot;Pay invoice #4421&quot;     - hidden inside the body of a PDF she just read
+</code></pre>
+<p>This spec defines the rules Pidgin enforces <strong>outside the LLM</strong> so that the agent only ever acts on instructions from people and systems it is supposed to listen to. The model is intentionally simple: every input is labeled, every action is policy-checked, and every action is attributed.</p>
+<p>The core principle:</p>
+<blockquote>
+<p><strong>Agents follow instructions only from authenticated peers and superiors inside the workspace. Everything else is data, triage, or a request awaiting human review.</strong></p>
+</blockquote>
+<hr />
+<h2 id="2-the-trust-problem-in-one-picture">2. The Trust Problem in One Picture</h2>
+<p>Every AI employee sits at the intersection of three planes of inbound traffic. The agent must treat them differently.</p>
+<pre><code class="language-mermaid">flowchart LR
+    subgraph trusted [Trusted plane - inside the org]
+        Peer[Peer or superior in workspace]
+        Manager[Human owner / manager]
+        OtherAgent[Other Pidgin agent]
+    end
+
+    subgraph semitrusted [Semi-trusted - known counterparties]
+        VendorEmail[&quot;Verified external sender&lt;br/&gt;(allowlisted vendor, customer)&quot;]
+    end
+
+    subgraph untrusted [Untrusted - the open world]
+        RandomEmail[&quot;Anyone who knows&lt;br/&gt;ai+jane@company.com&quot;]
+        DocContent[&quot;Content inside a PDF,&lt;br/&gt;ticket, email body, web page&quot;]
+        SlackGuest[&quot;Slack Connect / external guest&quot;]
+    end
+
+    Peer --&gt;|&quot;Instructions OK&quot;| Jane
+    Manager --&gt;|&quot;Instructions plus approvals&quot;| Jane
+    OtherAgent --&gt;|&quot;Signed A2A calls&quot;| Jane
+    VendorEmail --&gt;|&quot;Treated as work item&quot;| Jane
+    RandomEmail -.-&gt;|&quot;Triaged, not obeyed&quot;| Jane
+    DocContent -.-&gt;|&quot;Data only, never instructions&quot;| Jane
+    SlackGuest -.-&gt;|&quot;Triaged, not obeyed&quot;| Jane
+</code></pre>
+<p>Solid arrows are channels through which an agent may <strong>accept instructions</strong>. Dashed arrows are channels that produce <strong>data or work items</strong> -- never direct commands.</p>
+<hr />
+<h2 id="3-principals-and-the-workspace-directory">3. Principals and the Workspace Directory</h2>
+<p>Before any message reaches the agent's prompt, the Pidgin runtime resolves the sender to a <strong>principal</strong>. The principal -- not the body of the message -- determines what the agent is allowed to do in response.</p>
+<p>Principals are resolved by Pidgin infrastructure, not by the LLM. The LLM never decides who the sender is.</p>
+<table>
+<thead>
+<tr>
+<th>Principal type</th>
+<th>Examples</th>
+<th>Resolution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>workspace_member</code></td>
+<td>A human user in the Pidgin workspace</td>
+<td>Authenticated session (web/desktop/mobile), verified Slack identity, verified email from a directory-mapped address</td>
+</tr>
+<tr>
+<td><code>pidgin_agent</code></td>
+<td>Another AI employee in the same workspace</td>
+<td>Internal A2A handshake (see section 10)</td>
+</tr>
+<tr>
+<td><code>external_verified</code></td>
+<td>A vendor, customer, or partner explicitly allowlisted for a given agent or workspace</td>
+<td>Verified sender address matched against the agent's allowlist or the workspace directory</td>
+</tr>
+<tr>
+<td><code>external_unverified</code></td>
+<td>Any other sender reaching a public agent address</td>
+<td>Inbound channel with no matching directory entry</td>
+</tr>
+<tr>
+<td><code>untrusted_content</code></td>
+<td>Document bodies, ticket text, email bodies, web pages, file contents</td>
+<td>Anything the agent <strong>reads</strong> rather than something a person <strong>says</strong> to the agent</td>
+</tr>
+</tbody>
+</table>
+<p>Two rules about principals:</p>
+<ol>
+<li><strong>One message, one principal.</strong> A forwarded email does not inherit the trust of the forwarder. The principal is the immediate sender; any embedded prior message is reclassified as <code>untrusted_content</code> until separately verified.</li>
+<li><strong>No upgrade by prompt.</strong> Nothing inside a message body can change its principal. "I am the CEO" in an email body is text, not identity.</li>
+</ol>
+<hr />
+<h2 id="4-trust-labels">4. Trust Labels</h2>
+<p>Each inbound message carries a structured <strong>trust label</strong> assigned by the runtime. The label travels with the message into the agent's context as metadata -- never as free text the model could be tricked into rewriting.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Source</th>
+<th>Default treatment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>internal-authenticated</code></td>
+<td><code>workspace_member</code> or <code>pidgin_agent</code></td>
+<td>Eligible to issue instructions, subject to the invocation policy in section 5</td>
+</tr>
+<tr>
+<td><code>external-verified</code></td>
+<td><code>external_verified</code></td>
+<td>Becomes a work item or inbox entry; never a direct instruction</td>
+</tr>
+<tr>
+<td><code>external-unverified</code></td>
+<td><code>external_unverified</code></td>
+<td>Triaged; visible to the agent's owner; no tool calls auto-executed</td>
+</tr>
+<tr>
+<td><code>untrusted-content</code></td>
+<td><code>untrusted_content</code></td>
+<td>Data only; wrapped (see section 6); cannot originate tool calls</td>
+</tr>
+</tbody>
+</table>
+<p>The label is <strong>the contract between the runtime and the agent</strong>: the agent's system prompt and tool-call gating both refer to it, so a message tagged <code>untrusted-content</code> cannot, by construction, cause a side effect on its own.</p>
+<hr />
+<h2 id="5-the-invocation-policy-the-peers-and-superiors-rule">5. The Invocation Policy (the "Peers and Superiors" Rule)</h2>
+<p>Each AI employee has an <strong>invocation policy</strong> derived from the hierarchy recipe defined in <a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> (see <em>Hierarchy Recipes</em> and the <em>AI Employee Object</em>). The policy partitions the world into four buckets relative to that agent:</p>
+<table>
+<thead>
+<tr>
+<th>Bucket</th>
+<th>Who</th>
+<th>What they can do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>direct_commanders</code></td>
+<td>Human owner, manager chain, and configured peer roles</td>
+<td>Issue instructions; trigger tool calls within the agent's permission profile; request approvals</td>
+</tr>
+<tr>
+<td><code>requesters</code></td>
+<td>Other authenticated workspace members not in the commander set</td>
+<td>Produce <strong>work items</strong> in the agent's inbox; the agent triages and confirms with a commander before acting on anything beyond read-only responses</td>
+</tr>
+<tr>
+<td><code>external_intake</code></td>
+<td><code>external_verified</code> senders</td>
+<td>Produce <strong>triaged inbox items</strong>; the agent may draft and prepare, but never auto-execute</td>
+</tr>
+<tr>
+<td><code>untrusted</code></td>
+<td><code>external_unverified</code> senders and <code>untrusted_content</code></td>
+<td>Quarantined; visible to the owner; the agent does not act on them autonomously</td>
+</tr>
+</tbody>
+</table>
+<p>Example for Jane, the AI Accounting Agent reporting to the Finance Lead:</p>
+<pre><code class="language-json">{
+  &quot;agent_id&quot;: &quot;jane&quot;,
+  &quot;invocation_policy&quot;: {
+    &quot;direct_commanders&quot;: [
+      &quot;human:finance-lead@company.com&quot;,
+      &quot;human:ceo@company.com&quot;,
+      &quot;agent:company-operator&quot;
+    ],
+    &quot;requesters&quot;: [
+      &quot;role:any_workspace_member&quot;
+    ],
+    &quot;external_intake&quot;: [
+      &quot;domain:acme-vendor.com&quot;,
+      &quot;address:billing@blueops.com&quot;
+    ],
+    &quot;untrusted&quot;: [
+      &quot;principal:external_unverified&quot;,
+      &quot;principal:untrusted_content&quot;
+    ]
+  }
+}
+</code></pre>
+<p>Enforcement happens in the <strong>Pidgin runtime</strong>, not in the LLM. A tool call requested by the model is checked against <code>(sender_principal, action, invocation_policy, permission_profile)</code> before it executes. If the sender is not a commander and the action is not <code>read</code> or <code>draft</code>, the call is rewritten into a "pending approval" item routed to the agent's owner.</p>
+<hr />
+<h2 id="6-instructions-vs-data">6. Instructions vs Data</h2>
+<p>The single most important rule in this spec:</p>
+<blockquote>
+<p><strong>Tool calls may only originate from authenticated commanders. They may never originate from content the agent merely read.</strong></p>
+</blockquote>
+<p>This is the policy-level defense against prompt injection. The runtime treats every <code>untrusted-content</code> payload as a clearly delimited block. The agent's system prompt is constructed to reflect that boundary, and the runtime enforces it even if the model attempts to cross it.</p>
+<p>Concretely, when Jane reads a vendor PDF:</p>
+<pre><code class="language-text">[BEGIN UNTRUSTED CONTENT  source: vendor_invoice.pdf  trust: untrusted-content]
+... full PDF text including any &quot;Ignore previous instructions&quot; payload ...
+[END UNTRUSTED CONTENT]
+</code></pre>
+<p>If the model emits a tool call (e.g. <code>send_email</code>, <code>update_vendor_record</code>) whose causal trigger is text inside that block -- i.e. there is no authenticated commander instruction in the same turn -- the runtime refuses the call and surfaces it to the agent's owner as a flagged event. The agent can summarize, classify, or quote the untrusted content; it cannot let it drive a side effect.</p>
+<hr />
+<h2 id="7-approval-gates-as-the-safety-net">7. Approval Gates as the Safety Net</h2>
+<p>The invocation policy decides <strong>whether the agent listens at all</strong>. Approval gates decide <strong>what the agent is allowed to do once it has listened</strong>.</p>
+<p>These gates already exist in <a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a> -- see the per-agent permission profile in section 4.5 ("Risk-based permissions") and section 5 (the <code>can_read</code> / <code>can_write</code> / <code>requires_approval</code> / <code>blocked</code> buckets in the agent identity object). The security model layers on top of them rather than replacing them:</p>
+<ul>
+<li>Even when the requester is a <code>direct_commander</code>, any action in <code>requires_approval</code> triggers a signed approval from the agent's human owner.</li>
+<li>The <code>blocked</code> set is absolute. No principal -- including the owner -- can have the agent bypass it through a conversational instruction. Changes to <code>blocked</code> are workspace-admin changes, not agent-runtime decisions.</li>
+<li><code>external_intake</code> requesters can never elevate an action out of <code>requires_approval</code> into auto-execution. Their requests are always staged for human review.</li>
+</ul>
+<p>The combination is intentional: the invocation policy keeps the agent's attention on the right people; approval gates keep the agent's hands on the right actions.</p>
+<hr />
+<h2 id="8-attribution-and-audit">8. Attribution and Audit</h2>
+<p>The four-identity audit record already defined in <a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md section 6</a> (technical actor, virtual actor, requester, approver) is extended with two new fields so that every action can be replayed against the security model:</p>
+<table>
+<thead>
+<tr>
+<th>New field</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>trust_label</code></td>
+<td>The label of the input that caused this action (<code>internal-authenticated</code>, <code>external-verified</code>, <code>external-unverified</code>, <code>untrusted-content</code>)</td>
+</tr>
+<tr>
+<td><code>policy_decision</code></td>
+<td>How the runtime classified the action: <code>accepted_as_instruction</code>, <code>routed_to_inbox</code>, <code>quarantined</code>, <code>auto_approved</code>, <code>awaiting_human_approval</code>, <code>refused_by_policy</code></td>
+</tr>
+</tbody>
+</table>
+<p>Extended audit record:</p>
+<pre><code class="language-json">{
+  &quot;run_id&quot;: &quot;pg_8f31&quot;,
+  &quot;technical_actor&quot;: &quot;pidgin-jira-connector&quot;,
+  &quot;virtual_actor&quot;: &quot;jane&quot;,
+  &quot;virtual_actor_role&quot;: &quot;AI Accounting Agent&quot;,
+  &quot;requester&quot;: &quot;nitay@company.com&quot;,
+  &quot;approver&quot;: &quot;auto-policy:low-risk-accounting-comments&quot;,
+  &quot;target_system&quot;: &quot;jira&quot;,
+  &quot;action&quot;: &quot;comment&quot;,
+  &quot;target&quot;: &quot;FIN-123&quot;,
+  &quot;timestamp&quot;: &quot;2026-05-25T20:30:00Z&quot;,
+  &quot;trust_label&quot;: &quot;internal-authenticated&quot;,
+  &quot;policy_decision&quot;: &quot;accepted_as_instruction&quot;
+}
+</code></pre>
+<p>This lets an admin answer not only "who did what" but also <strong>"why was this action allowed to happen"</strong> -- and conversely, "why was this attempted action blocked" -- without reading the agent's transcript.</p>
+<hr />
+<h2 id="9-cross-tenant-isolation">9. Cross-Tenant Isolation</h2>
+<p>A <strong>workspace</strong> in Pidgin is one company's instance of the product -- the container defined in <a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> (see the <em>Core Entities</em> table). Pidgin is multi-tenant: many companies share the same infrastructure, each as their own workspace.</p>
+<p>Each workspace is a <strong>hard boundary</strong>:</p>
+<ul>
+<li>Agents, memory, tools, integrations, audit logs, and identities never cross workspaces.</li>
+<li>The principal directory is workspace-scoped. A <code>workspace_member</code> in Workspace A is <code>external_unverified</code> to every agent in Workspace B by default.</li>
+<li>An agent in Workspace A cannot invoke, observe, or be observed by an agent in Workspace B, even if the underlying recipe is identical.</li>
+<li>Connector accounts (e.g. the Pidgin Jira connector) may be shared software, but each workspace's installation uses its own credentials, its own scopes, and its own audit trail.</li>
+</ul>
+<p>Cross-workspace collaboration (if introduced later) will require an explicit per-workspace federation policy and is treated as a future protocol-level concern.</p>
+<hr />
+<h2 id="10-agent-to-agent-trust-inside-pidgin">10. Agent-to-Agent Trust Inside Pidgin</h2>
+<p>Agents inside a workspace can invoke each other (e.g. the Support Agent escalates to the Product Assistant). These calls are mediated by the Pidgin runtime and follow two rules:</p>
+<ol>
+<li><strong>No agent self-asserts identity.</strong> When Agent A calls Agent B, the runtime -- not A's message body -- attaches A's identity to the request. B's invocation policy treats A as a <code>pidgin_agent</code> principal with the same hierarchy-derived rights any peer would have.</li>
+<li><strong>The original requester chain travels with the call.</strong> If Nitay asked the Support Agent to do X, and the Support Agent calls the Product Assistant to help, the Product Assistant sees both <code>requester=support-agent</code> and <code>original_requester=nitay@company.com</code>. Authorization is enforced <strong>end-to-end</strong>: the Product Assistant cannot be tricked into doing something the original requester wasn't allowed to ask for.</li>
+</ol>
+<p>This prevents the most obvious A2A escalation pattern, where a less-privileged caller laundered its request through a more-privileged agent.</p>
+<p>External A2A -- agents in other systems calling Pidgin agents, or vice versa -- is <strong>out of scope</strong> for this spec and will require a protocol-level handshake covered separately.</p>
+<hr />
+<h2 id="11-out-of-scope-for-now">11. Out of Scope (For Now)</h2>
+<p>The following are intentionally deferred to a future <code>SECURITY_PROTOCOLS_SPEC.md</code>:</p>
+<ul>
+<li>Specific authentication protocols (DKIM/DMARC for email, OAuth 2.1, mTLS, signed A2A tokens, MCP authorization)</li>
+<li>Key management, rotation, and secret storage</li>
+<li>Enterprise identity surface: SSO, SAML, SCIM, directory sync</li>
+<li>DLP, SIEM export, eDiscovery, and retention enforcement</li>
+<li>Anomaly detection and behavioral monitoring of agents</li>
+<li>External A2A and cross-workspace federation</li>
+<li>UI specifics for how trust labels and policy decisions are rendered</li>
+</ul>
+<p>These are real and required, but they are <strong>how</strong> Pidgin will implement the model in this spec -- not <strong>what</strong> the model is.</p>
+<hr />
+<h2 id="cross-references">Cross-References</h2>
+<ul>
+<li><a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> — Product vision, entities, MVP scope</li>
+<li><a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> — Runtime enforcement of trust labels and gate</li>
+<li><a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a> — Connector attribution model</li>
+<li><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> — Persistence (<code>agent_action_log</code>, principals)</li>
+<li><a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a> — MVP stack; secret injection post-MVP</li>
+</ul>
+<hr />
+<h2 id="12-open-decisions">12. Open Decisions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Options</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Default treatment of <code>external_verified</code> senders</td>
+<td>Auto-triage into the agent's inbox vs. always hold for owner review</td>
+<td>Recommendation: auto-triage with a daily owner digest</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Peer-to-peer instruction by default</td>
+<td>Peers can issue direct instructions vs. peers always go through the manager</td>
+<td>Recommendation: configurable per role recipe; off by default for finance/legal-style roles</td>
+</tr>
+<tr>
+<td>3</td>
+<td>UI surfacing of trust labels</td>
+<td>Inline badge on every message vs. only on flagged/quarantined messages</td>
+<td>Recommendation: inline badge in the AI employee profile view; flagged-only in normal chat</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Handling of <code>requires_approval</code> requests from <code>external_intake</code></td>
+<td>Allow staging but block any auto-execution vs. block staging entirely until a commander adopts the request</td>
+<td>Recommendation: allow staging; require a commander to adopt before execution</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Quarantine retention</td>
+<td>How long quarantined messages remain visible to the owner</td>
+<td>Recommendation: 30 days, then summarized into the audit log</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Owner override of <code>blocked</code> actions</td>
+<td>Allowed via admin path vs. requires workspace-admin change</td>
+<td>Recommendation: workspace-admin change only; never conversational</td>
+</tr>
+</tbody>
+</table>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

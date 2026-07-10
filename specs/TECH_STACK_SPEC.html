@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tech Stack — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Tech Stack</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item active" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin Tech Stack Spec</h1></header>
+
+<h2 id="summary">Summary</h2>
+<pre><code class="language-text">MVP runtime: Python 3.12+, single process, offline-capable, one workspace directory per tenant (plain SQLite + text files). FastAPI for HTTP/WebSocket. Official LLM and connector SDKs. No vector DB, no OS keychain, no credential encryption in MVP — deliberate simplification.
+</code></pre>
+<p>The short product line:</p>
+<pre><code class="language-text">Python you know. SQLite for structure. Markdown for memory. Ship the loop, not the infrastructure.
+</code></pre>
+<blockquote>
+<p><strong>Scope:</strong> Language, libraries, and tooling for the Pidgin runtime MVP. Pairs with <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> and <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a>.</p>
+<p><strong>Out of scope:</strong> Recipe marketplace stack, frontend framework final choice, production deployment (K8s, Nuitka builds) — noted as post-MVP paths.</p>
+</blockquote>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-constraints">Constraints</a></li>
+<li><a href="#2-stack-at-a-glance">Stack at a Glance</a></li>
+<li><a href="#3-runtime-and-process-model">Runtime and Process Model</a></li>
+<li><a href="#4-storage-and-secrets">Storage and Secrets</a></li>
+<li><a href="#5-web-and-api-layer">Web and API Layer</a></li>
+<li><a href="#6-agent-runtime-internals">Agent Runtime Internals</a></li>
+<li><a href="#7-connectors">Connectors</a></li>
+<li><a href="#8-knowledge-and-recall">Knowledge and Recall</a></li>
+<li><a href="#9-tooling-and-quality">Tooling and Quality</a></li>
+<li><a href="#10-explicitly-not-in-mvp">Explicitly Not in MVP</a></li>
+<li><a href="#11-post-mvp-paths">Post-MVP Paths</a></li>
+<li><a href="#12-open-decisions">Open Decisions</a></li>
+</ol>
+<hr />
+<h2 id="1-constraints">1. Constraints</h2>
+<p>From product and architecture decisions:</p>
+<table>
+<thead>
+<tr>
+<th>Constraint</th>
+<th>Implication</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Single machine, can run offline</td>
+<td>One process; no Redis, no message broker, no external DB</td>
+</tr>
+<tr>
+<td>DB per workspace</td>
+<td>One SQLite file + companion files per workspace directory</td>
+</tr>
+<tr>
+<td>Python (author's skills)</td>
+<td>Primary language for runtime, connectors, gate, scheduler</td>
+</tr>
+<tr>
+<td>MVP simplicity</td>
+<td>No keychain, no Argon2/AES stack, no vector search</td>
+</tr>
+<tr>
+<td>Closed-source possible later</td>
+<td>Nuitka or similar for production binaries; not MVP blocker</td>
+</tr>
+<tr>
+<td>Separable later</td>
+<td>LLM gateway, connectors, gate as modules with clean interfaces</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2-stack-at-a-glance">2. Stack at a Glance</h2>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Choice</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Language</strong></td>
+<td>Python 3.12+</td>
+<td>Author expertise; mature AI/connector SDKs</td>
+</tr>
+<tr>
+<td><strong>Package manager</strong></td>
+<td><code>uv</code></td>
+<td>Fast installs, lockfile, venv</td>
+</tr>
+<tr>
+<td><strong>Process</strong></td>
+<td>Single <code>pidgind</code> process</td>
+<td>Scheduler + dispatcher + turn executor + HTTP in one binary invocation</td>
+</tr>
+<tr>
+<td><strong>HTTP / WS</strong></td>
+<td>FastAPI + Uvicorn</td>
+<td>Diagnostics + main API; WebSocket for live updates</td>
+</tr>
+<tr>
+<td><strong>SQLite</strong></td>
+<td>stdlib <code>sqlite3</code> + <code>aiosqlite</code></td>
+<td>Plain SQLite for MVP</td>
+</tr>
+<tr>
+<td><strong>Migrations</strong></td>
+<td>Alembic</td>
+<td>Forward-only SQL migrations</td>
+</tr>
+<tr>
+<td><strong>DB access</strong></td>
+<td>SQLAlchemy 2.0 Core</td>
+<td>Typed queries; not the ORM</td>
+</tr>
+<tr>
+<td><strong>Validation</strong></td>
+<td>Pydantic v2</td>
+<td>Events, actions, config, API models</td>
+</tr>
+<tr>
+<td><strong>Password verify</strong></td>
+<td><code>bcrypt</code></td>
+<td>Hash in <code>auth.json</code>; password never stored</td>
+</tr>
+<tr>
+<td><strong>LLM</strong></td>
+<td><code>anthropic</code>, <code>openai</code></td>
+<td>Official SDKs</td>
+</tr>
+<tr>
+<td><strong>Logging</strong></td>
+<td><code>structlog</code></td>
+<td>Structured JSON</td>
+</tr>
+<tr>
+<td><strong>Testing</strong></td>
+<td><code>pytest</code>, <code>pytest-asyncio</code></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Lint / format</strong></td>
+<td><code>ruff</code></td>
+<td>Replaces flake8, black, isort</td>
+</tr>
+<tr>
+<td><strong>Types</strong></td>
+<td><code>pyright</code> strict</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Memory / docs</strong></td>
+<td>Files on disk</td>
+<td><code>journal.md</code>, <code>docs/*.txt</code>; grep for recall</td>
+</tr>
+<tr>
+<td><strong>Frontend</strong></td>
+<td>Deferred</td>
+<td>React+Vite or HTMX when UI work starts</td>
+</tr>
+</tbody>
+</table>
+<p>Detail for each row is in sections 3–9.</p>
+<hr />
+<h2 id="3-runtime-and-process-model">3. Runtime and Process Model</h2>
+<p>One Python process (<code>pidgind</code>) containing:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CLI</strong></td>
+<td><code>create-workspace</code>, <code>open</code>, <code>run</code>, admin commands</td>
+</tr>
+<tr>
+<td><strong>Workspace manager</strong></td>
+<td>Open/close workspace dirs; verify password; hold DB connection</td>
+</tr>
+<tr>
+<td><strong>Scheduler loop</strong></td>
+<td>Poll <code>agent_timers</code>; emit <code>inbound_events</code></td>
+</tr>
+<tr>
+<td><strong>Event dispatcher</strong></td>
+<td>Poll pending <code>inbound_events</code>; start/resume turns</td>
+</tr>
+<tr>
+<td><strong>Turn executor</strong></td>
+<td>Build context → LLM → gate → actions → audit</td>
+</tr>
+<tr>
+<td><strong>Policy gate</strong></td>
+<td>Pure function; see AGENT_RUNTIME_SPEC §8</td>
+</tr>
+<tr>
+<td><strong>LLM gateway module</strong></td>
+<td><code>call(messages, tools, budget) → response</code></td>
+</tr>
+<tr>
+<td><strong>Connector registry</strong></td>
+<td>Slack, email, Jira, … behind uniform interface</td>
+</tr>
+<tr>
+<td><strong>FastAPI app</strong></td>
+<td>REST + WebSocket + static files (later)</td>
+</tr>
+</tbody>
+</table>
+<p>Async throughout (<code>asyncio</code>). I/O-bound work (LLM, connectors, DB via <code>aiosqlite</code>) uses <code>async</code>; CPU-bound rare paths (PDF extract) use <code>asyncio.to_thread</code>.</p>
+<hr />
+<h2 id="4-storage-and-secrets">4. Storage and Secrets</h2>
+<p>See <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md §4</a> for full layout.</p>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>MVP approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Structured data</td>
+<td><code>db.sqlite</code> per workspace</td>
+</tr>
+<tr>
+<td>Agent memory</td>
+<td><code>memory/&lt;handle&gt;/journal.md</code></td>
+</tr>
+<tr>
+<td>Document text</td>
+<td><code>docs/&lt;id&gt;.txt</code></td>
+</tr>
+<tr>
+<td>Blobs</td>
+<td><code>blobs/&lt;ab&gt;/&lt;cd&gt;/&lt;sha256&gt;</code></td>
+</tr>
+<tr>
+<td>Workspace password</td>
+<td>Caller supplies at open; bcrypt hash in <code>auth.json</code> only</td>
+</tr>
+<tr>
+<td>Connector tokens</td>
+<td>Plaintext JSON in DB column <code>credentials_json</code></td>
+</tr>
+<tr>
+<td>Password storage</td>
+<td><strong>Not Pidgin's job.</strong> User's password manager, <code>.env</code>, etc.</td>
+</tr>
+<tr>
+<td>Production secrets</td>
+<td>Inject via env / K8s Secret / Vault — adapter post-MVP</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Not used in MVP:</strong> <code>keyring</code>, <code>argon2-cffi</code>, <code>cryptography</code> for credential blobs, SQLCipher.</p>
+<hr />
+<h2 id="5-web-and-api-layer">5. Web and API Layer</h2>
+<table>
+<thead>
+<tr>
+<th>Piece</th>
+<th>Library</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Framework</td>
+<td>FastAPI</td>
+</tr>
+<tr>
+<td>ASGI server</td>
+<td>Uvicorn</td>
+</tr>
+<tr>
+<td>WebSocket</td>
+<td>FastAPI native / Starlette</td>
+</tr>
+<tr>
+<td>Static UI (later)</td>
+<td>FastAPI <code>StaticFiles</code> or separate Vite dev server</td>
+</tr>
+</tbody>
+</table>
+<p>Diagnostics routes (read-only over workspace DB) per AGENT_RUNTIME_SPEC §10.1.</p>
+<hr />
+<h2 id="6-agent-runtime-internals">6. Agent Runtime Internals</h2>
+<table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Libraries / approach</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ULID IDs</td>
+<td><code>python-ulid</code></td>
+</tr>
+<tr>
+<td>Turn / event models</td>
+<td>Pydantic v2</td>
+</tr>
+<tr>
+<td>Status changes</td>
+<td>Single helper: write <code>*_status_log</code> + update cache atomically</td>
+</tr>
+<tr>
+<td>LLM gateway</td>
+<td><code>anthropic</code>, <code>openai</code> — wrap behind internal interface</td>
+</tr>
+<tr>
+<td>Prompt assembly</td>
+<td>Internal module; inject sense-of-time, journal tail, grep results</td>
+</tr>
+<tr>
+<td>Debug export</td>
+<td>Write <code>turn.md</code> + JSONL under <code>_debug/</code> when flag enabled</td>
+</tr>
+</tbody>
+</table>
+<p>Gate and turn executor are plain Python modules — no framework magic.</p>
+<hr />
+<h2 id="7-connectors">7. Connectors</h2>
+<p>Uniform interface (AGENT_RUNTIME_SPEC §9.4). MVP connectors TBD by product priority; libraries when implemented:</p>
+<table>
+<thead>
+<tr>
+<th>Integration</th>
+<th>Library</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Slack</td>
+<td><code>slack-sdk</code>, <code>slack-bolt</code></td>
+</tr>
+<tr>
+<td>Google Workspace</td>
+<td><code>google-api-python-client</code>, <code>google-auth</code></td>
+</tr>
+<tr>
+<td>Microsoft Graph</td>
+<td><code>msgraph-sdk</code></td>
+</tr>
+<tr>
+<td>Jira / Confluence</td>
+<td><code>atlassian-python-api</code></td>
+</tr>
+<tr>
+<td>Email</td>
+<td><code>aiosmtplib</code> + IMAP client TBD</td>
+</tr>
+</tbody>
+</table>
+<p>All connector calls go through the policy gate first.</p>
+<hr />
+<h2 id="8-knowledge-and-recall">8. Knowledge and Recall</h2>
+<p><strong>No vector database. No sqlite-vec. No embedding API calls in MVP.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>remember</code></td>
+<td>Append block to <code>memory/&lt;handle&gt;/journal.md</code></td>
+</tr>
+<tr>
+<td><code>recall</code> (memory)</td>
+<td>Read tail of journal (~8 KB); grep for keywords</td>
+</tr>
+<tr>
+<td>Ingest document</td>
+<td>Extract text → write <code>docs/&lt;id&gt;.txt</code>; insert <code>ingested_documents</code> row</td>
+</tr>
+<tr>
+<td><code>recall</code> (docs)</td>
+<td>Grep granted <code>docs/*.txt</code>; or read whole file if &lt; ~32 KB</td>
+</tr>
+</tbody>
+</table>
+<p>Search upgrades later: ripgrep index → SQLite FTS on file corpus → embeddings if needed.</p>
+<hr />
+<h2 id="9-tooling-and-quality">9. Tooling and Quality</h2>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>uv</code></td>
+<td>Dependencies, lockfile, scripts</td>
+</tr>
+<tr>
+<td><code>ruff</code></td>
+<td>Lint + format</td>
+</tr>
+<tr>
+<td><code>pyright</code> (strict)</td>
+<td>Static types</td>
+</tr>
+<tr>
+<td><code>pytest</code> + <code>pytest-asyncio</code></td>
+<td>Tests</td>
+</tr>
+<tr>
+<td><code>pytest-cov</code></td>
+<td>Coverage (optional)</td>
+</tr>
+</tbody>
+</table>
+<p>Project layout (TBD at scaffold time): <code>src/pidgin/</code> with <code>runtime/</code>, <code>gate/</code>, <code>llm/</code>, <code>connectors/</code>, <code>db/</code>, <code>api/</code>.</p>
+<hr />
+<h2 id="10-explicitly-not-in-mvp">10. Explicitly Not in MVP</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Why deferred</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OS keychain (<code>keyring</code>)</td>
+<td>User manages passwords externally</td>
+</tr>
+<tr>
+<td>Argon2id / AES credential encryption</td>
+<td>Over-engineering for local MVP</td>
+</tr>
+<tr>
+<td><code>sqlite-vec</code> / embeddings</td>
+<td>File + grep is enough initially</td>
+</tr>
+<tr>
+<td>SQLCipher</td>
+<td>Plain SQLite + directory isolation</td>
+</tr>
+<tr>
+<td>Nuitka / PyInstaller</td>
+<td>Dev mode first; ship closed-source binary later</td>
+</tr>
+<tr>
+<td>Separate microservices</td>
+<td>Monolith with module boundaries</td>
+</tr>
+<tr>
+<td>Postgres / Redis</td>
+<td>Single-machine SQLite</td>
+</tr>
+<tr>
+<td>Frontend framework lock</td>
+<td>Backend first</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="11-post-mvp-paths">11. Post-MVP Paths</h2>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Likely direction</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Closed-source distribution</td>
+<td>Nuitka compile to native binary</td>
+</tr>
+<tr>
+<td>Production deployment</td>
+<td>Docker; passwords from K8s Secret</td>
+</tr>
+<tr>
+<td>DB encryption</td>
+<td>SQLCipher; password as DB key</td>
+</tr>
+<tr>
+<td>Semantic search</td>
+<td>Embeddings + index; maybe sqlite-vec or external</td>
+</tr>
+<tr>
+<td>Scale-out</td>
+<td>Per-tenant processes; Postgres migration</td>
+</tr>
+<tr>
+<td>Go rewrite of hot path</td>
+<td>Only if profiling proves Python bottleneck (unlikely — LLM-bound)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-open-decisions">12. Open Decisions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Frontend</td>
+<td>React+Vite vs HTMX — when UI starts</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Email connector</td>
+<td>IMAP library choice</td>
+</tr>
+<tr>
+<td>3</td>
+<td>PDF text extraction</td>
+<td><code>pypdf</code> vs <code>pdfplumber</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td>CLI framework</td>
+<td><code>typer</code> vs <code>click</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td>First connector to implement</td>
+<td><strong>Locked:</strong> <code>pidgin_chat</code> → Slack → Gmail → Drive → Meet → Zoom (<a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a>)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cross-references">Cross-References</h2>
+<ul>
+<li><a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> — Triggers, actions, turn lifecycle</li>
+<li><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> — 26 tables + file layout</li>
+<li><a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> — MVP scope</li>
+</ul>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

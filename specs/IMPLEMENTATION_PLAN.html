@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Implementation Plan — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Implementation Plan</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item active" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin Implementation Plan</h1></header>
+
+<p>Handoff document for building the MVP incrementally. Each phase should land with passing tests before the next begins.</p>
+<p><strong>North star</strong> (from <a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a>):</p>
+<blockquote>
+<p>Founder picks SaaS hierarchy recipe → hires Support Agent → interview → onboard → text chat → task with approval → "what happened today."</p>
+</blockquote>
+<hr />
+<h2 id="operator-model-locked">Operator model (locked)</h2>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Admin UI + API</strong></td>
+<td><strong>Only</strong> MVP operator path — create workspace, hire, chat, diagnostics</td>
+</tr>
+<tr>
+<td><strong>Human test loop</strong></td>
+<td>Every feature must be exercisable from the admin screen before moving on</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Not in MVP:</strong> No Typer CLI. <code>src/pidgin/cli.py</code> and the <code>pidgin</code> console script are removed — do not reintroduce CLI commands or document CLI as an operator path.</p>
+<p>Run the admin server:</p>
+<pre><code class="language-bash">uv sync --extra dev --extra api
+uv run pidgin-admin --home ~/.pidgin
+# → http://127.0.0.1:8765/
+</code></pre>
+<hr />
+<h2 id="how-to-use-this-doc-for-agents">How to use this doc (for agents)</h2>
+<ol>
+<li>Read <a href="index.html">README.md</a> for locked decisions — do not re-litigate them.</li>
+<li>Pick <strong>one phase task</strong> (or a clearly scoped sub-task) and mark it in your PR/commit message.</li>
+<li>Align with existing specs — especially <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a>, <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a>, <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a>.</li>
+<li>Run verification before finishing:
+   <code>bash
+   uv sync --extra dev --extra api
+   uv run pytest -v
+   uv run ruff check src tests</code></li>
+<li>Do <strong>not</strong> invent recipe format, gate semantics, or table shapes — extend what exists.</li>
+<li><strong>Diagnostics-first:</strong> ship read views and admin commands before adding automation; verify manually in <code>/admin</code>.</li>
+</ol>
+<hr />
+<h2 id="current-status">Current status</h2>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Specs (product, runtime, schema, stack, security)</td>
+<td>✅ Done</td>
+<td>See <a href="index.html">README.md</a></td>
+</tr>
+<tr>
+<td><code>migrations/001_initial.sql</code> (26 tables)</td>
+<td>✅ Done</td>
+<td>FK constraints omitted; app enforces integrity</td>
+</tr>
+<tr>
+<td><code>pyproject.toml</code> + package layout</td>
+<td>✅ Done</td>
+<td>Python 3.12+</td>
+</tr>
+<tr>
+<td>Core types (<code>src/pidgin/types/</code>)</td>
+<td>✅ Done</td>
+<td>8 triggers, 14 actions, gate I/O</td>
+</tr>
+<tr>
+<td>Workspace lifecycle (<code>src/pidgin/workspace/</code>)</td>
+<td>✅ Done</td>
+<td>create/open, bcrypt <code>auth.json</code>, registry</td>
+</tr>
+<tr>
+<td>DB layer (<code>src/pidgin/db/</code>)</td>
+<td>✅ Done</td>
+<td>migrate, connect, event insert/fetch, diagnostics queries</td>
+</tr>
+<tr>
+<td>File knowledge (<code>src/pidgin/knowledge/</code>)</td>
+<td>✅ Done</td>
+<td><code>remember</code> / <code>recall_tail</code> / <code>recall_grep</code></td>
+</tr>
+<tr>
+<td>Policy gate (<code>src/pidgin/gate/</code>)</td>
+<td>⏸ Deferred</td>
+<td>Security last in MVP; chat turns bypass gate</td>
+</tr>
+<tr>
+<td>Runtime (<code>src/pidgin/runtime/</code>)</td>
+<td>🟡 Chat stub</td>
+<td>Event → turn → stub reply via <code>say</code>; no LLM API yet</td>
+</tr>
+<tr>
+<td>Recipe loader + hire (<code>src/pidgin/recipes/</code>, <code>hire/</code>)</td>
+<td>✅ Done</td>
+<td>Bundled support-agent-v0.1.json</td>
+</tr>
+<tr>
+<td>Product UI (home + chat)</td>
+<td>✅ Done</td>
+<td>Hire → #support chat with stub replies</td>
+</tr>
+<tr>
+<td>Services (<code>src/pidgin/services/</code>)</td>
+<td>✅ Done</td>
+<td>Workspace create/list; inject event; run-once</td>
+</tr>
+<tr>
+<td>Admin API + UI (<code>src/pidgin/api/</code>)</td>
+<td>✅ Done</td>
+<td>FastAPI + HTML admin; diagnostics routes</td>
+</tr>
+<tr>
+<td>Tests</td>
+<td>🟡 Partial</td>
+<td>Foundation + admin + product flow tests</td>
+</tr>
+<tr>
+<td><code>recipes/support-agent-v0.1.json</code></td>
+<td>🟡 Stub</td>
+<td>No schema validation yet</td>
+</tr>
+<tr>
+<td><code>MVP_USER_STORIES.md</code></td>
+<td>🟡 Updating</td>
+<td>US-1–US-3 now reference admin UI</td>
+</tr>
+<tr>
+<td><code>RECIPES_SPEC.md</code></td>
+<td>✅ Done</td>
+<td>Bundle schema + <code>default_job_requirements</code> / <code>default_ideal_candidate</code> (PID-6)</td>
+</tr>
+<tr>
+<td><code>HIRE_UX.md</code></td>
+<td>✅ Done</td>
+<td>Wizard UX; architect handoffs resolved in §8</td>
+</tr>
+<tr>
+<td>Hire UX storage (SCHEMA_SPEC §4.1)</td>
+<td>✅ Spec'd</td>
+<td><code>role-templates/</code>, <code>hr-assist/</code>, <code>audit/</code> file layout locked</td>
+</tr>
+<tr>
+<td><code>migrations/002_hire_customization.sql</code></td>
+<td>❌ Missing</td>
+<td>Adds <code>hire_customization_json</code> — backend dev (PID-7)</td>
+</tr>
+<tr>
+<td><code>src/pidgin/llm/</code></td>
+<td>❌ Missing</td>
+<td>Phase 2</td>
+</tr>
+<tr>
+<td>Repository helpers (status-log, append-only guard)</td>
+<td>❌ Missing</td>
+<td>Phase 0.5</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Next agent should:</strong> implement Phase 1B hire wizard backend (PID-7) — migration 002, <code>hire_customization_json</code>, role-template file I/O, hire API extensions. Frontend hire UX (PID-8) follows. <strong>Do not</strong> prioritize gate matrix work.</p>
+<h3 id="mvp-priority-order">MVP priority order</h3>
+<ol>
+<li><strong>Visible product</strong> — hire, chat, rooms, agent roster (in progress)</li>
+<li><strong>Real LLM</strong> — replace stub replies</li>
+<li><strong>Tasks + approvals</strong> — product flows</li>
+<li><strong>Security / gate</strong> — last</li>
+</ol>
+<hr />
+<h2 id="locked-constraints-do-not-change-without-explicit-user-approval">Locked constraints (do not change without explicit user approval)</h2>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Language</td>
+<td>Python 3.12+</td>
+</tr>
+<tr>
+<td>Operator surface</td>
+<td>Admin UI + backend API only — <strong>no CLI in MVP</strong></td>
+</tr>
+<tr>
+<td>Storage</td>
+<td>One workspace = one directory: <code>db.sqlite</code> + <code>memory/</code>, <code>docs/</code>, <code>blobs/</code></td>
+</tr>
+<tr>
+<td>DB scope</td>
+<td>Per-workspace SQLite; no <code>workspace_id</code> columns</td>
+</tr>
+<tr>
+<td>Password</td>
+<td>Supplied via admin unlock / API session; bcrypt hash in <code>auth.json</code> only; no OS keychain</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>File-based <code>memory/&lt;handle&gt;/journal.md</code>; recall = tail + grep</td>
+</tr>
+<tr>
+<td>MVP omissions</td>
+<td>No CLI; no vectors, SQLCipher, Argon2, AES credential encryption</td>
+</tr>
+<tr>
+<td>Gate</td>
+<td>Runs <strong>outside</strong> LLM; every decision → <code>agent_action_log</code> row — <strong>deferred to post-MVP</strong></td>
+</tr>
+<tr>
+<td>Recipes</td>
+<td>Separate marketplace app; runtime uses snapshot at hire time</td>
+</tr>
+<tr>
+<td>Verification</td>
+<td>Human-testable via admin UI before phase exit</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="phases">Phases</h2>
+<h3 id="phase-0-foundation-admin-shell">Phase 0 — Foundation + Admin shell</h3>
+<p><strong>Goal:</strong> Workspace on disk, schema applied, event queue + turn stub, <strong>admin UI with diagnostics and commands</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.1</td>
+<td>Repo scaffold</td>
+<td><code>pyproject.toml</code>, <code>src/pidgin/</code></td>
+<td><code>uv sync --extra dev --extra api</code> succeeds</td>
+</tr>
+<tr>
+<td>0.2</td>
+<td>Core Pydantic types</td>
+<td><code>src/pidgin/types/</code></td>
+<td>All 8 triggers + 14 actions as enums; gate I/O models</td>
+</tr>
+<tr>
+<td>0.3</td>
+<td>Workspace lifecycle</td>
+<td><code>src/pidgin/workspace/manager.py</code></td>
+<td>create/open; <code>auth.json</code> bcrypt; registry JSON</td>
+</tr>
+<tr>
+<td>0.4</td>
+<td>DB migration</td>
+<td><code>migrations/001_initial.sql</code>, <code>src/pidgin/db/connection.py</code></td>
+<td><code>apply_migrations</code> idempotent; 26 tables</td>
+</tr>
+<tr>
+<td>0.5</td>
+<td>Repository helpers</td>
+<td><code>src/pidgin/db/</code> (new modules)</td>
+<td>ULID/timestamp helpers; status-log insert helper; append-only guard for audit tables</td>
+</tr>
+<tr>
+<td>0.6</td>
+<td>File knowledge</td>
+<td><code>src/pidgin/knowledge/memory.py</code></td>
+<td>Append journal; tail + grep recall</td>
+</tr>
+<tr>
+<td>0.7</td>
+<td>Policy gate</td>
+<td><code>src/pidgin/gate/policy.py</code></td>
+<td><strong>Post-MVP</strong> — skeleton exists; do not block product work</td>
+</tr>
+<tr>
+<td>0.8</td>
+<td>Event → turn stub</td>
+<td><code>src/pidgin/db/events.py</code>, <code>src/pidgin/runtime/</code></td>
+<td>Pending event → <code>turns</code> row → <code>agent_action_log</code> → event <code>done</code></td>
+</tr>
+<tr>
+<td>0.9</td>
+<td><strong>Admin server</strong></td>
+<td><code>src/pidgin/api/</code>, <code>src/pidgin/services/</code></td>
+<td><code>pidgin-admin</code>; create workspace; unlock; inject event; run-once</td>
+</tr>
+<tr>
+<td>0.10</td>
+<td><strong>Diagnostics views</strong></td>
+<td><code>src/pidgin/db/diagnostics.py</code>, <code>api/routes/</code></td>
+<td>Events, turns, turn timeline, audit — UI + JSON API</td>
+</tr>
+<tr>
+<td>0.11</td>
+<td>Foundation tests</td>
+<td><code>tests/test_foundation.py</code>, <code>tests/test_admin_api.py</code></td>
+<td>All green; admin human loop covered</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Phase 0 exit criteria</strong></p>
+<ul>
+<li>[ ] <code>uv run pytest -v</code> passes</li>
+<li>[ ] Admin UI: create workspace → unlock → hire agent → chat in <code>#support</code></li>
+<li>[ ] Diagnostics (Tools → Diagnostics): inject test event → run once → see event <code>done</code>, turn, audit row</li>
+<li>[ ] Diagnostics API returns same data as UI tables (<code>/api/workspaces/{id}/turns</code>, <code>/audit</code>)</li>
+</ul>
+<p><strong>Known Phase 0 gaps to close</strong></p>
+<ul>
+<li>Phase 0.5 repository helpers</li>
+<li>Split tests into <code>tests/unit/</code> and <code>tests/integration/</code> per layout below</li>
+</ul>
+<p><strong>Deferred (not MVP exit criteria)</strong></p>
+<ul>
+<li>Gate matrix tests and wiring <code>gate()</code> into turn executor</li>
+<li>CLI — removed; not shipped</li>
+</ul>
+<p><strong>Human test script (run after every Phase 0 change)</strong></p>
+<ol>
+<li><code>uv run pidgin-admin --home /tmp/pidgin-test</code></li>
+<li>Open http://127.0.0.1:8765/admin</li>
+<li>Create workspace "Test" with password <code>pw</code></li>
+<li>Hire Support Agent → send a chat message → see agent reply</li>
+<li>Optional: Diagnostics → inject test event → run once → inspect turn timeline</li>
+</ol>
+<hr />
+<h3 id="phase-1-stub-recipe-hire">Phase 1 — Stub recipe + hire</h3>
+<p><strong>Goal:</strong> Hire one Support Agent from a bundled recipe snapshot. <strong>Hire via admin UI only.</strong></p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.1</td>
+<td>Recipe spec</td>
+<td><code>specs/RECIPES_SPEC.md</code></td>
+<td>Documents bundle fields, validation rules, snapshot immutability</td>
+</tr>
+<tr>
+<td>1.2</td>
+<td>Stub recipe</td>
+<td><code>recipes/support-agent-v0.1.json</code></td>
+<td>Validates against spec; includes permissions + prompt template</td>
+</tr>
+<tr>
+<td>1.3</td>
+<td>Recipe loader</td>
+<td><code>src/pidgin/recipes/</code></td>
+<td>Load JSON, compute <code>bundle_sha256</code>, validate schema</td>
+</tr>
+<tr>
+<td>1.4</td>
+<td>Hire flow</td>
+<td><code>src/pidgin/hire/</code></td>
+<td>Creates <code>ai_employees</code>, <code>principals</code>, <code>ai_employee_recipe_snapshots</code></td>
+</tr>
+<tr>
+<td>1.5</td>
+<td>Permission resolution</td>
+<td><code>src/pidgin/gate/</code></td>
+<td><strong>Post-MVP</strong> — merge recipe permissions when gate lands</td>
+</tr>
+<tr>
+<td>1.6</td>
+<td><strong>Admin hire</strong></td>
+<td><code>src/pidgin/api/routes/admin.py</code>, <code>services/</code></td>
+<td>Hire from bundled recipe; agent on home + chat</td>
+</tr>
+<tr>
+<td>1.7</td>
+<td>Hire tests</td>
+<td><code>tests/test_product_flow.py</code></td>
+<td>Hire + chat smoke via admin</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> Phase 0 complete.</p>
+<hr />
+<h3 id="phase-1b-hire-wizard-customization-us-6">Phase 1B — Hire wizard + customization (US-6)</h3>
+<p><strong>Goal:</strong> Multi-step hire wizard with Pidgin role templates, operator customization persisted at hire, immutable recipe snapshot unchanged.</p>
+<p><strong>UX spec:</strong> <a href="HIRE_UX.html">HIRE_UX.md</a> §3. <strong>Storage:</strong> <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §7.1, §7.2.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1B.1</td>
+<td>Migration 002</td>
+<td><code>migrations/002_hire_customization.sql</code></td>
+<td><code>hire_customization_json</code> column on <code>ai_employees</code></td>
+</tr>
+<tr>
+<td>1B.2</td>
+<td>Bundled template listing</td>
+<td><code>src/pidgin/recipes/</code>, <code>api/routes/</code></td>
+<td><code>GET .../role-templates</code> returns Pidgin templates + defaults from JSON</td>
+</tr>
+<tr>
+<td>1B.3</td>
+<td>Hire with customization</td>
+<td><code>src/pidgin/hire/</code>, <code>api/routes/</code></td>
+<td><code>POST .../hire</code> accepts <code>template_id</code>, <code>customization</code>, identity; writes snapshot + customization</td>
+</tr>
+<tr>
+<td>1B.4</td>
+<td>Prompt merge stub</td>
+<td><code>src/pidgin/runtime/prompt.py</code></td>
+<td>Turn builder appends customization per SCHEMA_SPEC §7.2</td>
+</tr>
+<tr>
+<td>1B.5</td>
+<td>Hire wizard UI</td>
+<td><code>src/frontend/</code></td>
+<td>Steps 1–5 per HIRE_UX §3; no “recipe” in UI copy</td>
+</tr>
+<tr>
+<td>1B.6</td>
+<td>Hire wizard tests</td>
+<td><code>tests/integration/test_hire.py</code></td>
+<td>US-6 acceptance: pre-fill, persist customization, snapshot immutable</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> Phase 1 (basic hire path).</p>
+<hr />
+<h3 id="phase-1b2-your-role-templates-us-8-us-10">Phase 1B2 — Your role templates (US-8, US-10)</h3>
+<p><strong>Goal:</strong> Workspace template CRUD as versioned files; duplicate Pidgin template; create template from agent.</p>
+<p><strong>Storage:</strong> <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §4.1.1.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1B2.1</td>
+<td>Template file I/O</td>
+<td><code>src/pidgin/templates/</code> (new)</td>
+<td>Read/write <code>role-templates/&lt;slug&gt;/manifest.json</code> + <code>v&lt;N&gt;.md</code></td>
+</tr>
+<tr>
+<td>1B2.2</td>
+<td>Version promotion</td>
+<td>same</td>
+<td>Same slug save → new <code>v{N+1}.md</code>; manifest <code>current_version</code> bumped; prior files kept</td>
+</tr>
+<tr>
+<td>1B2.3</td>
+<td>Template API</td>
+<td><code>src/pidgin/api/routes/</code></td>
+<td><code>GET/POST/PATCH .../role-templates</code> per route table below</td>
+</tr>
+<tr>
+<td>1B2.4</td>
+<td>Duplicate Pidgin template</td>
+<td><code>services/</code></td>
+<td>Creates workspace copy at <code>v1.md</code> with lineage</td>
+</tr>
+<tr>
+<td>1B2.5</td>
+<td>Create from agent</td>
+<td><code>services/</code></td>
+<td>Copies <code>hire_customization_json</code> + permissions summary into new template</td>
+</tr>
+<tr>
+<td>1B2.6</td>
+<td>Template audit</td>
+<td><code>audit/template-versions/</code> writer</td>
+<td>JSONL line on each new version</td>
+</tr>
+<tr>
+<td>1B2.7</td>
+<td>Template UI + tests</td>
+<td><code>src/frontend/</code>, <code>tests/</code></td>
+<td>US-8, US-10 acceptance</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> Phase 1B.1 (shared customization shape).</p>
+<hr />
+<h3 id="phase-1b3-post-hire-brief-edit-audit-us-9">Phase 1B3 — Post-hire brief edit + audit (US-9)</h3>
+<p><strong>Goal:</strong> Edit job requirements, ideal candidate, your take on agent profile; audit trail; prompt merge picks up changes.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1B3.1</td>
+<td>Brief PATCH API</td>
+<td><code>api/routes/</code></td>
+<td><code>PATCH .../agents/{handle}/brief</code> updates <code>hire_customization_json</code></td>
+</tr>
+<tr>
+<td>1B3.2</td>
+<td>Brief edit audit</td>
+<td><code>src/pidgin/audit/</code> (new)</td>
+<td>Appends to <code>audit/brief-edits/&lt;employee_id&gt;.jsonl</code></td>
+</tr>
+<tr>
+<td>1B3.3</td>
+<td>Agent profile UI</td>
+<td><code>src/frontend/</code></td>
+<td>Editable sections + save per HIRE_UX §4</td>
+</tr>
+<tr>
+<td>1B3.4</td>
+<td>Turn prompt refresh</td>
+<td><code>runtime/prompt.py</code></td>
+<td>Subsequent turns use updated customization (§7.2)</td>
+</tr>
+<tr>
+<td>1B3.5</td>
+<td>Brief edit tests</td>
+<td><code>tests/integration/</code></td>
+<td>US-9 acceptance</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> Phase 1B.4 (prompt merge).</p>
+<hr />
+<h3 id="phase-1c-pidgin-hr-assist-us-7">Phase 1C — Pidgin HR assist (US-7)</h3>
+<p><strong>Goal:</strong> Built-in hiring coach chat; Apply / Append suggestions; session persistence. Stub LLM acceptable.</p>
+<p><strong>Storage:</strong> <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §4.1.2.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1C.1</td>
+<td>HR assist session I/O</td>
+<td><code>src/pidgin/hr_assist/</code> (new)</td>
+<td><code>meta.json</code> + append-only <code>messages.jsonl</code></td>
+</tr>
+<tr>
+<td>1C.2</td>
+<td>HR assist API</td>
+<td><code>api/routes/</code></td>
+<td><code>POST .../hr-assist/sessions</code>, message POST/GET</td>
+</tr>
+<tr>
+<td>1C.3</td>
+<td>Assist stub LLM</td>
+<td><code>src/pidgin/llm/</code> or inline stub</td>
+<td>Returns reply + optional <code>suggestion</code> payload</td>
+</tr>
+<tr>
+<td>1C.4</td>
+<td>Apply / Append handlers</td>
+<td><code>api/</code> or frontend</td>
+<td><code>apply</code> overwrites form fields; <code>append_your_take</code> appends text</td>
+</tr>
+<tr>
+<td>1C.5</td>
+<td>HR assist UI</td>
+<td><code>src/frontend/</code></td>
+<td>Panel on hire steps 2–3, agent profile, template editor</td>
+</tr>
+<tr>
+<td>1C.6</td>
+<td>Degraded mode</td>
+<td><code>api/</code></td>
+<td>Hire and save succeed when assist unavailable (US-7)</td>
+</tr>
+<tr>
+<td>1C.7</td>
+<td>HR assist tests</td>
+<td><code>tests/integration/</code></td>
+<td>US-7 acceptance</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> Phase 1B.5 (hire form fields exist). May ship after 1B if form UI lands first.</p>
+<hr />
+<h3 id="phase-2-first-conversation-loop">Phase 2 — First conversation loop</h3>
+<p><strong>Goal:</strong> Human posts in Pidgin-native chat → agent turn → stub LLM → <code>say</code> action → message in DB. <strong>Chat + diagnostics in admin UI.</strong></p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2.1</td>
+<td>Rooms + conversations</td>
+<td><code>src/pidgin/db/rooms.py</code></td>
+<td>Insert room, conversation, message</td>
+</tr>
+<tr>
+<td>2.2</td>
+<td>Pidgin-native connector (in-process)</td>
+<td><code>src/pidgin/connectors/pidgin_chat.py</code></td>
+<td>Human message → <code>inbound_events</code> (trigger <code>direct_address</code>)</td>
+</tr>
+<tr>
+<td>2.3</td>
+<td>LLM gateway interface + stub</td>
+<td><code>src/pidgin/llm/</code></td>
+<td>Fixed JSON tool-call response for <code>say</code></td>
+</tr>
+<tr>
+<td>2.4</td>
+<td>Turn executor (real)</td>
+<td><code>src/pidgin/runtime/executor.py</code></td>
+<td>Build prompt → invoke LLM → parse actions → gate each → execute</td>
+</tr>
+<tr>
+<td>2.5</td>
+<td>Action executors (minimal)</td>
+<td><code>src/pidgin/runtime/actions/</code></td>
+<td>Implement <code>say</code>, <code>read</code>, <code>remember</code>, <code>recall</code></td>
+</tr>
+<tr>
+<td>2.6</td>
+<td>Principal resolution</td>
+<td><code>src/pidgin/principals/</code></td>
+<td>Workspace member → trust label <code>internal-authenticated</code></td>
+</tr>
+<tr>
+<td>2.7</td>
+<td>Time injection</td>
+<td><code>src/pidgin/runtime/prompt.py</code></td>
+<td><code>now</code>, elapsed time, pending timers/watchers in system prompt</td>
+</tr>
+<tr>
+<td>2.8</td>
+<td><strong>Admin chat + turn drill-down</strong></td>
+<td><code>src/pidgin/api/</code></td>
+<td>Post message from admin; turn timeline shows LLM + gate steps</td>
+</tr>
+<tr>
+<td>2.9</td>
+<td>Conversation tests</td>
+<td><code>tests/integration/test_conversation.py</code></td>
+<td>Message in → agent reply out; verifiable in admin</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> Phase 1 (hired agent with handle + permissions).</p>
+<p><strong>Integrations:</strong> Phase 2I runs in parallel once 2.2–2.4 land. See <a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a>. Agent skill: <code>.cursor/skills/add-pidgin-connector/SKILL.md</code>.</p>
+<hr />
+<h3 id="phase-2i-integrations-platform-connectors">Phase 2I — Integrations platform + connectors</h3>
+<p><strong>Goal:</strong> Full-stack integrations — registry, OAuth + manual auth, Integrations UI, then external connectors in priority order. An agent without integrations is not shippable for product demos.</p>
+<p><strong>Spec:</strong> <a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a>. Product model: <a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2I.1</td>
+<td>Connector framework</td>
+<td><code>src/pidgin/connectors/base.py</code>, <code>resources.py</code>, <code>registry.py</code></td>
+<td><code>ConnectorProtocol</code>; URI parser; registry resolve</td>
+</tr>
+<tr>
+<td>2I.2</td>
+<td>Installations service + API</td>
+<td><code>services/integrations.py</code>, <code>api/routes/integrations.py</code></td>
+<td>CRUD <code>connector_installations</code>; catalog endpoint</td>
+</tr>
+<tr>
+<td>2I.3</td>
+<td>OAuth + manual auth</td>
+<td><code>api/routes/integrations.py</code>, per-type <code>oauth.py</code></td>
+<td>Start/callback OAuth; manual POST; masked GET</td>
+</tr>
+<tr>
+<td>2I.4</td>
+<td><strong>Integrations UI</strong></td>
+<td><code>src/frontend/pages/IntegrationsPage.tsx</code>, <code>Layout.tsx</code></td>
+<td><code>/{workspace}/settings/integrations</code>; connect/disconnect/health per type</td>
+</tr>
+<tr>
+<td>2I.5</td>
+<td>Webhook ingress router</td>
+<td><code>api/routes/hooks.py</code></td>
+<td>Verified webhook → <code>inbound_events</code></td>
+</tr>
+<tr>
+<td>2I.6</td>
+<td>Refactor <code>pidgin_chat</code></td>
+<td><code>connectors/pidgin_chat/</code>, <code>services/chat.py</code></td>
+<td>Chat uses connector egress; same UX</td>
+</tr>
+<tr>
+<td>2I.7</td>
+<td><strong>Slack</strong></td>
+<td><code>connectors/slack/</code></td>
+<td>OAuth + manual dev path; Events API ingress; <code>say</code>/<code>read</code>; UI card</td>
+</tr>
+<tr>
+<td>2I.8</td>
+<td><strong>Gmail</strong></td>
+<td><code>connectors/gmail/</code></td>
+<td>OAuth + manual dev path; inbound email; <code>read</code>/<code>draft</code>; UI card</td>
+</tr>
+<tr>
+<td>2I.9</td>
+<td><strong>Google Drive</strong></td>
+<td><code>connectors/google_drive/</code></td>
+<td>OAuth + service-account manual; <code>read</code>; UI card</td>
+</tr>
+<tr>
+<td>2I.10</td>
+<td><strong>Google Meet</strong></td>
+<td><code>connectors/google_meet/</code></td>
+<td>OAuth only; read calendar/Meet events; UI card</td>
+</tr>
+<tr>
+<td>2I.11</td>
+<td><strong>Zoom</strong></td>
+<td><code>connectors/zoom/</code></td>
+<td>OAuth + server-to-server manual; read meetings; UI card</td>
+</tr>
+<tr>
+<td>2I.12</td>
+<td>Connector tests</td>
+<td><code>tests/unit/connectors/</code>, <code>tests/integration/connectors/</code></td>
+<td>Each shipped type has unit + ingress integration test</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> Phase 2.2–2.4 (event loop + action dispatcher). External <code>execute</code>/send hard-depends Phase 3 approvals — read + ingress may ship earlier.</p>
+<p><strong>Build order (locked):</strong> <code>pidgin_chat</code> → Slack → Gmail → Drive → Google Meet → Zoom.</p>
+<hr />
+<h3 id="phase-3-approvals-pulse-slice">Phase 3 — Approvals + Pulse slice</h3>
+<p><strong>Goal:</strong> <code>execute</code> stages approval; human approves → turn resumes; operator asks "what happened today." <strong>Approval inbox + Pulse in admin UI.</strong></p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Primary files</th>
+<th>Done when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3.1</td>
+<td>Approval staging</td>
+<td><code>src/pidgin/runtime/actions/execute.py</code></td>
+<td><code>execute</code> → <code>pending_approvals</code> + suspend turn</td>
+</tr>
+<tr>
+<td>3.2</td>
+<td>Approval response trigger</td>
+<td><code>src/pidgin/runtime/</code></td>
+<td>Trigger #8 resumes turn with approval payload</td>
+</tr>
+<tr>
+<td>3.3</td>
+<td>Self-prompt timer</td>
+<td><code>src/pidgin/runtime/scheduler.py</code></td>
+<td><code>schedule_self</code> → row in timers table → fires event</td>
+</tr>
+<tr>
+<td>3.4</td>
+<td>Watcher (minimal)</td>
+<td><code>src/pidgin/runtime/watchers.py</code></td>
+<td>One watcher type (e.g. file or DB poll stub)</td>
+</tr>
+<tr>
+<td>3.5</td>
+<td>Pulse query</td>
+<td><code>src/pidgin/pulse/</code></td>
+<td>Query <code>agent_action_log</code> for today / this week summary</td>
+</tr>
+<tr>
+<td>3.6</td>
+<td><strong>Admin Pulse view</strong></td>
+<td><code>src/pidgin/api/</code></td>
+<td><code>/admin/.../pulse</code> curated summary + <code>/api/.../pulse</code></td>
+</tr>
+<tr>
+<td>3.7</td>
+<td>Approval tests</td>
+<td><code>tests/integration/test_approval.py</code></td>
+<td>Full stage → approve → resume loop via admin</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Depends on:</strong> Phase 2 (real turn executor + gate audit).</p>
+<hr />
+<h3 id="phase-4-mvp-product-surfaces-deferred">Phase 4 — MVP product surfaces (deferred)</h3>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Task</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4.1</td>
+<td>Interview/onboarding harness</td>
+<td>Needs <code>INTERVIEW_SPEC.md</code>; admin-driven scenarios</td>
+</tr>
+<tr>
+<td>4.2</td>
+<td>~~First external connector~~</td>
+<td>Moved to Phase 2I (<a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a>)</td>
+</tr>
+<tr>
+<td>4.3</td>
+<td>Real LLM gateway</td>
+<td>Anthropic/OpenAI; keys via env</td>
+</tr>
+<tr>
+<td>4.4</td>
+<td>End-user chat UI</td>
+<td>Separate from admin diagnostics shell</td>
+</tr>
+<tr>
+<td>4.5</td>
+<td>Company operator setup wizard</td>
+<td>Hierarchy recipe from marketplace</td>
+</tr>
+<tr>
+<td>4.6</td>
+<td>Debug export</td>
+<td><code>_debug/</code> folder per workspace settings</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dependency-graph">Dependency graph</h2>
+<pre><code class="language-mermaid">flowchart TD
+  P0[Phase 0 Foundation + Admin]
+  P1[Phase 1 Recipe + Hire]
+  P2[Phase 2 Conversation Loop]
+  P3[Phase 3 Approvals + Pulse]
+  P4[Phase 4 Product Surfaces]
+
+  P0 --&gt; P1
+  P1 --&gt; P1B[Phase 1B Hire wizard]
+  P1B --&gt; P1B2[Phase 1B2 Workspace templates]
+  P1B --&gt; P1B3[Phase 1B3 Post-hire edit]
+  P1B --&gt; P1C[Phase 1C HR assist]
+  P1B --&gt; P2
+  P2 --&gt; P2I[Phase 2I Integrations]
+  P2 --&gt; P3
+  P2I --&gt; P3
+  P3 --&gt; P4
+
+  RS[RECIPES_SPEC.md] -.-&gt; P1
+  CS[CONNECTORS_SPEC.md] -.-&gt; P2I
+  IS[INTERVIEW_SPEC.md] -.-&gt; P4
+</code></pre>
+<hr />
+<h2 id="project-layout-target">Project layout (target)</h2>
+<pre><code>pidgin/
+  pyproject.toml
+  migrations/
+    001_initial.sql
+    002_hire_customization.sql
+  recipes/
+    support-agent-v0.1.json
+  src/pidgin/
+    __init__.py
+    api/                   # FastAPI admin + product UI + diagnostics
+      app.py
+      routes/
+      templates/
+    services/              # operator commands (create, inject, run-once, hire, …)
+    types/
+    util/
+    workspace/
+    db/                    # connection, migrate, diagnostics queries
+    knowledge/
+    gate/
+    runtime/
+    recipes/               # Phase 1
+    hire/                  # Phase 1
+    templates/             # Phase 1B2 — role-templates/ file I/O
+    hr_assist/             # Phase 1C
+    audit/                 # Phase 1B3 — brief-edits, template-versions JSONL
+    llm/                   # Phase 2
+    connectors/            # Phase 2+
+    pulse/                 # Phase 3
+  tests/
+    unit/
+    integration/
+  specs/
+</code></pre>
+<hr />
+<h2 id="admin-api-reference-phase-0">Admin API reference (Phase 0)</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/health</code></td>
+<td>Server health</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/admin</code></td>
+<td>Workspace list + create form</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/admin/workspaces/{id}</code></td>
+<td>Workspace home — agents, rooms, hire</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/admin/workspaces/{id}/rooms/{room_id}/chat</code></td>
+<td>Chat with hired agent</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/admin/workspaces/{id}/debug</code></td>
+<td>Diagnostics dashboard</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/admin/workspaces/{id}/hire</code></td>
+<td>Hire Support Agent from bundled recipe</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/admin/workspaces/{id}/turns/{turn_id}</code></td>
+<td>Single-turn timeline (HTML)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/workspaces</code></td>
+<td>List workspaces</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/workspaces</code></td>
+<td>Create workspace</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/workspaces/{id}/unlock</code></td>
+<td>Store session password</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/workspaces/{id}/inject-event</code></td>
+<td>Queue test inbound event</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/api/workspaces/{id}/run-once</code></td>
+<td>Process pending events</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/workspaces/{id}/events</code></td>
+<td>Inbound event list</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/workspaces/{id}/turns</code></td>
+<td>Turn list</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/workspaces/{id}/turns/{turn_id}</code></td>
+<td>Turn timeline (JSON)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/api/workspaces/{id}/audit</code></td>
+<td>Raw audit log</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> §10.1 for the full diagnostics route map (agents, pulse filters — Phase 1+).</p>
+<hr />
+<h2 id="hire-ux-api-routes-phase-1b1c">Hire UX API routes (Phase 1B–1C)</h2>
+<p>Base path: <code>/api/workspaces/{workspace_id}</code> (authenticated operator session). HTML admin routes mirror these where noted in <a href="HIRE_UX.html">HIRE_UX.md</a>.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>Phase</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/role-templates</code></td>
+<td>1B</td>
+<td>List Pidgin bundled templates + workspace templates (manifest summary)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/role-templates/bundled/{recipe_id}</code></td>
+<td>1B</td>
+<td>Single bundled template with <code>default_job_requirements</code>, <code>default_ideal_candidate</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/role-templates/workspace/{slug}</code></td>
+<td>1B2</td>
+<td>Workspace template manifest + current version body</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/role-templates/workspace/{slug}/versions/{n}</code></td>
+<td>1B2</td>
+<td>Historical version body</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/role-templates/workspace</code></td>
+<td>1B2</td>
+<td>Create blank or duplicate template → new slug folder + <code>v1.md</code></td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/role-templates/workspace/{slug}</code></td>
+<td>1B2</td>
+<td>Save new version (<code>v{N+1}.md</code>) or update manifest name</td>
+</tr>
+<tr>
+<td>DELETE</td>
+<td><code>/role-templates/workspace/{slug}</code></td>
+<td>1B2</td>
+<td>Remove entire slug folder (with confirmation)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/hire</code></td>
+<td>1B</td>
+<td>Hire with <code>template_source</code>, <code>template_id</code>/<code>slug</code>, <code>customization</code>, identity fields</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/agents/{handle}/brief</code></td>
+<td>1B3</td>
+<td>Read <code>hire_customization_json</code></td>
+</tr>
+<tr>
+<td>PATCH</td>
+<td><code>/agents/{handle}/brief</code></td>
+<td>1B3</td>
+<td>Update customization + append brief-edit audit</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/agents/{handle}/create-template</code></td>
+<td>1B2</td>
+<td>Create workspace template from agent (US-10)</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/hr-assist/sessions</code></td>
+<td>1C</td>
+<td>Create session (<code>context_type</code>, <code>context_id</code>) → returns <code>session_id</code></td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/hr-assist/sessions/{session_id}</code></td>
+<td>1C</td>
+<td>Session meta + message list</td>
+</tr>
+<tr>
+<td>POST</td>
+<td><code>/hr-assist/sessions/{session_id}/messages</code></td>
+<td>1C</td>
+<td>Operator message → assist reply (+ optional <code>suggestion</code>)</td>
+</tr>
+<tr>
+<td>GET</td>
+<td><code>/hr-assist/sessions/{session_id}/messages</code></td>
+<td>1C</td>
+<td>Paginated transcript</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>POST /hire</code> body (illustrative):</strong></p>
+<pre><code class="language-json">{
+  &quot;template_source&quot;: &quot;bundled&quot;,
+  &quot;template_id&quot;: &quot;support-agent&quot;,
+  &quot;customization&quot;: {
+    &quot;job_requirements&quot;: { &quot;mission&quot;: &quot;…&quot;, &quot;responsibilities&quot;: [], &quot;out_of_scope&quot;: [] },
+    &quot;ideal_candidate&quot;: { &quot;tone&quot;: &quot;…&quot;, &quot;decision_framework&quot;: &quot;…&quot;, &quot;escalation_rules&quot;: &quot;…&quot; },
+    &quot;your_take&quot;: &quot;&quot;
+  },
+  &quot;display_name&quot;: &quot;Jane&quot;,
+  &quot;handle&quot;: &quot;jane&quot;,
+  &quot;manager_principal_id&quot;: &quot;01J...&quot;
+}
+</code></pre>
+<p>Workspace template hire: <code>"template_source": "workspace"</code>, <code>"slug": "support-lead"</code>, <code>"version": 2</code> (optional; default latest).</p>
+<hr />
+<h2 id="schema-quick-reference">Schema quick reference</h2>
+<p><strong>Workspace directory</strong> (<code>~/.pidgin/workspaces/&lt;workspace_id&gt;/</code>):</p>
+<pre><code>auth.json          # bcrypt hash only
+db.sqlite          # 26 tables (+ hire_customization_json via migration 002)
+memory/&lt;handle&gt;/journal.md
+docs/&lt;id&gt;.txt
+blobs/&lt;ab&gt;/&lt;cd&gt;/&lt;sha256&gt;
+role-templates/&lt;slug&gt;/manifest.json + v&lt;N&gt;.md
+hr-assist/sessions/&lt;id&gt;/meta.json + messages.jsonl
+audit/brief-edits/&lt;employee_id&gt;.jsonl
+audit/template-versions/&lt;slug&gt;.jsonl
+_debug/            # optional
+</code></pre>
+<p><strong>Key runtime tables</strong> (see <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> §2):</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>inbound_events</code></td>
+<td>Trigger queue; <code>processing_status</code>: pending → dispatching → done</td>
+</tr>
+<tr>
+<td><code>turns</code></td>
+<td>One agent turn per triggering event</td>
+</tr>
+<tr>
+<td><code>agent_action_log</code></td>
+<td>Append-only audit; gate outcome + policy decision per action</td>
+</tr>
+<tr>
+<td><code>ai_employees</code></td>
+<td>Hired agents</td>
+</tr>
+<tr>
+<td><code>ai_employee_recipe_snapshots</code></td>
+<td>Immutable recipe bundle at hire time</td>
+</tr>
+<tr>
+<td><code>pending_approvals</code></td>
+<td>Staged actions awaiting human (Phase 3)</td>
+</tr>
+<tr>
+<td><code>messages</code></td>
+<td>Chat messages (Phase 2)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="parallelization-guide-for-multiple-agents">Parallelization guide (for multiple agents)</h2>
+<p>After Phase 0 admin shell is green:</p>
+<table>
+<thead>
+<tr>
+<th>Track</th>
+<th>Owner focus</th>
+<th>Isolation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td>Real LLM gateway</td>
+<td><code>src/pidgin/llm/</code></td>
+</tr>
+<tr>
+<td>B</td>
+<td>Chat UX (live updates)</td>
+<td><code>src/pidgin/api/</code> templates + routes</td>
+</tr>
+<tr>
+<td>C</td>
+<td>Phase 0.5 repository helpers</td>
+<td><code>src/pidgin/db/</code> helpers</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Do not</strong> open a CLI or gate track for MVP.</p>
+<hr />
+<h2 id="open-decisions-tbd">Open decisions (TBD)</h2>
+<table>
+<thead>
+<tr>
+<th>Topic</th>
+<th>Options</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CLI</td>
+<td>Ship in MVP vs remove scaffold</td>
+<td><strong>Not in MVP</strong> — admin + API only</td>
+</tr>
+<tr>
+<td>End-user frontend</td>
+<td>React vs HTMX</td>
+<td>Defer; admin is HTMX/Jinja for now</td>
+</tr>
+<tr>
+<td>Session security</td>
+<td>Cookie vs header password</td>
+<td>Dev cookie; production needs hardening</td>
+</tr>
+<tr>
+<td>Integration build order</td>
+<td>Which connector first</td>
+<td><strong>Locked:</strong> Slack → Gmail → Drive → Meet → Zoom after <code>pidgin_chat</code> (<a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a>)</td>
+</tr>
+<tr>
+<td>Integration auth</td>
+<td>OAuth only vs manual only</td>
+<td><strong>Both</strong> — OAuth primary; manual dev/fallback per connector type in CONNECTORS_SPEC §3</td>
+</tr>
+<tr>
+<td>Integrations UI</td>
+<td>Admin-only vs full React</td>
+<td><strong>Full UI</strong> at <code>/{workspace}/settings/integrations</code> (Phase 2I.4)</td>
+</tr>
+<tr>
+<td>Memory cleaning</td>
+<td>Agent self-maintenance, summarize-and-replace, retention, manual trim, archive tiers</td>
+<td><strong>Required</strong> — mechanism TBD; see <a href="MEMORY_SPEC.html">MEMORY_SPEC.md</a></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="spec-cross-references">Spec cross-references</h2>
+<table>
+<thead>
+<tr>
+<th>Doc</th>
+<th>Use when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="index.html">README.md</a></td>
+<td>Spec index + locked decisions</td>
+</tr>
+<tr>
+<td><a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a></td>
+<td>Product vision, user flows, MVP scope</td>
+</tr>
+<tr>
+<td><a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a></td>
+<td>Triggers, actions, turn lifecycle, gate placement, diagnostics</td>
+</tr>
+<tr>
+<td><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a></td>
+<td>Table definitions, file layout</td>
+</tr>
+<tr>
+<td><a href="MEMORY_SPEC.html">MEMORY_SPEC.md</a></td>
+<td>Journal lifecycle, cleaning requirement, deferred options</td>
+</tr>
+<tr>
+<td><a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a></td>
+<td>Trust labels, invocation policy</td>
+</tr>
+<tr>
+<td><a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a></td>
+<td>Libraries, deliberate omissions</td>
+</tr>
+<tr>
+<td><a href="MVP_USER_STORIES.html">MVP_USER_STORIES.md</a></td>
+<td>Acceptance criteria US-1–US-11</td>
+</tr>
+<tr>
+<td><a href="HIRE_UX.html">HIRE_UX.md</a></td>
+<td>Hire wizard, templates, HR assist UX vocabulary</td>
+</tr>
+<tr>
+<td><a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a></td>
+<td>Bundled role recipe JSON schema</td>
+</tr>
+<tr>
+<td><a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a></td>
+<td>Connector contract, auth, API, UI, build order</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="suggested-first-tasks-for-the-next-agent">Suggested first tasks for the next agent</h2>
+<ol>
+<li><strong>Verify:</strong> <code>uv sync --extra dev --extra api &amp;&amp; uv run pytest -v</code></li>
+<li><strong>PID-7 (backend dev):</strong> <code>002_hire_customization.sql</code>, hire API + <code>hire_customization_json</code>, role-template file module, prompt merge §7.2</li>
+<li><strong>PID-8 (frontend dev):</strong> hire wizard UI against Phase 1B API routes</li>
+<li><strong>Recipes writer:</strong> add <code>default_job_requirements</code> / <code>default_ideal_candidate</code> to bundled JSON files per RECIPES_SPEC §2.1</li>
+</ol>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

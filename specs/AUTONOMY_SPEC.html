@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Autonomy — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Autonomy</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item active" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin Autonomy Spec</h1></header>
+
+<h2 id="summary">Summary</h2>
+<pre><code class="language-text">A hired agent runs the company without being switched on by hand. When it becomes
+active it wakes itself, reads the company context, turns its recipe's mission into a
+standing task backlog, and schedules its own recurring check-ins. From then on it is
+driven by its own timers, its task list, and periodic status reports to its supervisor
+— not by a human poking it. The operator sets direction and approves; the agent keeps
+itself busy.
+</code></pre>
+<blockquote>
+<p><strong>Scope:</strong> The layer that turns a <em>reactive</em> agent (acts only when addressed) into a
+<em>self-running</em> one (defines its own work, schedules itself, reports up). Covers
+activation bootstrap, recurring schedules, self-anchored timers, a wakeup budget, the
+task backlog, and the supervisor check-in loop.</p>
+<p><strong>Pairs with:</strong> <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> (triggers, actions,
+turn lifecycle, sense of time), <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> (the tables below
+already exist), <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a> (trust labels, the gate),
+<a href="AGENT_ONBOARDING.html">AGENT_ONBOARDING.md</a> (first-read of company canon),
+<a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a> (recipe fields).</p>
+<p><strong>Out of scope:</strong> Connector-side watcher delivery (trigger 5 plumbing), multi-agent
+org charts beyond a single manager edge, SLA/business-hours math (see
+<a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC §4.4</a>).</p>
+</blockquote>
+<hr />
+<h2 id="1-why-this-exists">1. Why this exists</h2>
+<p>Today the runtime spine is complete but one-directional. Every trigger becomes an
+<code>inbound_events</code> row and a background worker (<a href="../src/pidgin/runtime/worker.py">worker.py</a>)
+dispatches turns from that queue. The timer path works end to end: <code>schedule_self</code> →
+<code>agent_timers</code> → <code>fire_due_timers</code> → <code>inbound_events</code> → turn
+(<a href="../src/pidgin/runtime/scheduler.py">scheduler.py</a>,
+<a href="../src/pidgin/db/timers.py">timers.py</a>).</p>
+<p>But an agent only ever runs if a human speaks to it first, and a "schedule" lasts exactly
+one wakeup. Four things are missing for a company to run itself:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Gap</th>
+<th>Today</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Cold start</strong></td>
+<td>Every timer requires an <code>originating_turn_id</code>; nothing runs a turn on activation</td>
+<td>A freshly hired agent is inert until a human DMs it — manual activation</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Recurrence</strong></td>
+<td><code>agent_timers</code> goes <code>pending → fired</code> once; <code>schedule_self</code> takes only <code>delay_minutes</code></td>
+<td>"Every morning" must be re-armed each time and dies silently if one tick fails</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Backlog</strong></td>
+<td><code>tasks</code> table exists; <code>open_task</code>/<code>close</code> are in the enum but unimplemented and unexposed</td>
+<td>Agent can't hold what it's responsible for across turns</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Reporting up</strong></td>
+<td><code>manager_principal_id</code> exists; <code>escalate</code> unimplemented</td>
+<td>No "check with my supervisor weekly" mechanism</td>
+</tr>
+</tbody>
+</table>
+<p>This spec closes all four. The schema needs only additive columns — every table already
+exists.</p>
+<hr />
+<h2 id="2-the-model-in-one-picture">2. The model in one picture</h2>
+<pre><code class="language-mermaid">flowchart TD
+  H[Operator hires + activates agent] --&gt; A[status -&gt; active]
+  A --&gt;|runtime enqueues| B[Bootstrap wakeup&lt;br/&gt;self-anchored timer, fires now]
+  B --&gt; C[Bootstrap turn]
+  C --&gt; C1[Read company canon AGENT_ONBOARDING]
+  C --&gt; C2[Turn mission into open_task backlog]
+  C --&gt; C3[schedule_self recurring check-ins&lt;br/&gt;from recipe cadence guidance]
+  C --&gt; C4[schedule_self recurring supervisor report]
+  C3 --&gt;|daily/weekly| D[Recurring wakeup]
+  C4 --&gt;|weekly| E[Report wakeup]
+  D --&gt; F[Work turn: advance tasks, watch, draft, escalate]
+  E --&gt; G[Status report -&gt; manager via post/escalate]
+  F --&gt;|re-arm| D
+  G --&gt;|re-arm| E
+  F -.-&gt;|needs sign-off| I[request_approval -&gt; operator]
+</code></pre>
+<p>The keystone is the <strong>bootstrap wakeup</strong>: it removes manual activation and lets the agent
+set up <em>its own</em> cadence on day one, rather than the runtime hard-coding it.</p>
+<hr />
+<h2 id="3-self-anchored-timers-closes-gap-1-enables-everything">3. Self-anchored timers (closes gap 1, enables everything)</h2>
+<p>Today <code>agent_timers.originating_turn_id</code> is <code>NOT NULL</code> and <code>fire_due_timers</code> copies the
+origin conversation onto the fired event so a reply lands where it was requested. A
+self-running agent needs timers that belong to <em>no</em> conversation — the agent's own
+calendar, not a follow-up to someone.</p>
+<p><strong>Change:</strong> make <code>originating_turn_id</code> nullable. A timer with a null origin is
+<strong>self-anchored</strong>: when it fires, the resulting turn has no conversation to <code>say</code> into, so
+the agent must use <code>post</code>/<code>escalate</code>/<code>open_task</code> to produce visible effects (the egress
+already falls back to <code>NullEgress</code> when there's no <code>conversation_id</code> —
+<a href="../src/pidgin/runtime/actions/__init__.py">actions/<strong>init</strong>.py</a>).</p>
+<p><strong>Trust label on self-anchored timers:</strong></p>
+<ul>
+<li><strong>Bootstrap &amp; runtime-armed timers</strong> → <code>internal-authenticated</code>. They originate from the
+  operator's act of activating the agent, on the agent's own behalf. This is the only place
+  the runtime mints trust without an upstream event; it is safe because it carries no
+  external content.</li>
+<li><strong>Agent-armed recurring timers</strong> → inherit the trust label of the turn that called
+  <code>schedule_self</code>, exactly as today (<a href="SECURITY_SPEC.html">SECURITY_SPEC §10</a>, runtime spec
+  §6.1). A timer set inside an <code>untrusted-content</code> turn stays untrusted forever.</li>
+</ul>
+<hr />
+<h2 id="4-activation-bootstrap-closes-gap-1">4. Activation bootstrap (closes gap 1)</h2>
+<p>When an agent transitions to <code>active</code> (<code>transition_employee_status</code> in
+<a href="../src/pidgin/db/employees.py">employees.py</a>), the runtime enqueues a <strong>bootstrap timer</strong>:
+a self-anchored timer scheduled at <code>now</code>, trust <code>internal-authenticated</code>, with a fixed
+<code>reason</code> of kind <code>bootstrap</code>. It fires on the next worker tick like any other timer.</p>
+<p>The bootstrap turn's injected message instructs the agent to:</p>
+<ol>
+<li><strong>Read company canon first</strong> (<a href="AGENT_ONBOARDING.html">AGENT_ONBOARDING.md</a> §2) and cache
+   the role-relevant parts via <code>remember</code>.</li>
+<li><strong>Decompose its mission into tasks</strong> — read its recipe <code>mission</code> /
+   <code>responsibilities</code> and <code>open_task</code> one durable task per standing responsibility.</li>
+<li><strong>Schedule its own recurring check-ins</strong> from the recipe's cadence guidance (§8), via
+   recurring <code>schedule_self</code>.</li>
+<li><strong>Schedule a recurring status report</strong> to its supervisor (§9).</li>
+<li>Optionally <code>escalate</code> to the operator any blocking gap (missing connector, unclear
+   scope) before going quiet.</li>
+</ol>
+<p><strong>Idempotency.</strong> Bootstrap must run <strong>once per activation, not once per <code>active</code> write</strong>.
+Track it with an <code>ai_employees.bootstrapped_at</code> marker (additive column):
+- Null → bootstrap timer is enqueued on the transition to <code>active</code>; stamp on completion.
+- Re-activating from <code>paused</code> does <strong>not</strong> re-bootstrap (the backlog and timers survive);
+  it instead enqueues a lighter <strong>resume</strong> wakeup ("you were paused; here's your backlog —
+  re-arm anything that expired").</p>
+<p>This mirrors the onboarding "read-once-then-cache" lifecycle and the spec's open item
+<em>"first-read bootstrap — runtime ensures a new agent's first action reads the onboarding
+doc."</em> Bootstrap is that hook.</p>
+<blockquote>
+<p><strong>Trigger vocabulary.</strong> Bootstrap reuses <strong>trigger 4 (timer)</strong> — it is just the agent's
+first self-anchored timer — so the "8 triggers, nothing else starts a turn" invariant in
+<a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC §2</a> holds. The <code>bootstrap</code> kind lives in the
+timer's payload, not as a 9th trigger type.</p>
+</blockquote>
+<hr />
+<h2 id="5-recurring-schedules-closes-gap-2">5. Recurring schedules (closes gap 2)</h2>
+<p><code>schedule_self</code> gains an optional recurrence; cadence is the <strong>agent's</strong> choice, guided by
+the recipe (§8), per the product decision.</p>
+<p><strong><code>schedule_self</code> params (extended):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Param</th>
+<th>Today</th>
+<th>New</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>delay_minutes</code></td>
+<td>required</td>
+<td>optional (one-shot, unchanged)</td>
+</tr>
+<tr>
+<td><code>reason</code></td>
+<td>required</td>
+<td>required</td>
+</tr>
+<tr>
+<td><code>recurrence</code></td>
+<td>—</td>
+<td>optional: <code>{ "kind": "daily"|"weekly"|"interval", ... }</code></td>
+</tr>
+<tr>
+<td><code>at_local_time</code></td>
+<td>—</td>
+<td>optional <code>"HH:MM"</code> for daily/weekly anchoring</td>
+</tr>
+</tbody>
+</table>
+<p><code>recurrence</code> shapes (RRULE-lite — deliberately small, per runtime spec §4.4's "no full
+cron"):</p>
+<pre><code class="language-json">{ &quot;kind&quot;: &quot;daily&quot;,    &quot;at_local_time&quot;: &quot;09:00&quot; }
+{ &quot;kind&quot;: &quot;weekly&quot;,   &quot;weekday&quot;: &quot;mon&quot;, &quot;at_local_time&quot;: &quot;08:30&quot; }
+{ &quot;kind&quot;: &quot;interval&quot;, &quot;every_minutes&quot;: 240 }
+</code></pre>
+<p><strong>Schema (additive on <code>agent_timers</code>):</strong> <code>recurrence_json TEXT NULL</code>, <code>next_run_at TEXT
+NULL</code>, and a <code>kind TEXT NOT NULL DEFAULT 'oneshot'</code> discriminator
+(<code>oneshot</code>|<code>recurring</code>|<code>bootstrap</code>).</p>
+<p><strong>Re-arm semantics.</strong> In <code>fire_due_timers</code>, after a timer fires:
+- <code>oneshot</code>/<code>bootstrap</code> → mark <code>fired</code> (terminal, as today).
+- <code>recurring</code> → compute the next occurrence from <code>recurrence_json</code>, set <code>scheduled_at =
+  next_run_at</code>, keep <code>status = 'pending'</code>. A missed window advances to the <em>next future</em>
+  occurrence (no thundering catch-up of every skipped tick).</p>
+<p><strong>Cancellation</strong> stays gated like any action (<a href="AGENT_RUNTIME_SPEC.html">runtime spec §6.1.3</a>);
+a <code>cancel_schedule(timer_id)</code> action lets an agent retire a cadence it no longer needs.</p>
+<hr />
+<h2 id="6-wakeup-budget-safety-for-self-running">6. Wakeup budget (safety for self-running)</h2>
+<p>Self-running + recurrence + bootstrap means agents now wake without a human in the loop —
+so a runaway recipe or an injection-induced loop must be capped. Enforce the runtime spec's
+<a href="AGENT_RUNTIME_SPEC.html">Open Decision 4</a> defaults:</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Default</th>
+<th>Enforced in</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_pending_timers</code></td>
+<td>50</td>
+<td><code>schedule_self</code> — refuse beyond cap</td>
+</tr>
+<tr>
+<td><code>max_wakeups_per_day</code></td>
+<td>100</td>
+<td><code>fire_due_timers</code> — count timer-fired turns per agent per UTC day; over cap → defer + one <code>escalate</code> to the operator, don't silently drop</td>
+</tr>
+</tbody>
+</table>
+<p>Both are recipe-overridable (<code>autonomy.limits</code> in §8). Crossing a cap is an <strong>audited</strong>
+event, surfaced in diagnostics — not a silent stall.</p>
+<hr />
+<h2 id="7-task-backlog-closes-gap-3">7. Task backlog (closes gap 3)</h2>
+<p>The <code>tasks</code> table and <code>tasks_status_log</code> already exist with <code>owner_principal_id</code>,
+<code>current_status</code> (<code>open</code>/<code>in_progress</code>/<code>blocked</code>/<code>done</code>/<code>cancelled</code>), <code>outcome</code>, <code>due_at</code>,
+and <code>source_turn_id</code>. Two actions in the enum just need wiring:</p>
+<ul>
+<li><strong><code>open_task</code></strong> → insert a <code>tasks</code> row owned by the agent's principal, linked to the
+  current turn. Always allowed (runtime spec §3).</li>
+<li><strong><code>close</code></strong> → transition a task to <code>done</code>/<code>cancelled</code> with an <code>outcome</code>. Always allowed.</li>
+<li>(Status moves <code>open → in_progress → blocked</code> use the same close/update path.)</li>
+</ul>
+<p><strong>Backlog injection.</strong> Each turn injects the agent's open tasks alongside its pending
+timers and watchers — the "My open tasks" block, extending the sense-of-time injection of
+<a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC §4.3</a> (currently <code>prompt.py</code> injects only
+<code>now</code>). This is what lets a recurring "work" wakeup pick up where the last one left off
+instead of re-deriving its job:</p>
+<pre><code class="language-text">My open tasks:
+  [in_progress] Draft April newsletter        (due Fri, opened 3 days ago)
+  [blocked]     Q2 ad budget — waiting on operator approval
+  [open]        Refresh competitor scan
+</code></pre>
+<p>A standing responsibility = a long-lived task; a recurring timer = the heartbeat that says
+"go advance these now."</p>
+<hr />
+<h2 id="8-cadence-from-recipe-guidance-the-agent-picks">8. Cadence from recipe guidance (the agent picks)</h2>
+<p>Recipes gain an optional <strong><code>autonomy</code></strong> block. It is <em>guidance in natural language plus
+soft defaults</em> — the bootstrap turn reads it and decides its actual schedule, rather than
+the runtime arming fixed cron jobs. This keeps "I don't want to activate them manually"
+true at the cadence level too: the agent owns its calendar.</p>
+<pre><code class="language-json">&quot;autonomy&quot;: {
+  &quot;cadence_guidance&quot;: [
+    &quot;Review the content pipeline and any in-flight campaigns each morning.&quot;,
+    &quot;Scan competitor activity weekly.&quot;,
+    &quot;Send the operator a short status report every Friday.&quot;
+  ],
+  &quot;supervisor_report&quot;: { &quot;cadence&quot;: &quot;weekly&quot;, &quot;weekday&quot;: &quot;fri&quot; },
+  &quot;limits&quot;: { &quot;max_wakeups_per_day&quot;: 60 }
+}
+</code></pre>
+<ul>
+<li><code>cadence_guidance</code> → injected into the bootstrap prompt; the agent converts each line
+  into <code>open_task</code> + recurring <code>schedule_self</code> as it sees fit.</li>
+<li><code>supervisor_report</code> → seeds §9; the agent may tune timing but should not drop it.</li>
+<li><code>limits</code> → overrides §6 defaults.</li>
+</ul>
+<p>Absent an <code>autonomy</code> block, the bootstrap prompt falls back to a generic instruction
+("establish a daily review of your responsibilities and a weekly report to your
+supervisor"), so every agent still self-runs.</p>
+<hr />
+<h2 id="9-supervisor-check-in-loop-closes-gap-4">9. Supervisor check-in loop (closes gap 4)</h2>
+<p>Every agent has a <code>manager_principal_id</code> (its human owner by default, or another agent's
+principal). Autonomy adds a <strong>standing reporting obligation</strong>:</p>
+<ol>
+<li>During bootstrap the agent schedules a <strong>recurring report timer</strong> (from
+   <code>autonomy.supervisor_report</code>, default weekly).</li>
+<li>On fire, the agent assembles a report from <code>recall</code> + its open <code>tasks</code> (what shipped,
+   what's in flight, what's blocked, what it needs a decision on) and sends it <strong>up</strong> via:
+   - <strong><code>escalate</code></strong> when it needs a decision or is blocked — hands work to the
+     owner/manager with context (runtime spec action 13), routed to that principal.
+   - <strong><code>post</code></strong> to the manager's channel/DM for an informational digest needing no action.</li>
+<li>Anything requiring sign-off remains a <strong><code>request_approval</code></strong> to the operator — the
+   report surfaces it, the approval gate decides it (<a href="AGENT_RUNTIME_SPEC.html">runtime spec §8</a>).</li>
+</ol>
+<p><strong><code>escalate</code> implementation:</strong> resolve <code>manager_principal_id</code> → that principal's
+DM/conversation, write the handoff with full context (originating task, the tradeoff, the
+recommendation), and link the source task. It is the mirror of <code>delegate</code> (down) — same
+authority-chain rules (<a href="SECURITY_SPEC.html">SECURITY_SPEC §10</a>): escalation does not launder
+trust.</p>
+<p>This gives a manager (human <em>or</em> a lead agent) a real org: leads get periodic reports from
+reports and can <code>delegate</code> back down, all on the same primitives.</p>
+<hr />
+<h2 id="10-build-order">10. Build order</h2>
+<p>Each slice is shippable and observable on its own.</p>
+<table>
+<thead>
+<tr>
+<th>Slice</th>
+<th>Delivers</th>
+<th>Touches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A — Self-anchored timers</strong></td>
+<td>Timers with no conversation; trust rules</td>
+<td>migration (nullable <code>originating_turn_id</code>), <code>timers.py</code>, <code>fire_due_timers</code></td>
+</tr>
+<tr>
+<td><strong>B — Activation bootstrap</strong></td>
+<td>Agents wake themselves on activate; first-read; idempotent marker</td>
+<td><code>bootstrapped_at</code> column, hook in <code>transition_employee_status</code>, bootstrap prompt</td>
+</tr>
+<tr>
+<td><strong>C — Recurring schedules</strong></td>
+<td>Daily/weekly/interval that survive missed ticks</td>
+<td><code>recurrence_json</code>/<code>next_run_at</code>/<code>kind</code> columns, re-arm in <code>fire_due_timers</code>, extend <code>schedule_self</code> + tool def</td>
+</tr>
+<tr>
+<td><strong>D — Wakeup budget</strong></td>
+<td>Caps + audited cap-crossing</td>
+<td>counters in <code>schedule_self</code> / <code>fire_due_timers</code>, recipe <code>limits</code></td>
+</tr>
+<tr>
+<td><strong>E — Task backlog</strong></td>
+<td><code>open_task</code>/<code>close</code> wired + injected into prompt</td>
+<td><code>execute_action</code>, tool defs, <code>prompt.py</code> injection, <code>tasks</code> reads</td>
+</tr>
+<tr>
+<td><strong>F — Supervisor loop</strong></td>
+<td><code>escalate</code> wired + recurring report pattern</td>
+<td><code>execute_action</code> (<code>escalate</code>), bootstrap seeds report timer, recipe <code>autonomy</code> block</td>
+</tr>
+</tbody>
+</table>
+<p>A→C alone make agents self-running; E and F make them <em>manageable</em> (a backlog you can see,
+reports you receive). Recipes (<code>marketing-agent</code>, <code>support-agent</code>, …) get an <code>autonomy</code>
+block as part of F.</p>
+<hr />
+<h2 id="11-safety-summary">11. Safety summary</h2>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runaway self-prompting</td>
+<td>§6 budget; audited cap-crossing; cap on pending timers</td>
+</tr>
+<tr>
+<td>Trust escalation via timers</td>
+<td>§3 — agent-armed timers inherit trust; only runtime-armed bootstrap mints <code>internal-authenticated</code>, and it carries no external content</td>
+</tr>
+<tr>
+<td>Injection-driven autonomy</td>
+<td>Gate unchanged (<a href="AGENT_RUNTIME_SPEC.html">runtime spec §8</a>); a <code>untrusted-content</code> turn can't originate <code>post</code>/<code>execute</code>; its self-prompts stay untrusted</td>
+</tr>
+<tr>
+<td>Double bootstrap</td>
+<td>§4 <code>bootstrapped_at</code> marker; pause→active resumes, doesn't re-bootstrap</td>
+</tr>
+<tr>
+<td>Silent failure</td>
+<td>Every cap, refusal, and missed cadence is an <code>agent_action_log</code> row → diagnostics; no silent drop</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="12-open-decisions">12. Open decisions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Recurrence expressivity — RRULE-lite (§5) vs. full cron strings</td>
+<td>Lean RRULE-lite for MVP; cron later if needed</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Timezone for <code>at_local_time</code> — workspace tz vs. operator tz</td>
+<td>TBD; default workspace setting, fall back to UTC</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Report transport when manager is another agent — <code>post</code> to a DM conversation vs. <code>delegate</code>-style event</td>
+<td>Lean <code>post</code>; revisit when lead-agent orgs are real</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Does bootstrap <em>gate</em> on company-canon existence, or proceed and flag the gap?</td>
+<td>Lean proceed + <code>escalate</code> the gap, per AGENT_ONBOARDING open decision 4</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Catch-up policy for long-paused recurring timers</td>
+<td>§5 says skip to next future occurrence; confirm no digest-of-missed needed</td>
+</tr>
+</tbody>
+</table>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

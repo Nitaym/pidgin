@@ -1,0 +1,1950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Schema</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item active" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin Schema Spec</h1></header>
+
+<h2 id="summary">Summary</h2>
+<pre><code class="language-text">Each Pidgin workspace is one SQLite file plus companion text files on disk. The schema is 26 tables grouped into 9 domains. Agent memory and document text live in files, not in the DB — the DB holds structure, pointers, and the audit trail.
+
+For MVP the DB is plain SQLite. Each workspace has its own password, supplied by the caller at open time (Pidgin does not store or manage passwords). Full DB encryption and stronger secret injection (e.g. K8s secrets) are post-MVP.
+</code></pre>
+<p>The short product line:</p>
+<pre><code class="language-text">One file per workspace. One password per file (yours to keep). Twenty-six tables for structure; text files for memory.
+</code></pre>
+<blockquote>
+<p><strong>Scope:</strong> The per-workspace storage schema for the Pidgin runtime. Defines tables, columns, indexes, the append-only / mutable distinction, the storage and access model, and the conventions every table follows. Pairs with <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a>, which defines how this state is produced and consumed.</p>
+<p><strong>Out of scope:</strong> The recipe marketplace's own schema (separate app), workspace-level config files outside any DB, key management protocols (deferred to <code>SECURITY_PROTOCOLS_SPEC.md</code>), full DB encryption (deferred to post-MVP).</p>
+</blockquote>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-purpose">Purpose</a></li>
+<li><a href="#2-all-tables-at-a-glance">All Tables at a Glance</a></li>
+<li><a href="#3-conventions">Conventions</a></li>
+<li><a href="#4-storage-and-workspace-access">Storage and Workspace Access</a></li>
+<li><a href="#5-group-1--tenant-and-schema-infrastructure">Group 1 — Tenant and Schema Infrastructure</a></li>
+<li><a href="#6-group-2--identity-and-access">Group 2 — Identity and Access</a></li>
+<li><a href="#7-group-3--ai-employees">Group 3 — AI Employees</a></li>
+<li><a href="#8-group-4--channels-and-conversations">Group 4 — Channels and Conversations</a></li>
+<li><a href="#9-group-5--the-trigger-plane">Group 5 — The Trigger Plane</a></li>
+<li><a href="#10-group-6--turns-and-model-use">Group 6 — Turns and Model Use</a></li>
+<li><a href="#11-group-7--work-in-flight">Group 7 — Work in Flight</a></li>
+<li><a href="#12-group-8--knowledge">Group 8 — Knowledge</a></li>
+<li><a href="#13-group-9--the-action-record">Group 9 — The Action Record</a></li>
+<li><a href="#14-caches-and-frozen-at-write-fields">Caches and Frozen-at-Write Fields</a></li>
+<li><a href="#15-schema-migrations">Schema Migrations</a></li>
+<li><a href="#16-open-decisions">Open Decisions</a></li>
+</ol>
+<hr />
+<h2 id="1-purpose">1. Purpose</h2>
+<p>The runtime defined in <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> is stateless across restarts. <strong>Structured operational state</strong> lives in the DB; <strong>long text</strong> (agent memory, document bodies) lives in companion files on disk.</p>
+<p><strong>In the DB:</strong></p>
+<ul>
+<li>Who works here (principals, AI employees)</li>
+<li>What they're allowed to do (recipe snapshots, permission profiles)</li>
+<li>What's happened (messages, events, turns, model calls, actions, status changes)</li>
+<li>What's in flight (timers, watchers, pending approvals, intake items, tasks)</li>
+<li>Catalog of ingested documents (metadata + file paths, not full text)</li>
+<li>The audit trail (every gate decision)</li>
+</ul>
+<p><strong>On disk (per workspace directory):</strong></p>
+<ul>
+<li>Agent memory journals (<code>memory/&lt;agent_handle&gt;/journal.md</code>)</li>
+<li>Extracted document text (<code>docs/&lt;document_id&gt;.txt</code>)</li>
+<li>Original blobs (<code>blobs/...</code>)</li>
+</ul>
+<p>Anything that could be computed from these sources is not stored as state. Caches are allowed and explicitly marked. Frozen-at-write fields (audit immutability) are explicitly marked.</p>
+<hr />
+<h2 id="2-all-tables-at-a-glance">2. All Tables at a Glance</h2>
+<p>The schema has <strong>26 tables</strong> across 9 groups, plus <strong>file-based knowledge</strong> (not tables). Each table is one of:</p>
+<ul>
+<li><strong>(A) Append-only</strong> — only <code>INSERT</code>; no <code>UPDATE</code> or <code>DELETE</code> after a row is written.</li>
+<li><strong>(M) Mutable</strong> — rows can be updated. Status lifecycles are paired with <code>*_status_log</code> tables.</li>
+</ul>
+<p>Full details (columns, indexes, constraints, lifecycle notes) for each table are in sections 5 through 13. Conventions that apply to every table are in §3. The storage and access model is in §4.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Table</th>
+<th>Type</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Group 1 — Tenant and Schema Infrastructure</strong> (§5)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>1</td>
+<td><code>workspace</code></td>
+<td>M</td>
+<td>Single-row settings for this workspace</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>schema_migrations</code></td>
+<td>A</td>
+<td>Applied migration ledger</td>
+</tr>
+<tr>
+<td><strong>Group 2 — Identity and Access</strong> (§6)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>principals</code></td>
+<td>M</td>
+<td>Directory of humans, AI employees, and allowlisted externals</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>connector_installations</code></td>
+<td>M</td>
+<td>Per-workspace integration configs and credentials</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>document_access_grants</code></td>
+<td>M</td>
+<td>Which AI employees can read which documents</td>
+</tr>
+<tr>
+<td><strong>Group 3 — AI Employees</strong> (§7)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>ai_employees</code></td>
+<td>M</td>
+<td>Instantiated AI employees with cached <code>current_status</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>ai_employees_status_log</code></td>
+<td>A</td>
+<td>Lifecycle transitions per AI employee</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>ai_employee_recipe_snapshots</code></td>
+<td>A</td>
+<td>Immutable recipe bundles snapshotted at hire time</td>
+</tr>
+<tr>
+<td><strong>Group 4 — Channels and Conversations</strong> (§8)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>rooms</code></td>
+<td>M</td>
+<td>Channels and rooms (Slack channels, internal rooms, DMs, email threads)</td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>room_members</code></td>
+<td>M</td>
+<td>Membership of rooms (humans + agents)</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>conversations</code></td>
+<td>M</td>
+<td>Threads — DMs, room threads, email threads, ticket threads</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>messages</code></td>
+<td>A</td>
+<td>Every utterance in every conversation (sender display name frozen-at-write)</td>
+</tr>
+<tr>
+<td><strong>Group 5 — The Trigger Plane</strong> (§9)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>13</td>
+<td><code>inbound_events</code></td>
+<td>A*</td>
+<td>The durable inbound queue — one row per trigger firing</td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>agent_timers</code></td>
+<td>M</td>
+<td>Pending self-prompts and recurring schedules</td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>agent_watchers</code></td>
+<td>M</td>
+<td>Subscriptions to connector resources</td>
+</tr>
+<tr>
+<td><strong>Group 6 — Turns and Model Use</strong> (§10)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>turns</code></td>
+<td>M</td>
+<td>Anchor for <code>run_id</code> with cached <code>current_status</code></td>
+</tr>
+<tr>
+<td>17</td>
+<td><code>turns_status_log</code></td>
+<td>A</td>
+<td>Status transitions per turn</td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>model_invocations</code></td>
+<td>A</td>
+<td>Per-LLM-call record (cost, tokens, latency, raw I/O)</td>
+</tr>
+<tr>
+<td><strong>Group 7 — Work in Flight</strong> (§11)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>tasks</code></td>
+<td>M</td>
+<td>Structured work items with cached <code>current_status</code></td>
+</tr>
+<tr>
+<td>20</td>
+<td><code>tasks_status_log</code></td>
+<td>A</td>
+<td>Status transitions per task</td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>pending_approvals</code></td>
+<td>M</td>
+<td>Actions staged for owner approval</td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>pending_approvals_status_log</code></td>
+<td>A</td>
+<td>Status transitions per approval</td>
+</tr>
+<tr>
+<td>23</td>
+<td><code>external_intake_items</code></td>
+<td>M</td>
+<td>External-verified requests awaiting commander adoption</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>quarantined_items</code></td>
+<td>M</td>
+<td>Untrusted / unverified items flagged for owner review</td>
+</tr>
+<tr>
+<td><strong>Group 8 — Knowledge</strong> (§12)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>ingested_documents</code></td>
+<td>M</td>
+<td>Catalog of ingested documents (metadata + paths to text files on disk)</td>
+</tr>
+<tr>
+<td><strong>Group 9 — The Action Record</strong> (§13)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>26</td>
+<td><code>agent_action_log</code></td>
+<td>A</td>
+<td>Single source of truth for every gated action (frozen-at-write attribution)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>File-based (not tables, MVP):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>memory/&lt;agent_handle&gt;/journal.md</code></td>
+<td>Per-agent append-only memory journal (<code>remember</code> / <code>recall</code>)</td>
+</tr>
+<tr>
+<td><code>docs/&lt;document_id&gt;.txt</code></td>
+<td>Extracted text for an ingested document</td>
+</tr>
+<tr>
+<td><code>blobs/&lt;ab&gt;/&lt;cd&gt;/&lt;sha256&gt;</code></td>
+<td>Original uploaded/ingested files</td>
+</tr>
+<tr>
+<td><code>role-templates/&lt;slug&gt;/manifest.json</code></td>
+<td>Workspace role template metadata (see §4.1.1)</td>
+</tr>
+<tr>
+<td><code>role-templates/&lt;slug&gt;/v&lt;N&gt;.md</code></td>
+<td>Versioned role brief body (Markdown + YAML frontmatter)</td>
+</tr>
+<tr>
+<td><code>hr-assist/sessions/&lt;session_id&gt;/meta.json</code></td>
+<td>HR assist session metadata (see §4.1.2)</td>
+</tr>
+<tr>
+<td><code>hr-assist/sessions/&lt;session_id&gt;/messages.jsonl</code></td>
+<td>HR assist chat transcript (append-only JSONL)</td>
+</tr>
+<tr>
+<td><code>audit/brief-edits/&lt;employee_id&gt;.jsonl</code></td>
+<td>Post-hire brief edit audit trail (see §4.1.3)</td>
+</tr>
+<tr>
+<td><code>audit/template-versions/&lt;slug&gt;.jsonl</code></td>
+<td>Workspace template version-create audit trail</td>
+</tr>
+</tbody>
+</table>
+<p>* <code>inbound_events</code> is append-only for payload and trigger metadata; <code>processing_status</code> and three companion operational fields are mutable. This is the one declared exception to strict append-only — see §9 for the rationale.</p>
+<p><strong>Deferred post-MVP (not in MVP schema):</strong> vector embeddings (<code>sqlite-vec</code>), <code>document_chunks</code>, DB-backed <code>ai_employee_memory_entries</code>. Search improves on the file layer first (grep, FTS, then vectors if needed).</p>
+<h3 id="21-reading-the-schema">2.1 Reading the schema</h3>
+<ul>
+<li><strong>Start with Group 9 (<code>agent_action_log</code>)</strong> to understand the audit surface — most other tables exist to support it.</li>
+<li><strong>Then Group 5 and Group 6</strong> to see how triggers become turns become actions.</li>
+<li><strong>Then Groups 3, 7, 8</strong> for the entities triggers and turns operate on.</li>
+<li><strong>Groups 1, 2, 4</strong> are infrastructure that supports the rest.</li>
+</ul>
+<h3 id="22-append-only-vs-mutable-map">2.2 Append-only vs. mutable map</h3>
+<p>For implementers: this is the list to wire into the repository layer's allow-list of operations.</p>
+<table>
+<thead>
+<tr>
+<th>Append-only (insert only)</th>
+<th>Mutable (insert + update)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>schema_migrations</code></td>
+<td><code>workspace</code></td>
+</tr>
+<tr>
+<td><code>ai_employees_status_log</code></td>
+<td><code>principals</code></td>
+</tr>
+<tr>
+<td><code>ai_employee_recipe_snapshots</code></td>
+<td><code>connector_installations</code></td>
+</tr>
+<tr>
+<td><code>messages</code></td>
+<td><code>document_access_grants</code></td>
+</tr>
+<tr>
+<td><code>turns_status_log</code></td>
+<td><code>ai_employees</code></td>
+</tr>
+<tr>
+<td><code>model_invocations</code></td>
+<td><code>rooms</code></td>
+</tr>
+<tr>
+<td><code>tasks_status_log</code></td>
+<td><code>room_members</code></td>
+</tr>
+<tr>
+<td><code>pending_approvals_status_log</code></td>
+<td><code>conversations</code></td>
+</tr>
+<tr>
+<td><code>agent_action_log</code></td>
+<td><code>inbound_events</code> (partial)</td>
+</tr>
+<tr>
+<td></td>
+<td><code>agent_timers</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>agent_watchers</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>turns</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>tasks</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>pending_approvals</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>external_intake_items</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>quarantined_items</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>ingested_documents</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-conventions">3. Conventions</h2>
+<h3 id="31-naming">3.1 Naming</h3>
+<ul>
+<li><strong>Plural snake_case</strong> for table names: <code>agent_timers</code>, not <code>agent_timer</code> or <code>agentTimers</code>.</li>
+<li><strong>Prefix by subject domain</strong> when the bare noun is ambiguous: <code>ai_employee_*</code>, <code>agent_*</code>, <code>connector_*</code>, <code>document_*</code>.</li>
+<li><strong><code>_log</code> suffix</strong> for append-only event/status logs: <code>ai_employees_status_log</code>, <code>tasks_status_log</code>.</li>
+<li><strong>Match spec vocabulary exactly</strong> where defined elsewhere: <code>principals</code> (per SECURITY_SPEC), <code>ai_employees</code> (per PRODUCT_SPEC), <code>agent_action_log</code> (per INTEGRATION_WOFKLOW + SECURITY_SPEC).</li>
+</ul>
+<h3 id="32-primary-keys">3.2 Primary keys</h3>
+<ul>
+<li><strong>ULIDs everywhere.</strong> Stored as <code>TEXT</code> (26 chars). Globally unique, lexicographically sortable by creation time, no integer-PK leakage, safe for any future merges or migrations.</li>
+<li>No auto-increment integer PKs except where measured performance demands it (none in MVP).</li>
+</ul>
+<h3 id="33-timestamps">3.3 Timestamps</h3>
+<ul>
+<li><strong>All timestamps UTC, ISO 8601 with millisecond precision, stored as <code>TEXT</code>.</strong></li>
+<li>Example: <code>2026-05-29T18:23:04.123Z</code>.</li>
+<li>Switches cleanly to PostgreSQL <code>TIMESTAMPTZ</code> later.</li>
+<li>Every table has <code>created_at</code>. Mutable tables also have <code>updated_at</code>. Append-only tables do not.</li>
+</ul>
+<h3 id="34-append-only-vs-mutable">3.4 Append-only vs. mutable</h3>
+<p>Each table is classified as:</p>
+<ul>
+<li><strong>Append-only (A):</strong> rows are only ever inserted. The data-access layer exposes only <code>insert(...)</code>, never <code>update(...)</code> or <code>delete(...)</code>. This is enforced at the repository boundary.</li>
+<li><strong>Mutable (M):</strong> rows can be updated; <code>updated_at</code> reflects the latest change. Lifecycle is captured separately in a paired <code>_status_log</code> table if the entity has meaningful states.</li>
+</ul>
+<h3 id="35-status-as-event-sourced-current-state-as-cache">3.5 Status as event-sourced, current state as cache</h3>
+<p>Four entities have meaningful status lifecycles: <code>ai_employees</code>, <code>tasks</code>, <code>pending_approvals</code>, <code>turns</code>.</p>
+<p>For each one:</p>
+<ul>
+<li>A <code>*_status_log</code> append-only table records every status change.</li>
+<li>The parent table holds a <code>current_status</code> column. <strong>This is a cache</strong> — computed as the latest <code>to_status</code> from the log. Documented and rebuildable.</li>
+</ul>
+<p>All status changes go through one helper that writes the log row AND updates the cache atomically. No naked <code>UPDATE ai_employees SET current_status = ...</code> anywhere in the codebase.</p>
+<h3 id="36-json-discipline">3.6 JSON discipline</h3>
+<ul>
+<li>JSON fields allowed for genuinely variable payloads: <code>inbound_events.payload_json</code>, <code>pending_approvals.proposed_action_params_json</code>, <code>model_invocations.request_messages_json</code>.</li>
+<li><strong>Anything we will ever filter or join on gets its own column</strong>, not a JSON path. SQLite generated columns + indexes are an option when we want both.</li>
+</ul>
+<h3 id="37-frozen-at-write-fields">3.7 Frozen-at-write fields</h3>
+<p>Some columns intentionally denormalize a value at write time and <strong>must never be updated even if the source changes</strong>. These are audit-immutability fields, not caches.</p>
+<p>Examples: <code>messages.sender_display_name</code>, <code>agent_action_log.virtual_actor_display_name</code>, <code>agent_action_log.requester_display_name</code>. A message from 2026 must still show its sender's name as it was when sent, regardless of later renames or deletions.</p>
+<p>Frozen-at-write columns are marked explicitly in each table's notes below.</p>
+<h3 id="38-foreign-keys-and-constraints">3.8 Foreign keys and constraints</h3>
+<ul>
+<li><code>FOREIGN KEY</code> declarations on every cross-table reference.</li>
+<li><code>CHECK</code> constraints for enum-style columns.</li>
+<li><code>UNIQUE</code> constraints for natural identifiers.</li>
+<li><code>PRAGMA foreign_keys = ON</code> required at every connection open.</li>
+</ul>
+<hr />
+<h2 id="4-storage-and-workspace-access">4. Storage and Workspace Access</h2>
+<h3 id="41-storage-model-for-mvp">4.1 Storage model for MVP</h3>
+<p>Each workspace is <strong>one directory</strong> containing:</p>
+<ul>
+<li><code>db.sqlite</code> — plain SQLite (structured operational data)</li>
+<li><code>memory/</code> — per-agent text journals</li>
+<li><code>docs/</code> — extracted document text</li>
+<li><code>blobs/</code> — original files</li>
+<li><code>auth.json</code> — password verifier only (see §4.2)</li>
+<li><code>role-templates/</code> — <strong>Your role templates</strong> (text files, not DB; see §4.1.1)</li>
+<li><code>hr-assist/sessions/</code> — HR assist chat sessions (file-based; see §4.1.2)</li>
+<li><code>audit/</code> — file-based audit for hire UX (brief edits, template versions; see §4.1.3)</li>
+</ul>
+<p>Workspaces are isolated by <strong>file separation</strong>. Each workspace has its <strong>own password</strong>, but <strong>Pidgin does not store or manage that password</strong> — the caller supplies it when opening a workspace (CLI flag, environment variable, or interactive prompt). For MVP, where the operator keeps the password is their problem (password manager, <code>.env</code> file, sticky note). For production deployment, passwords come from a proper secret store (e.g. Kubernetes Secret, Vault) injected at runtime.</p>
+<p><strong>Not in MVP:</strong> OS keychain integration, Argon2id/AES credential encryption, SQLCipher full-DB encryption, vector search. These are post-MVP upgrades.</p>
+<h4 id="411-workspace-role-templates-locked-files-not-db">4.1.1 Workspace role templates (locked — files, not DB)</h4>
+<p><strong>Your role templates</strong> live under <code>role-templates/&lt;slug&gt;/</code>. Pidgin role templates remain bundled JSON in <code>recipes/*.json</code> (<a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a>); duplicating into the workspace creates a new slug folder starting at <code>v1.md</code>.</p>
+<pre><code>role-templates/
+  &lt;slug&gt;/
+    manifest.json       # metadata; points at current_version
+    v1.md               # version 1 body
+    v2.md               # version 2 body (prior versions never overwritten)
+    ...
+</code></pre>
+<p><strong>Manifest schema</strong> (<code>manifest.json</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Display name shown in UI</td>
+</tr>
+<tr>
+<td><code>slug</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Directory name; kebab-case; stable across versions</td>
+</tr>
+<tr>
+<td><code>current_version</code></td>
+<td>integer</td>
+<td>yes</td>
+<td>Latest version number; matches highest <code>v&lt;N&gt;.md</code></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>string</td>
+<td>yes</td>
+<td>UTC ISO 8601 ms</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>string</td>
+<td>yes</td>
+<td>UTC ISO 8601 ms; bumped on every new version</td>
+</tr>
+<tr>
+<td><code>lineage</code></td>
+<td>object</td>
+<td>no</td>
+<td>Provenance when copied from Pidgin template or agent</td>
+</tr>
+</tbody>
+</table>
+<p>Optional <code>lineage</code> keys:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>When set</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>source_recipe_id</code></td>
+<td>string</td>
+<td>Duplicated from bundled Pidgin role template</td>
+</tr>
+<tr>
+<td><code>source_recipe_version</code></td>
+<td>string</td>
+<td>Semver of bundled template at duplicate time</td>
+</tr>
+<tr>
+<td><code>derived_from_agent_id</code></td>
+<td>string</td>
+<td>Created via “Create template from agent”</td>
+</tr>
+<tr>
+<td><code>derived_from_agent_handle</code></td>
+<td>string</td>
+<td>Human-readable handle for UI lineage note</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Version body format (locked):</strong> Markdown with YAML frontmatter. Each save under the <strong>same slug</strong> writes a <strong>new</strong> <code>v&lt;N&gt;.md</code> file; prior version files are never edited or deleted except on explicit template delete (entire slug folder).</p>
+<p>Example <code>v2.md</code>:</p>
+<pre><code class="language-markdown">---
+version: 2
+created_at: 2026-05-31T10:00:00.000Z
+created_by_principal_id: 01J...
+---
+
+## Job requirements
+
+### Mission
+…
+
+### Responsibilities
+- …
+
+### Out of scope
+- …
+
+## Ideal candidate profile
+
+### Tone
+…
+
+### Decision framework
+…
+
+### Escalation rules
+…
+
+## Your take
+…
+</code></pre>
+<p><strong>Version promotion:</strong> saving with unchanged <code>name</code> / <code>slug</code> increments <code>current_version</code>, writes <code>v{N+1}.md</code>, updates <code>manifest.updated_at</code>. The UI shows the latest version as current; older files remain browsable.</p>
+<p><strong>API mapping:</strong> <code>GET/POST/PATCH .../role-templates</code> read and write these files — see <a href="IMPLEMENTATION_PLAN.html">IMPLEMENTATION_PLAN.md</a> Hire UX API routes.</p>
+<h4 id="412-hr-assist-sessions-locked-files-not-db">4.1.2 HR assist sessions (locked — files, not DB)</h4>
+<p>HR assist chat threads persist under <code>hr-assist/sessions/&lt;session_id&gt;/</code>:</p>
+<pre><code>hr-assist/sessions/
+  &lt;session_id&gt;/
+    meta.json
+    messages.jsonl
+</code></pre>
+<p><code>session_id</code> is a ULID. <code>meta.json</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_id</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Same as directory name</td>
+</tr>
+<tr>
+<td><code>context_type</code></td>
+<td>string</td>
+<td>yes</td>
+<td><code>hire</code> | <code>agent</code> | <code>template</code></td>
+</tr>
+<tr>
+<td><code>context_id</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Hire session ULID, <code>ai_employees.id</code>, or template <code>slug</code></td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>string</td>
+<td>yes</td>
+<td>UTC ISO 8601 ms</td>
+</tr>
+<tr>
+<td><code>updated_at</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Bumped on each message append</td>
+</tr>
+</tbody>
+</table>
+<p><code>messages.jsonl</code> — one JSON object per line (append-only):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Message ULID</td>
+</tr>
+<tr>
+<td><code>role</code></td>
+<td>string</td>
+<td>yes</td>
+<td><code>operator</code> | <code>assist</code></td>
+</tr>
+<tr>
+<td><code>body_text</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Plain text</td>
+</tr>
+<tr>
+<td><code>created_at</code></td>
+<td>string</td>
+<td>yes</td>
+<td>UTC ISO 8601 ms</td>
+</tr>
+<tr>
+<td><code>suggestion</code></td>
+<td>object</td>
+<td>no</td>
+<td>Present on <code>assist</code> messages when actionable</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Suggestion payload</strong> (for <strong>Apply to form</strong> / <strong>Append to your take</strong>):</p>
+<pre><code class="language-json">{
+  &quot;action&quot;: &quot;apply&quot;,
+  &quot;targets&quot;: {
+    &quot;job_requirements.mission&quot;: &quot;…&quot;,
+    &quot;ideal_candidate.tone&quot;: &quot;…&quot;
+  }
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th><code>action</code></th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>apply</code></td>
+<td>Overwrite listed dot-path keys in the active form (<code>targets</code> map)</td>
+</tr>
+<tr>
+<td><code>append_your_take</code></td>
+<td>Append <code>targets.your_take</code> (string) to the <strong>Your take</strong> field with a newline separator</td>
+</tr>
+</tbody>
+</table>
+<p>Dot-path keys match <a href="#71-hire_customization_json">§7.1</a> field names. UI may ignore unknown keys; backend validates paths on apply.</p>
+<p><strong>API:</strong> <code>POST .../hr-assist/sessions</code>, <code>POST/GET .../hr-assist/sessions/{id}/messages</code> — see <a href="IMPLEMENTATION_PLAN.html">IMPLEMENTATION_PLAN.md</a>.</p>
+<h4 id="413-hire-ux-audit-files-locked-files-not-db">4.1.3 Hire UX audit files (locked — files, not DB)</h4>
+<p>Post-hire brief edits and workspace template version creates append to JSONL audit files (not <code>agent_action_log</code> — those remain for gated agent actions).</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>When written</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>audit/brief-edits/&lt;employee_id&gt;.jsonl</code></td>
+<td>Each save of job requirements, ideal candidate, or your take on an agent profile</td>
+</tr>
+<tr>
+<td><code>audit/template-versions/&lt;slug&gt;.jsonl</code></td>
+<td>Each new <code>v&lt;N&gt;.md</code> created for a workspace template</td>
+</tr>
+</tbody>
+</table>
+<p>Each JSONL line:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Required</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Audit entry ULID</td>
+</tr>
+<tr>
+<td><code>occurred_at</code></td>
+<td>string</td>
+<td>yes</td>
+<td>UTC ISO 8601 ms</td>
+</tr>
+<tr>
+<td><code>actor_principal_id</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Operator who performed the action</td>
+</tr>
+<tr>
+<td><code>action</code></td>
+<td>string</td>
+<td>yes</td>
+<td><code>brief_edit</code> | <code>template_version_create</code></td>
+</tr>
+<tr>
+<td><code>summary</code></td>
+<td>string</td>
+<td>yes</td>
+<td>Human-readable one-liner for UI</td>
+</tr>
+<tr>
+<td><code>changes_json</code></td>
+<td>string</td>
+<td>no</td>
+<td>JSON string: field-level diff or <code>{ "from_version": 1, "to_version": 2 }</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-workspace-password-verify-only-never-store">4.2 Workspace password (verify only, never store)</h3>
+<p>At workspace creation:</p>
+<ol>
+<li>User chooses a password.</li>
+<li>Runtime stores a <strong>bcrypt hash</strong> in <code>auth.json</code> (along with workspace id and creation metadata).</li>
+<li>The password itself is <strong>never written to disk</strong> by Pidgin.</li>
+</ol>
+<p>At open:</p>
+<ol>
+<li>Caller provides the password (e.g. <code>pidgin open --workspace acme --password "$ACME_DB_PASSWORD"</code>).</li>
+<li>Runtime verifies against the bcrypt hash in <code>auth.json</code>.</li>
+<li>If match → open <code>db.sqlite</code>. If not → refuse.</li>
+<li>Password exists in process memory only for the duration of the open session, then is discarded.</li>
+</ol>
+<p><code>auth.json</code> example:</p>
+<pre><code class="language-json">{
+  &quot;workspace_id&quot;: &quot;01J...&quot;,
+  &quot;password_hash&quot;: &quot;$2b$12$...&quot;,
+  &quot;created_at&quot;: &quot;2026-05-30T12:00:00.000Z&quot;
+}
+</code></pre>
+<h3 id="43-what-is-encrypted-mvp-nothing">4.3 What is encrypted (MVP: nothing)</h3>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>MVP storage</th>
+<th>Post-MVP option</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DB tables</td>
+<td>Plaintext SQLite</td>
+<td>SQLCipher with workspace password as key</td>
+</tr>
+<tr>
+<td>Connector credentials</td>
+<td>Plaintext in <code>connector_installations.credentials_json</code></td>
+<td>Encrypt at rest when DB encryption lands</td>
+</tr>
+<tr>
+<td>Memory / doc text files</td>
+<td>Plain markdown / text on disk</td>
+<td>Optional encryption under workspace key</td>
+</tr>
+<tr>
+<td>Workspace password</td>
+<td><strong>Not stored</strong> — hash in <code>auth.json</code> only</td>
+<td>Same; production injects password from secret store</td>
+</tr>
+</tbody>
+</table>
+<p>MVP trade-off: anyone with read access to the workspace directory can read everything, including connector tokens. Acceptable for local single-user / trusted-team deployment. Not acceptable for multi-tenant SaaS without the post-MVP encryption path.</p>
+<h3 id="44-workspace-lifecycle-commands">4.4 Workspace lifecycle commands</h3>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create_workspace(name, password)</code></td>
+<td>Hash password → write <code>auth.json</code>; create directory layout; create <code>db.sqlite</code>; initialize schema; register in runtime registry</td>
+</tr>
+<tr>
+<td><code>open_workspace(id, password)</code></td>
+<td>Verify password against <code>auth.json</code>; open DB; return scoped connection</td>
+</tr>
+<tr>
+<td><code>close_workspace(id)</code></td>
+<td>Close DB; discard password from memory</td>
+</tr>
+<tr>
+<td><code>list_workspaces()</code></td>
+<td>Enumerate registry — no password required to list, only to open</td>
+</tr>
+<tr>
+<td><code>change_password(id, old, new)</code></td>
+<td>Verify old password; rewrite bcrypt hash in <code>auth.json</code></td>
+</tr>
+<tr>
+<td><code>export_workspace(id)</code></td>
+<td>Bundle workspace directory as portable archive</td>
+</tr>
+<tr>
+<td><code>delete_workspace(id)</code></td>
+<td>Remove workspace directory and registry entry</td>
+</tr>
+</tbody>
+</table>
+<h3 id="45-file-based-knowledge-layout">4.5 File-based knowledge layout</h3>
+<pre><code>workspaces/&lt;workspace_id&gt;/
+  auth.json
+  db.sqlite
+  memory/
+    jane/
+      journal.md              ← append-only; one line per remember()
+    max/
+      journal.md
+  docs/
+    01J....txt                ← extracted text; id matches ingested_documents.id
+  blobs/
+    ab/cd/&lt;sha256&gt;            ← original files
+  role-templates/
+    support-lead/
+      manifest.json
+      v1.md
+      v2.md
+  hr-assist/
+    sessions/
+      01J.../
+        meta.json
+        messages.jsonl
+  audit/
+    brief-edits/
+      01J....jsonl            ← one file per ai_employees.id
+    template-versions/
+      support-lead.jsonl      ← one file per template slug
+  _debug/                     ← optional debug export
+</code></pre>
+<p><strong>Agent memory (<code>remember</code> / <code>recall</code>):</strong> append a dated entry to <code>memory/&lt;handle&gt;/journal.md</code>. <strong>Recall</strong> reads the tail of the journal (last N lines / last N KB) and optionally greps for keywords from the current turn. No DB table, no embeddings.</p>
+<p><strong>Documents:</strong> on ingest, write extracted text to <code>docs/&lt;id&gt;.txt</code>; DB row in <code>ingested_documents</code> holds metadata and <code>text_path</code>. <strong>Recall</strong> greps across granted doc files or reads relevant files whole if small enough.</p>
+<p>Search infrastructure (FTS, ripgrep index, vectors) improves on this file layer later — the MVP path is deliberately boring text files.</p>
+<h3 id="46-runtime-level-workspace-agnostic-state">4.6 Runtime-level (workspace-agnostic) state</h3>
+<pre><code>~/.pidgin/
+  config.json                 ← runtime settings (marketplace URLs, defaults)
+  workspaces_registry.json    ← list of known workspaces: id, display name, directory path
+  workspaces/
+    &lt;workspace_id&gt;/           ← per §4.5
+</code></pre>
+<h3 id="47-forward-path-post-mvp">4.7 Forward path (post-MVP)</h3>
+<table>
+<thead>
+<tr>
+<th>Upgrade</th>
+<th>Trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SQLCipher on <code>db.sqlite</code></td>
+<td>Multi-tenant or untrusted disk</td>
+</tr>
+<tr>
+<td>Credential encryption</td>
+<td>Same</td>
+</tr>
+<tr>
+<td>FTS / vector index on <code>memory/</code> and <code>docs/</code></td>
+<td>Volume makes grep too slow</td>
+</tr>
+<tr>
+<td>Secret injection adapter</td>
+<td>Production K8s / Vault deployment</td>
+</tr>
+</tbody>
+</table>
+<h3 id="48-debug-export">4.8 Debug export</h3>
+<p>The flag-controlled debug export (per <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC §10.2</a>) writes plaintext markdown / text files under <code>_debug/</code>. Off by default, opt-in per workspace, auto-purged after configurable retention.</p>
+<hr />
+<h2 id="5-group-1-tenant-and-schema-infrastructure">5. Group 1 — Tenant and Schema Infrastructure</h2>
+<h3 id="workspace-m"><code>workspace</code> (M)</h3>
+<p>Single-row table holding this workspace's settings.</p>
+<pre><code class="language-sql">CREATE TABLE workspace (
+  id                          TEXT PRIMARY KEY,
+  display_name                TEXT NOT NULL,
+  hierarchy_recipe_id         TEXT,
+  hierarchy_recipe_version    TEXT,
+  default_marketplace_url     TEXT,
+  debug_export_enabled        INTEGER NOT NULL DEFAULT 0,
+  debug_export_retention_days INTEGER NOT NULL DEFAULT 7,
+  settings_json               TEXT,
+  created_at                  TEXT NOT NULL,
+  updated_at                  TEXT NOT NULL
+);
+</code></pre>
+<p>Notes: Single-row by convention. The <code>id</code> is the workspace ULID, matching the directory name on disk.</p>
+<h3 id="schema_migrations-a"><code>schema_migrations</code> (A)</h3>
+<p>Tracks applied migrations.</p>
+<pre><code class="language-sql">CREATE TABLE schema_migrations (
+  version    TEXT PRIMARY KEY,        -- e.g. &quot;001_initial&quot;
+  applied_at TEXT NOT NULL,
+  checksum   TEXT NOT NULL            -- sha256 of the migration SQL
+);
+</code></pre>
+<hr />
+<h2 id="6-group-2-identity-and-access">6. Group 2 — Identity and Access</h2>
+<h3 id="principals-m"><code>principals</code> (M)</h3>
+<p>The workspace directory: every actor that can send a message to an agent.</p>
+<pre><code class="language-sql">CREATE TABLE principals (
+  id                 TEXT PRIMARY KEY,
+  type               TEXT NOT NULL CHECK (type IN (
+                       'workspace_member',
+                       'pidgin_agent',
+                       'external_verified'
+                     )),
+  display_name       TEXT NOT NULL,
+  email_address      TEXT,
+  slack_user_id      TEXT,
+  google_subject_id  TEXT,
+  ai_employee_id     TEXT,                  -- non-NULL iff type='pidgin_agent'
+  allowlist_pattern  TEXT,                  -- for external_verified, e.g. 'domain:acme.com'
+  is_active          INTEGER NOT NULL DEFAULT 1,
+  metadata_json      TEXT,
+  created_at         TEXT NOT NULL,
+  updated_at         TEXT NOT NULL,
+  UNIQUE (email_address),
+  UNIQUE (slack_user_id),
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id)
+);
+CREATE INDEX idx_principals_type ON principals(type);
+</code></pre>
+<p>Notes: <code>external_unverified</code> and <code>untrusted_content</code> are <em>not</em> rows here; they're the absence-of-a-row case classified by the runtime at event ingress.</p>
+<h3 id="connector_installations-m"><code>connector_installations</code> (M)</h3>
+<p>Per-workspace integration installs.</p>
+<pre><code class="language-sql">CREATE TABLE connector_installations (
+  id                    TEXT PRIMARY KEY,
+  connector_type        TEXT NOT NULL,            -- 'slack', 'gmail', 'jira', ...
+  display_name          TEXT NOT NULL,
+  credentials_json          TEXT,                     -- OAuth tokens, API keys (plaintext for MVP)
+  config_json           TEXT,                     -- non-secret config (URLs, team IDs)
+  status                TEXT NOT NULL CHECK (status IN (
+                          'active', 'disabled', 'errored'
+                        )),
+  installed_at          TEXT NOT NULL,
+  updated_at            TEXT NOT NULL,
+  last_health_check_at  TEXT,
+  UNIQUE (connector_type, display_name)
+);
+</code></pre>
+<p>Notes: MVP stores connector credentials as plaintext JSON in the DB. Protect the workspace directory. Post-MVP: encrypt when SQLCipher lands.</p>
+<h3 id="document_access_grants-m"><code>document_access_grants</code> (M)</h3>
+<p>Which AI employees can read which ingested documents.</p>
+<pre><code class="language-sql">CREATE TABLE document_access_grants (
+  id                       TEXT PRIMARY KEY,
+  document_id              TEXT NOT NULL,
+  ai_employee_id           TEXT NOT NULL,
+  granted_by_principal_id  TEXT NOT NULL,
+  granted_at               TEXT NOT NULL,
+  revoked_at               TEXT,
+  UNIQUE (document_id, ai_employee_id),
+  FOREIGN KEY (document_id) REFERENCES ingested_documents(id),
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (granted_by_principal_id) REFERENCES principals(id)
+);
+CREATE INDEX idx_doc_access_employee_active
+  ON document_access_grants(ai_employee_id) WHERE revoked_at IS NULL;
+</code></pre>
+<hr />
+<h2 id="7-group-3-ai-employees">7. Group 3 — AI Employees</h2>
+<h3 id="ai_employees-m-current_status-cached"><code>ai_employees</code> (M; <code>current_status</code> cached)</h3>
+<p>Instantiated AI employees.</p>
+<pre><code class="language-sql">CREATE TABLE ai_employees (
+  id                         TEXT PRIMARY KEY,
+  display_name               TEXT NOT NULL,
+  role_title                 TEXT NOT NULL,
+  handle                     TEXT NOT NULL UNIQUE,    -- e.g. 'jane'
+  recipe_snapshot_id         TEXT NOT NULL,
+  human_owner_principal_id   TEXT NOT NULL,
+  manager_principal_id       TEXT,
+  current_status             TEXT NOT NULL CHECK (current_status IN (
+                               'draft', 'interviewing', 'onboarding',
+                               'active', 'paused', 'offboarded'
+                             )),
+  permission_overrides_json  TEXT,                    -- merged on top of recipe at gate time
+  hire_customization_json   TEXT,                    -- operator brief; see §7.1
+  default_channels_json      TEXT,                    -- email alias, slack handle
+  created_at                 TEXT NOT NULL,
+  updated_at                 TEXT NOT NULL,
+  FOREIGN KEY (recipe_snapshot_id) REFERENCES ai_employee_recipe_snapshots(id),
+  FOREIGN KEY (human_owner_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (manager_principal_id) REFERENCES principals(id)
+);
+</code></pre>
+<p>Notes: <code>current_status</code> is a cache of the latest row in <code>ai_employees_status_log</code>. The <strong>resolved permission profile</strong> (effective <code>can_read</code>/<code>can_write</code>/<code>requires_approval</code>/<code>blocked</code>) is <em>not stored</em> — computed at gate time from <code>recipe_snapshot.bundle_json</code> + <code>permission_overrides_json</code>.</p>
+<p><code>hire_customization_json</code> holds the operator-editable brief (job requirements, ideal candidate profile, your take). It is <strong>mutable</strong> after hire; the immutable <code>ai_employee_recipe_snapshots</code> row is never updated for brief changes. See §7.1.</p>
+<h3 id="71-hire_customization_json">7.1 <code>hire_customization_json</code></h3>
+<p>JSON object persisted on <code>ai_employees</code> at hire and updated on post-hire profile saves (<a href="MVP_USER_STORIES.html">MVP_USER_STORIES.md</a> US-6, US-9). Shape aligns with hire wizard and agent profile fields:</p>
+<pre><code class="language-json">{
+  &quot;job_requirements&quot;: {
+    &quot;mission&quot;: &quot;string&quot;,
+    &quot;responsibilities&quot;: [&quot;string&quot;],
+    &quot;out_of_scope&quot;: [&quot;string&quot;]
+  },
+  &quot;ideal_candidate&quot;: {
+    &quot;tone&quot;: &quot;string&quot;,
+    &quot;decision_framework&quot;: &quot;string&quot;,
+    &quot;escalation_rules&quot;: &quot;string&quot;
+  },
+  &quot;your_take&quot;: &quot;string&quot;
+}
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>job_requirements.mission</code></td>
+<td>string</td>
+<td>Primary purpose of the role</td>
+</tr>
+<tr>
+<td><code>job_requirements.responsibilities</code></td>
+<td>string[]</td>
+<td>Ordered list; empty array allowed</td>
+</tr>
+<tr>
+<td><code>job_requirements.out_of_scope</code></td>
+<td>string[]</td>
+<td>Explicit boundaries</td>
+</tr>
+<tr>
+<td><code>ideal_candidate.tone</code></td>
+<td>string</td>
+<td>Communication style</td>
+</tr>
+<tr>
+<td><code>ideal_candidate.decision_framework</code></td>
+<td>string</td>
+<td>How the agent should decide</td>
+</tr>
+<tr>
+<td><code>ideal_candidate.escalation_rules</code></td>
+<td>string</td>
+<td>When and how to escalate</td>
+</tr>
+<tr>
+<td><code>your_take</code></td>
+<td>string</td>
+<td>Freeform operator additions</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Pre-fill at hire:</strong> bundled recipe <code>default_job_requirements</code> and <code>default_ideal_candidate</code> (<a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a> §2) seed the wizard; operator edits are written to this column at hire. Workspace template <code>v&lt;N&gt;.md</code> bodies parse into the same shape.</p>
+<p><strong>Post-hire edits:</strong> <code>PATCH .../agents/{handle}/brief</code> (or equivalent) replaces the full object or merges sections; each save appends to <code>audit/brief-edits/&lt;employee_id&gt;.jsonl</code> (§4.1.3).</p>
+<h3 id="72-resolved-system-prompt-merge-turn-time">7.2 Resolved system prompt merge (turn time)</h3>
+<p>At turn time the runtime builds the agent system prompt from the <strong>immutable recipe snapshot</strong> plus the <strong>mutable customization</strong>. Merge order (locked):</p>
+<ol>
+<li><strong>Base template</strong> — <code>bundle_json.system_prompt_template</code> from <code>ai_employees.recipe_snapshot_id</code>.</li>
+<li><strong>Placeholder render</strong> — substitute <code>{{display_name}}</code>, <code>{{role_title}}</code>, and other recipe-defined placeholders from the <code>ai_employees</code> row (and workspace context as defined in <a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a>).</li>
+<li><strong>Customization append</strong> — if <code>hire_customization_json</code> is non-null, append a fixed markdown section block:</li>
+</ol>
+<pre><code class="language-markdown">
+---
+
+## Job requirements (operator-defined)
+
+**Mission:** {mission}
+
+**Responsibilities:**
+- {responsibility_1}
+- …
+
+**Out of scope:**
+- {item_1}
+- …
+
+## Ideal candidate profile (operator-defined)
+
+**Tone:** {tone}
+
+**Decision framework:** {decision_framework}
+
+**Escalation rules:** {escalation_rules}
+
+## Your take
+
+{your_take}
+</code></pre>
+<p>Omit subsections whose source field is empty or missing. Lists render as markdown bullets; empty arrays omit the subsection heading.</p>
+<ol start="4">
+<li><strong>Runtime injections</strong> — time, recall context, pending timers/watchers per <a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> §4 append after the merged system prompt.</li>
+</ol>
+<p>The merged prompt is <strong>not stored</strong> — derived on each turn. <code>model_invocations.request_messages_json</code> captures what was actually sent.</p>
+<p><strong>Invariant:</strong> customization changes affect subsequent turns immediately; they never mutate <code>ai_employee_recipe_snapshots.bundle_json</code>.</p>
+<h3 id="ai_employees_status_log-a"><code>ai_employees_status_log</code> (A)</h3>
+<p>Lifecycle transitions.</p>
+<pre><code class="language-sql">CREATE TABLE ai_employees_status_log (
+  id                  TEXT PRIMARY KEY,
+  ai_employee_id      TEXT NOT NULL,
+  from_status         TEXT,                          -- NULL for initial creation
+  to_status           TEXT NOT NULL,
+  actor_principal_id  TEXT NOT NULL,
+  reason              TEXT,
+  occurred_at         TEXT NOT NULL,
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (actor_principal_id) REFERENCES principals(id)
+);
+CREATE INDEX idx_ai_employees_status_log_employee
+  ON ai_employees_status_log(ai_employee_id, occurred_at DESC);
+</code></pre>
+<h3 id="ai_employee_recipe_snapshots-a"><code>ai_employee_recipe_snapshots</code> (A)</h3>
+<p>Immutable frozen recipe bundles snapshotted from the marketplace at hire time.</p>
+<pre><code class="language-sql">CREATE TABLE ai_employee_recipe_snapshots (
+  id              TEXT PRIMARY KEY,
+  ai_employee_id  TEXT NOT NULL,
+  source_url      TEXT NOT NULL,
+  recipe_id       TEXT NOT NULL,                     -- e.g. 'support-agent'
+  recipe_version  TEXT NOT NULL,                     -- e.g. 'v1.2'
+  bundle_sha256   TEXT NOT NULL,                     -- cache, recomputable
+  bundle_json     TEXT NOT NULL,                     -- full frozen recipe content
+  fetched_at      TEXT NOT NULL,
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id)
+);
+CREATE INDEX idx_recipe_snapshots_employee
+  ON ai_employee_recipe_snapshots(ai_employee_id, fetched_at DESC);
+</code></pre>
+<p>Notes: Upgrading an agent to a new recipe version creates a NEW row here, not an edit to the old one. The <code>ai_employees.recipe_snapshot_id</code> pointer is updated to point at the new snapshot. Old snapshots are retained for audit.</p>
+<hr />
+<h2 id="8-group-4-channels-and-conversations">8. Group 4 — Channels and Conversations</h2>
+<h3 id="rooms-m"><code>rooms</code> (M)</h3>
+<p>Channels/rooms — Slack channels, internal Pidgin rooms, email aliases, DM buckets.</p>
+<pre><code class="language-sql">CREATE TABLE rooms (
+  id                   TEXT PRIMARY KEY,
+  name                 TEXT NOT NULL UNIQUE,
+  purpose              TEXT,
+  modality             TEXT NOT NULL CHECK (modality IN (
+                         'pidgin_chat', 'slack', 'email_thread', 'jira', 'other'
+                       )),
+  external_system_id   TEXT,                         -- e.g. Slack channel ID
+  visibility           TEXT NOT NULL CHECK (visibility IN (
+                         'public', 'private', 'dm'
+                       )),
+  created_at           TEXT NOT NULL,
+  updated_at           TEXT NOT NULL,
+  UNIQUE (modality, external_system_id)
+);
+</code></pre>
+<h3 id="room_members-m"><code>room_members</code> (M)</h3>
+<p>Membership of rooms.</p>
+<pre><code class="language-sql">CREATE TABLE room_members (
+  id                          TEXT PRIMARY KEY,
+  room_id                     TEXT NOT NULL,
+  principal_id                TEXT NOT NULL,
+  channel_activity_subscribed INTEGER NOT NULL DEFAULT 0,  -- trigger 2 opt-in
+  muted                       INTEGER NOT NULL DEFAULT 0,
+  joined_at                   TEXT NOT NULL,
+  UNIQUE (room_id, principal_id),
+  FOREIGN KEY (room_id) REFERENCES rooms(id),
+  FOREIGN KEY (principal_id) REFERENCES principals(id)
+);
+CREATE INDEX idx_room_members_principal ON room_members(principal_id);
+</code></pre>
+<h3 id="conversations-m"><code>conversations</code> (M)</h3>
+<p>Threads — DMs, room threads, email threads, ticket threads.</p>
+<pre><code class="language-sql">CREATE TABLE conversations (
+  id                  TEXT PRIMARY KEY,
+  room_id             TEXT,                          -- NULL for cross-room or DM-only
+  modality            TEXT NOT NULL,
+  external_thread_id  TEXT,                          -- e.g. Slack thread_ts, email Message-ID root
+  linked_task_id      TEXT,
+  started_at          TEXT NOT NULL,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL,
+  UNIQUE (modality, external_thread_id),
+  FOREIGN KEY (room_id) REFERENCES rooms(id),
+  FOREIGN KEY (linked_task_id) REFERENCES tasks(id)
+);
+CREATE INDEX idx_conversations_room ON conversations(room_id);
+</code></pre>
+<p>Notes: <code>last_activity_at</code> is <strong>not stored</strong> — derived as <code>MAX(messages.created_at)</code> for the conversation, served via the index on <code>messages</code>.</p>
+<h3 id="messages-a-sender_display_name-frozen-at-write"><code>messages</code> (A; <code>sender_display_name</code> frozen-at-write)</h3>
+<p>Every utterance in every conversation.</p>
+<pre><code class="language-sql">CREATE TABLE messages (
+  id                    TEXT PRIMARY KEY,
+  conversation_id       TEXT NOT NULL,
+  sender_principal_id   TEXT NOT NULL,
+  sender_display_name   TEXT NOT NULL,               -- FROZEN AT WRITE
+  modality              TEXT NOT NULL,
+  body_text             TEXT NOT NULL,
+  body_format           TEXT NOT NULL DEFAULT 'text' CHECK (body_format IN (
+                          'text', 'markdown', 'html'
+                        )),
+  attachments_json      TEXT,                        -- array of document IDs
+  originating_event_id  TEXT,
+  originating_turn_id   TEXT,                        -- non-NULL if sent by an agent
+  external_message_id   TEXT,                        -- Slack ts, email Message-ID
+  created_at            TEXT NOT NULL,
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+  FOREIGN KEY (sender_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (originating_event_id) REFERENCES inbound_events(id),
+  FOREIGN KEY (originating_turn_id) REFERENCES turns(id)
+);
+CREATE INDEX idx_messages_conversation_created
+  ON messages(conversation_id, created_at);
+CREATE INDEX idx_messages_external
+  ON messages(modality, external_message_id);
+</code></pre>
+<hr />
+<h2 id="9-group-5-the-trigger-plane">9. Group 5 — The Trigger Plane</h2>
+<h3 id="inbound_events-m-for-processing_status-otherwise-insert-once"><code>inbound_events</code> (M for <code>processing_status</code>; otherwise insert-once)</h3>
+<p>The durable inbound queue. One row per trigger firing.</p>
+<pre><code class="language-sql">CREATE TABLE inbound_events (
+  id                       TEXT PRIMARY KEY,
+  trigger_type             TEXT NOT NULL CHECK (trigger_type IN (
+                             'direct_address', 'channel_activity', 'inbound_external',
+                             'timer', 'watcher', 'self_prompt',
+                             'peer_delegation', 'approval_response'
+                           )),
+  target_ai_employee_id    TEXT,
+  sender_principal_id      TEXT,                     -- NULL for timer firings, etc.
+  trust_label              TEXT NOT NULL CHECK (trust_label IN (
+                             'internal-authenticated',
+                             'external-verified',
+                             'external-unverified',
+                             'untrusted-content'
+                           )),
+  resumes_turn_id          TEXT,                     -- non-NULL for trigger 8
+  parent_turn_id           TEXT,                     -- for delegate sub-turns
+  payload_json             TEXT NOT NULL,
+  processing_status        TEXT NOT NULL DEFAULT 'pending' CHECK (processing_status IN (
+                             'pending', 'dispatching', 'done', 'failed'
+                           )),
+  picked_up_at             TEXT,
+  completed_at             TEXT,
+  resulting_turn_id        TEXT,
+  failure_reason           TEXT,
+  received_at              TEXT NOT NULL,
+  FOREIGN KEY (target_ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (sender_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (resumes_turn_id) REFERENCES turns(id),
+  FOREIGN KEY (parent_turn_id) REFERENCES turns(id),
+  FOREIGN KEY (resulting_turn_id) REFERENCES turns(id)
+);
+CREATE INDEX idx_inbound_events_pending
+  ON inbound_events(received_at) WHERE processing_status = 'pending';
+CREATE INDEX idx_inbound_events_employee
+  ON inbound_events(target_ai_employee_id, received_at DESC);
+</code></pre>
+<p>Notes: Conceptually append-only for the payload; <code>processing_status</code>, <code>picked_up_at</code>, <code>completed_at</code>, <code>resulting_turn_id</code>, and <code>failure_reason</code> are the only mutable fields. This is the one declared exception to strict append-only, because work-queue state is genuinely operational and not historical fact.</p>
+<h3 id="agent_timers-m"><code>agent_timers</code> (M)</h3>
+<p>Pending self-prompts and recurring schedules.</p>
+<pre><code class="language-sql">CREATE TABLE agent_timers (
+  id                       TEXT PRIMARY KEY,
+  ai_employee_id           TEXT NOT NULL,
+  scheduled_at             TEXT NOT NULL,
+  reason                   TEXT NOT NULL,            -- the agent's note to itself
+  originating_turn_id      TEXT NOT NULL,
+  inherited_trust_label    TEXT NOT NULL,            -- trust travels
+  status                   TEXT NOT NULL DEFAULT 'pending' CHECK (status IN (
+                             'pending', 'fired', 'cancelled'
+                           )),
+  fired_at                 TEXT,
+  fired_event_id           TEXT,
+  created_at               TEXT NOT NULL,
+  updated_at               TEXT NOT NULL,
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (originating_turn_id) REFERENCES turns(id),
+  FOREIGN KEY (fired_event_id) REFERENCES inbound_events(id)
+);
+CREATE INDEX idx_agent_timers_pending
+  ON agent_timers(scheduled_at) WHERE status = 'pending';
+CREATE INDEX idx_agent_timers_employee
+  ON agent_timers(ai_employee_id, status);
+</code></pre>
+<h3 id="agent_watchers-m"><code>agent_watchers</code> (M)</h3>
+<p>Subscriptions to connector resources.</p>
+<pre><code class="language-sql">CREATE TABLE agent_watchers (
+  id                              TEXT PRIMARY KEY,
+  ai_employee_id                  TEXT NOT NULL,
+  resource_uri                    TEXT NOT NULL,    -- e.g. 'jira:FIN-123'
+  until_condition                 TEXT,             -- 'resolved', a date, or NULL=forever
+  reason                          TEXT NOT NULL,
+  originating_turn_id             TEXT NOT NULL,
+  inherited_trust_label           TEXT NOT NULL,
+  connector_subscription_handle   TEXT,             -- opaque handle from the connector
+  status                          TEXT NOT NULL DEFAULT 'active' CHECK (status IN (
+                                    'active', 'closed', 'expired', 'errored'
+                                  )),
+  closed_at                       TEXT,
+  created_at                      TEXT NOT NULL,
+  updated_at                      TEXT NOT NULL,
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (originating_turn_id) REFERENCES turns(id)
+);
+CREATE INDEX idx_agent_watchers_active_employee
+  ON agent_watchers(ai_employee_id) WHERE status = 'active';
+CREATE INDEX idx_agent_watchers_resource
+  ON agent_watchers(resource_uri);
+</code></pre>
+<hr />
+<h2 id="10-group-6-turns-and-model-use">10. Group 6 — Turns and Model Use</h2>
+<h3 id="turns-m-while-running-current_status-cached"><code>turns</code> (M while running; <code>current_status</code> cached)</h3>
+<p>Anchors <code>run_id</code>. One row per turn.</p>
+<pre><code class="language-sql">CREATE TABLE turns (
+  id                      TEXT PRIMARY KEY,         -- the run_id
+  ai_employee_id          TEXT NOT NULL,
+  conversation_id         TEXT,
+  triggering_event_id     TEXT NOT NULL,
+  parent_turn_id          TEXT,                     -- for delegate sub-turns
+  current_status          TEXT NOT NULL DEFAULT 'running' CHECK (current_status IN (
+                            'running', 'suspended', 'completed', 'failed', 'refused'
+                          )),
+  suspension_reason       TEXT,                     -- e.g. 'awaiting_approval'
+  started_at              TEXT NOT NULL,
+  ended_at                TEXT,
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+  FOREIGN KEY (triggering_event_id) REFERENCES inbound_events(id),
+  FOREIGN KEY (parent_turn_id) REFERENCES turns(id)
+);
+CREATE INDEX idx_turns_employee_started
+  ON turns(ai_employee_id, started_at DESC);
+CREATE INDEX idx_turns_active
+  ON turns(current_status) WHERE current_status IN ('running', 'suspended');
+</code></pre>
+<h3 id="turns_status_log-a"><code>turns_status_log</code> (A)</h3>
+<p>Status transitions for a turn.</p>
+<pre><code class="language-sql">CREATE TABLE turns_status_log (
+  id          TEXT PRIMARY KEY,
+  turn_id     TEXT NOT NULL,
+  from_status TEXT,
+  to_status   TEXT NOT NULL,
+  reason      TEXT,
+  occurred_at TEXT NOT NULL,
+  FOREIGN KEY (turn_id) REFERENCES turns(id)
+);
+CREATE INDEX idx_turns_status_log_turn
+  ON turns_status_log(turn_id, occurred_at);
+</code></pre>
+<h3 id="model_invocations-a"><code>model_invocations</code> (A)</h3>
+<p>Per-LLM-call record. One turn → 1+ rows.</p>
+<pre><code class="language-sql">CREATE TABLE model_invocations (
+  id                      TEXT PRIMARY KEY,
+  turn_id                 TEXT NOT NULL,
+  sequence_in_turn        INTEGER NOT NULL,         -- 1, 2, 3, ...
+  provider                TEXT NOT NULL,            -- 'anthropic', 'openai', 'local'
+  model_id                TEXT NOT NULL,
+  request_messages_json   TEXT NOT NULL,
+  request_tools_json      TEXT,
+  response_json           TEXT NOT NULL,
+  input_tokens            INTEGER,
+  output_tokens           INTEGER,
+  cost_usd_micros         INTEGER,                  -- cost in micro-USD (1/1,000,000)
+  latency_ms              INTEGER,
+  error_text              TEXT,
+  invoked_at              TEXT NOT NULL,
+  UNIQUE (turn_id, sequence_in_turn),
+  FOREIGN KEY (turn_id) REFERENCES turns(id)
+);
+CREATE INDEX idx_model_invocations_turn
+  ON model_invocations(turn_id, sequence_in_turn);
+</code></pre>
+<p>Notes: Per-turn aggregates (total tokens, total cost, number of calls) are <strong>derived</strong> via SUM/COUNT over this table; never stored on <code>turns</code>.</p>
+<hr />
+<h2 id="11-group-7-work-in-flight">11. Group 7 — Work in Flight</h2>
+<h3 id="tasks-m-current_status-cached"><code>tasks</code> (M; <code>current_status</code> cached)</h3>
+<p>Structured work items.</p>
+<pre><code class="language-sql">CREATE TABLE tasks (
+  id                       TEXT PRIMARY KEY,
+  title                    TEXT NOT NULL,
+  description              TEXT,
+  owner_principal_id       TEXT NOT NULL,
+  source_conversation_id   TEXT,
+  source_turn_id           TEXT,
+  current_status           TEXT NOT NULL DEFAULT 'open' CHECK (current_status IN (
+                             'open', 'in_progress', 'blocked', 'done', 'cancelled'
+                           )),
+  outcome                  TEXT,                    -- filled when current_status='done'
+  due_at                   TEXT,
+  created_at               TEXT NOT NULL,
+  updated_at               TEXT NOT NULL,
+  FOREIGN KEY (owner_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (source_conversation_id) REFERENCES conversations(id),
+  FOREIGN KEY (source_turn_id) REFERENCES turns(id)
+);
+CREATE INDEX idx_tasks_owner_status ON tasks(owner_principal_id, current_status);
+</code></pre>
+<h3 id="tasks_status_log-a"><code>tasks_status_log</code> (A)</h3>
+<pre><code class="language-sql">CREATE TABLE tasks_status_log (
+  id                  TEXT PRIMARY KEY,
+  task_id             TEXT NOT NULL,
+  from_status         TEXT,
+  to_status           TEXT NOT NULL,
+  actor_principal_id  TEXT NOT NULL,
+  reason              TEXT,
+  occurred_at         TEXT NOT NULL,
+  FOREIGN KEY (task_id) REFERENCES tasks(id),
+  FOREIGN KEY (actor_principal_id) REFERENCES principals(id)
+);
+CREATE INDEX idx_tasks_status_log_task
+  ON tasks_status_log(task_id, occurred_at);
+</code></pre>
+<h3 id="pending_approvals-m-current_status-cached"><code>pending_approvals</code> (M; <code>current_status</code> cached)</h3>
+<p>Staged actions awaiting owner approval.</p>
+<pre><code class="language-sql">CREATE TABLE pending_approvals (
+  id                              TEXT PRIMARY KEY,
+  ai_employee_id                  TEXT NOT NULL,
+  originating_turn_id             TEXT NOT NULL,
+  proposed_action                 TEXT NOT NULL,    -- one of the 14 action types
+  proposed_action_params_json     TEXT NOT NULL,
+  drafted_body                    TEXT,             -- e.g. drafted email body
+  trust_label                     TEXT NOT NULL,
+  requesting_principal_id         TEXT NOT NULL,
+  requires_approver_principal_id  TEXT NOT NULL,
+  current_status                  TEXT NOT NULL DEFAULT 'open' CHECK (current_status IN (
+                                    'open', 'approved', 'rejected',
+                                    'edited_and_approved', 'expired'
+                                  )),
+  resolution_event_id             TEXT,             -- the resolving inbound_event
+  resolution_text                 TEXT,             -- approver's note or edited body
+  resolved_at                     TEXT,
+  expires_at                      TEXT,
+  created_at                      TEXT NOT NULL,
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (originating_turn_id) REFERENCES turns(id),
+  FOREIGN KEY (requesting_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (requires_approver_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (resolution_event_id) REFERENCES inbound_events(id)
+);
+CREATE INDEX idx_pending_approvals_approver_open
+  ON pending_approvals(requires_approver_principal_id) WHERE current_status = 'open';
+CREATE INDEX idx_pending_approvals_turn
+  ON pending_approvals(originating_turn_id);
+</code></pre>
+<h3 id="pending_approvals_status_log-a"><code>pending_approvals_status_log</code> (A)</h3>
+<pre><code class="language-sql">CREATE TABLE pending_approvals_status_log (
+  id                    TEXT PRIMARY KEY,
+  pending_approval_id   TEXT NOT NULL,
+  from_status           TEXT,
+  to_status             TEXT NOT NULL,
+  actor_principal_id    TEXT,                       -- NULL for expiry
+  reason                TEXT,
+  occurred_at           TEXT NOT NULL,
+  FOREIGN KEY (pending_approval_id) REFERENCES pending_approvals(id),
+  FOREIGN KEY (actor_principal_id) REFERENCES principals(id)
+);
+</code></pre>
+<h3 id="external_intake_items-m"><code>external_intake_items</code> (M)</h3>
+<p><code>external_verified</code> sender requests awaiting commander adoption.</p>
+<pre><code class="language-sql">CREATE TABLE external_intake_items (
+  id                              TEXT PRIMARY KEY,
+  ai_employee_id                  TEXT NOT NULL,
+  external_sender_principal_id    TEXT NOT NULL,
+  inbound_event_id                TEXT NOT NULL,
+  summary                         TEXT,             -- agent's triage summary
+  current_status                  TEXT NOT NULL DEFAULT 'awaiting_adoption' CHECK (current_status IN (
+                                    'awaiting_adoption', 'adopted', 'rejected', 'expired'
+                                  )),
+  adopting_principal_id           TEXT,
+  adoption_event_id               TEXT,
+  resolved_at                     TEXT,
+  expires_at                      TEXT,
+  created_at                      TEXT NOT NULL,
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (external_sender_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (inbound_event_id) REFERENCES inbound_events(id),
+  FOREIGN KEY (adopting_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (adoption_event_id) REFERENCES inbound_events(id)
+);
+CREATE INDEX idx_external_intake_employee_status
+  ON external_intake_items(ai_employee_id, current_status);
+</code></pre>
+<h3 id="quarantined_items-m"><code>quarantined_items</code> (M)</h3>
+<p>Items flagged as <code>external-unverified</code> or <code>untrusted-content</code> — visible to the owner, never acted on by the agent.</p>
+<pre><code class="language-sql">CREATE TABLE quarantined_items (
+  id                          TEXT PRIMARY KEY,
+  ai_employee_id              TEXT NOT NULL,
+  inbound_event_id            TEXT NOT NULL,
+  trust_label                 TEXT NOT NULL,
+  reason                      TEXT NOT NULL,        -- e.g. 'unverified sender'
+  current_status              TEXT NOT NULL DEFAULT 'open' CHECK (current_status IN (
+                                'open', 'reviewed', 'summarized', 'expired'
+                              )),
+  reviewed_by_principal_id    TEXT,
+  expires_at                  TEXT,                 -- per SECURITY_SPEC §12 OD-5 (30 days default)
+  created_at                  TEXT NOT NULL,
+  FOREIGN KEY (ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (inbound_event_id) REFERENCES inbound_events(id),
+  FOREIGN KEY (reviewed_by_principal_id) REFERENCES principals(id)
+);
+CREATE INDEX idx_quarantined_employee_open
+  ON quarantined_items(ai_employee_id) WHERE current_status = 'open';
+</code></pre>
+<hr />
+<h2 id="12-group-8-knowledge">12. Group 8 — Knowledge</h2>
+<p>Knowledge in MVP is <strong>file-first</strong>. The DB catalogs documents; text lives on disk.</p>
+<h3 id="file-memoryagent_handlejournalmd">File: <code>memory/&lt;agent_handle&gt;/journal.md</code></h3>
+<p>Not a table. Created when an agent is hired. Append-only markdown log.</p>
+<p>Format for each <code>remember</code> action:</p>
+<pre><code class="language-markdown">## 2026-05-30T15:04:12Z — fact
+Acme Corp uses NET-60 payment terms.
+(source: turn pg_8f31, conversation #482)
+</code></pre>
+<p><strong>Recall (MVP):</strong> read last ~8 KB of <code>journal.md</code> into the turn context; if the trigger payload has keywords, grep the journal for matching lines. No vector search.</p>
+<h3 id="ingested_documents-m"><code>ingested_documents</code> (M)</h3>
+<p>Catalog row per ingested document. Full text is in <code>docs/&lt;id&gt;.txt</code>, not in the DB.</p>
+<pre><code class="language-sql">CREATE TABLE ingested_documents (
+  id                        TEXT PRIMARY KEY,
+  title                     TEXT NOT NULL,
+  source_uri                TEXT,
+  mime                      TEXT NOT NULL,
+  blob_sha256               TEXT NOT NULL,
+  text_path                 TEXT NOT NULL,           -- relative path, e.g. 'docs/01J....txt'
+  size_bytes                INTEGER NOT NULL,      -- cache (blob size)
+  ingested_by_principal_id  TEXT,
+  metadata_json             TEXT,
+  ingested_at               TEXT NOT NULL,
+  updated_at                TEXT NOT NULL,
+  FOREIGN KEY (ingested_by_principal_id) REFERENCES principals(id)
+);
+CREATE INDEX idx_documents_sha256 ON ingested_documents(blob_sha256);
+</code></pre>
+<p><strong>Recall (MVP):</strong> for documents the agent may read (via <code>document_access_grants</code>), grep <code>docs/*.txt</code> for keywords from the turn, or include whole file if under a size cap (~32 KB). No chunking, no embeddings.</p>
+<h3 id="deferred-post-mvp">Deferred post-MVP</h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>document_chunks</code> table</td>
+<td>Docs too large to grep whole-file</td>
+</tr>
+<tr>
+<td>Vector / FTS index</td>
+<td>Grep too slow at scale</td>
+</tr>
+<tr>
+<td><code>ai_employee_memory_entries</code> DB table</td>
+<td>Only if file journals need structured query — unlikely; files are the source of truth</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="13-group-9-the-action-record">13. Group 9 — The Action Record</h2>
+<h3 id="agent_action_log-a-many-fields-frozen-at-write"><code>agent_action_log</code> (A; many fields frozen-at-write)</h3>
+<p>The single source of truth for every gated action. Backs auditor, Pulse, and diagnostics views.</p>
+<pre><code class="language-sql">CREATE TABLE agent_action_log (
+  id                              TEXT PRIMARY KEY,
+  turn_id                         TEXT NOT NULL,
+
+  -- The four identities (INTEGRATION_WOFKLOW §6) — FROZEN AT WRITE
+  technical_actor                 TEXT NOT NULL,    -- e.g. 'pidgin-jira-connector'
+  virtual_actor_ai_employee_id    TEXT NOT NULL,
+  virtual_actor_display_name      TEXT NOT NULL,    -- frozen
+  virtual_actor_role              TEXT NOT NULL,    -- frozen
+  requester_principal_id          TEXT NOT NULL,
+  requester_display_name          TEXT NOT NULL,    -- frozen
+  approver                        TEXT,             -- e.g. 'auto-policy:low-risk' or principal id
+
+  -- The security extension (SECURITY_SPEC §8)
+  trust_label                     TEXT NOT NULL,
+  policy_decision                 TEXT NOT NULL CHECK (policy_decision IN (
+                                    'accepted_as_instruction', 'routed_to_inbox',
+                                    'quarantined', 'auto_approved',
+                                    'awaiting_human_approval',
+                                    'refused_by_policy', 'blocked'
+                                  )),
+
+  -- The action
+  action_type                     TEXT NOT NULL,    -- one of the 14 actions
+  action_params_json              TEXT NOT NULL,
+  target_system                   TEXT,             -- e.g. 'jira', 'slack', 'pidgin'
+  target_resource                 TEXT,             -- e.g. 'FIN-123'
+
+  -- The result
+  outcome                         TEXT NOT NULL CHECK (outcome IN (
+                                    'executed', 'staged', 'refused', 'failed'
+                                  )),
+  outcome_detail_json             TEXT,
+  model_invocation_id             TEXT,             -- LLM call that requested this action
+
+  occurred_at                     TEXT NOT NULL,
+
+  FOREIGN KEY (turn_id) REFERENCES turns(id),
+  FOREIGN KEY (virtual_actor_ai_employee_id) REFERENCES ai_employees(id),
+  FOREIGN KEY (requester_principal_id) REFERENCES principals(id),
+  FOREIGN KEY (model_invocation_id) REFERENCES model_invocations(id)
+);
+CREATE INDEX idx_action_log_turn
+  ON agent_action_log(turn_id, occurred_at);
+CREATE INDEX idx_action_log_employee_time
+  ON agent_action_log(virtual_actor_ai_employee_id, occurred_at DESC);
+CREATE INDEX idx_action_log_outcome_time
+  ON agent_action_log(outcome, occurred_at DESC);
+CREATE INDEX idx_action_log_target
+  ON agent_action_log(target_system, target_resource);
+CREATE INDEX idx_action_log_policy_decision
+  ON agent_action_log(policy_decision, occurred_at DESC);
+</code></pre>
+<p>Notes: This is the single most important table for audit, security review, and product surfaces (Pulse, diagnostics). All <code>*_display_name</code> and <code>virtual_actor_role</code> columns are <strong>frozen at write</strong> — once inserted, never updated, even if the source entity is renamed or deleted.</p>
+<hr />
+<h2 id="14-caches-and-frozen-at-write-fields">14. Caches and Frozen-at-Write Fields</h2>
+<h3 id="141-cached-columns-recomputable">14.1 Cached columns (recomputable)</h3>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Column</th>
+<th>Source of truth</th>
+<th>Rebuild rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ai_employees</code></td>
+<td><code>current_status</code></td>
+<td>latest <code>ai_employees_status_log.to_status</code></td>
+<td><code>SELECT to_status ORDER BY occurred_at DESC LIMIT 1</code></td>
+</tr>
+<tr>
+<td><code>tasks</code></td>
+<td><code>current_status</code></td>
+<td>latest <code>tasks_status_log.to_status</code></td>
+<td>same pattern</td>
+</tr>
+<tr>
+<td><code>pending_approvals</code></td>
+<td><code>current_status</code></td>
+<td>latest <code>pending_approvals_status_log.to_status</code></td>
+<td>same pattern</td>
+</tr>
+<tr>
+<td><code>turns</code></td>
+<td><code>current_status</code></td>
+<td>latest <code>turns_status_log.to_status</code></td>
+<td>same pattern</td>
+</tr>
+<tr>
+<td><code>ai_employee_recipe_snapshots</code></td>
+<td><code>bundle_sha256</code></td>
+<td>sha256 of <code>bundle_json</code></td>
+<td><code>SHA256(bundle_json)</code></td>
+</tr>
+<tr>
+<td><code>ingested_documents</code></td>
+<td><code>size_bytes</code></td>
+<td>file on disk</td>
+<td><code>os.stat(blobs/&lt;sha256&gt;).size</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="142-frozen-at-write-columns-audit-immutability">14.2 Frozen-at-write columns (audit immutability)</h3>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Column</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>messages</code></td>
+<td><code>sender_display_name</code></td>
+</tr>
+<tr>
+<td><code>agent_action_log</code></td>
+<td><code>virtual_actor_display_name</code>, <code>virtual_actor_role</code>, <code>requester_display_name</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="143-explicitly-not-stored-derived-on-read">14.3 Explicitly NOT stored (derived on read)</h3>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>How to compute</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>conversations.last_activity_at</code></td>
+<td><code>MAX(messages.created_at)</code> for the conversation</td>
+</tr>
+<tr>
+<td><code>ai_employees.resolved_permission_profile</code></td>
+<td>merge of <code>recipe_snapshot.bundle_json.permissions</code> + <code>workspace.settings_json.overrides</code> + <code>ai_employees.permission_overrides_json</code></td>
+</tr>
+<tr>
+<td><code>ai_employees.resolved_system_prompt</code></td>
+<td>§7.2 merge of snapshot <code>system_prompt_template</code> + <code>hire_customization_json</code></td>
+</tr>
+<tr>
+<td><code>turns.total_input_tokens</code> etc.</td>
+<td><code>SUM(model_invocations.input_tokens)</code> for the turn</td>
+</tr>
+<tr>
+<td><code>turns.action_count</code></td>
+<td><code>COUNT(agent_action_log)</code> for the turn</td>
+</tr>
+<tr>
+<td><code>ai_employees.pending_approval_count</code></td>
+<td><code>COUNT(pending_approvals WHERE ai_employee_id=? AND current_status='open')</code></td>
+</tr>
+</tbody>
+</table>
+<p>If profiling later shows any of these are expensive enough to need caching, we add a clearly-marked cache column with a rebuild rule. Until then, derive.</p>
+<hr />
+<h2 id="15-schema-migrations">15. Schema Migrations</h2>
+<ul>
+<li>One migration history per physical DB file (per-workspace SQLite). Tracked in <code>schema_migrations</code>.</li>
+<li>Migrations are forward-only; rollbacks happen by creating a new forward migration.</li>
+<li>Each migration is a numbered SQL file with a checksum recorded in <code>schema_migrations.checksum</code>.</li>
+<li>On every <code>open_workspace</code>, the runtime checks for pending migrations and applies them inside a transaction. Failure aborts the open.</li>
+<li>The same migration files apply to every workspace's DB; per-workspace customization lives in <code>workspace.settings_json</code>, not in schema variations.</li>
+</ul>
+<h3 id="151-migration-ledger">15.1 Migration ledger</h3>
+<table>
+<thead>
+<tr>
+<th>Version</th>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>001_initial</code></td>
+<td><code>migrations/001_initial.sql</code></td>
+<td>26 tables — initial schema</td>
+</tr>
+<tr>
+<td><code>002_hire_customization</code></td>
+<td><code>migrations/002_hire_customization.sql</code></td>
+<td>Add <code>ai_employees.hire_customization_json TEXT</code> (nullable)</td>
+</tr>
+</tbody>
+</table>
+<p><code>002_hire_customization.sql</code>:</p>
+<pre><code class="language-sql">ALTER TABLE ai_employees ADD COLUMN hire_customization_json TEXT;
+</code></pre>
+<p>Existing rows: column is <code>NULL</code> until hire flow or profile edit populates it. Hire UX file layout (<code>role-templates/</code>, <code>hr-assist/</code>, <code>audit/</code>) requires <strong>no migration</strong> — directories are created on first use.</p>
+<hr />
+<h2 id="16-open-decisions">16. Open Decisions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Memory journal tail size for recall</td>
+<td>Default ~8 KB; tunable per recipe</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Document whole-file size cap for recall</td>
+<td>Default ~32 KB; larger docs require grep</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Quarantine retention</td>
+<td>Default 30 days per SECURITY_SPEC OD-5</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Pending approval expiry default</td>
+<td>Recommendation: 14 days</td>
+</tr>
+<tr>
+<td>5</td>
+<td>External intake expiry default</td>
+<td>Recommendation: 7 days</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Recipe snapshot retention on offboarding</td>
+<td>Recommendation: keep forever (audit)</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Search upgrade path</td>
+<td>grep → SQLite FTS on files → vectors (post-MVP)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cross-references">Cross-References</h2>
+<ul>
+<li><a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> — Product vision, entities, recipe model</li>
+<li><a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a> — Principals, trust labels, policy decisions, attribution model</li>
+<li><a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a> — Connector model, the four-identity attribution</li>
+<li><a href="AGENT_RUNTIME_SPEC.html">AGENT_RUNTIME_SPEC.md</a> — Triggers, actions, turn lifecycle, gate semantics, prompt construction</li>
+<li><a href="RECIPES_SPEC.html">RECIPES_SPEC.md</a> — Bundled role recipe fields, <code>default_job_requirements</code>, prompt template</li>
+<li><a href="HIRE_UX.html">HIRE_UX.md</a> — Hire wizard UX, template vocabulary, HR assist surfaces</li>
+<li><a href="IMPLEMENTATION_PLAN.html">IMPLEMENTATION_PLAN.md</a> — Phase 1B hire UX tasks and API routes</li>
+<li><a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a> — Python stack, MVP tooling, what we deliberately omit</li>
+</ul>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>

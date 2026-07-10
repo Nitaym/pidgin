@@ -1,0 +1,715 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Runtime — Pidgin Specs</title>
+<link rel="stylesheet" href="assets/spec.css">
+</head>
+<body>
+<input type="checkbox" id="nav-toggle">
+<div class="topbar">
+  <label for="nav-toggle" aria-label="Toggle menu">☰</label>
+  <span class="title">Agent Runtime</span>
+</div>
+<div class="layout">
+  <aside class="sidebar">
+<a class="brand" href="index.html"><span class="mark">Pidgin Specs</span><span class="sub">AI workforce platform</span></a>
+<nav>
+<div class="group-label">Overview</div>
+<a class="item" href="index.html">Home</a>
+<a class="item" href="PRODUCT_SPEC.html">Product Spec</a>
+<a class="item" href="main_features.html">Main Features</a>
+<a class="item" href="MVP_USER_STORIES.html">MVP User Stories</a>
+<div class="group-label">Runtime & behavior</div>
+<a class="item active" href="AGENT_RUNTIME_SPEC.html">Agent Runtime</a>
+<a class="item" href="AUTONOMY_SPEC.html">Autonomy</a>
+<a class="item" href="CHANGE_GATED_WAKEUP_SPEC.html">Change-Gated Wakeup</a>
+<a class="item" href="MEMORY_SPEC.html">Memory</a>
+<a class="item" href="RECIPES_SPEC.html">Recipes</a>
+<div class="group-label">Integrations</div>
+<a class="item" href="INTEGRATION_WOFKLOW.html">Integration Workflow</a>
+<a class="item" href="CONNECTORS_SPEC.html">Connectors</a>
+<div class="group-label">Data & security</div>
+<a class="item" href="SCHEMA_SPEC.html">Schema</a>
+<a class="item" href="SECURITY_SPEC.html">Security</a>
+<div class="group-label">Build & stack</div>
+<a class="item" href="TECH_STACK_SPEC.html">Tech Stack</a>
+<a class="item" href="IMPLEMENTATION_PLAN.html">Implementation Plan</a>
+<div class="group-label">People & UX</div>
+<a class="item" href="HIRE_UX.html">Hire UX</a>
+<a class="item" href="UI_DESIGN_GUIDE.html">UI Design Guide</a>
+<a class="item" href="AGENT_ONBOARDING.html">Agent Onboarding</a>
+<a class="item" href="VOICE_COMMUNICATION.html">Voice & Comms</a>
+<a class="item" href="MARKETING_TEAM_SKETCH.html">Marketing Team Sketch</a>
+</nav>
+  </aside>
+  <main class="content">
+<div class="wrap">
+<header class="spec-head"><p class="eyebrow">Pidgin Spec</p><h1>Pidgin Agent Runtime Spec</h1></header>
+
+<h2 id="summary">Summary</h2>
+<pre><code class="language-text">An AI employee in Pidgin is woken by one of 8 triggers, runs one or more turns, and emits any of 14 actions during each turn. Every action goes through a single policy gate before it can produce a side effect. Structured state lives in the per-workspace SQLite DB; agent memory and document text live in companion files on disk.
+</code></pre>
+<p>The short product line:</p>
+<pre><code class="language-text">An AI employee is a small vocabulary - 8 ways to be woken, 14 things to do, one gate. Everything else is composition.
+</code></pre>
+<blockquote>
+<p><strong>Scope:</strong> The behavioral primitives of an AI employee and the runtime that hosts them. Defines what triggers a turn, what an agent can do during a turn, what context it receives, and where the policy gate lives. Pairs with <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> which defines how this state is persisted.</p>
+<p><strong>Out of scope:</strong> The recipe authoring/marketplace flow, the interview and onboarding scenario harness, the reviewer agent, the diagnostics UI specifics, LLM-provider-level concerns (model selection, fail-over, cost accounting), vector/semantic search. See <a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a> for stack choices.</p>
+</blockquote>
+<hr />
+<h2 id="table-of-contents">Table of Contents</h2>
+<ol>
+<li><a href="#1-purpose">Purpose</a></li>
+<li><a href="#2-the-trigger-model">The Trigger Model</a></li>
+<li><a href="#3-the-action-model">The Action Model</a></li>
+<li><a href="#4-sense-of-time">Sense of Time</a></li>
+<li><a href="#5-memory-and-knowledge-scopes">Memory and Knowledge Scopes</a></li>
+<li><a href="#6-self-prompting">Self-Prompting</a></li>
+<li><a href="#7-turn-lifecycle">Turn Lifecycle</a></li>
+<li><a href="#8-the-policy-gate">The Policy Gate</a></li>
+<li><a href="#9-mvp-runtime-architecture">MVP Runtime Architecture</a></li>
+<li><a href="#10-diagnostics-and-debug-export">Diagnostics and Debug Export</a></li>
+<li><a href="#11-out-of-scope">Out of Scope</a></li>
+<li><a href="#12-open-decisions">Open Decisions</a></li>
+</ol>
+<hr />
+<h2 id="1-purpose">1. Purpose</h2>
+<p><a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a>, <a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a>, and <a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a> collectively define <strong>what</strong> an AI employee is and the guarantees the system must provide around its actions. This spec defines the small set of primitives an AI employee actually <strong>uses</strong> — the trigger and action vocabulary that everything else (interviews, onboarding, conversations, tasks, Pulse) composes from.</p>
+<p>The design goal is to keep this vocabulary small. A human employee operates with a similarly small set of primitives: react to direct address, scan ambient activity, remember things, plan future check-ins, ask permission for risky actions, hand off when blocked. The runtime mirrors that vocabulary directly.</p>
+<hr />
+<h2 id="2-the-trigger-model">2. The Trigger Model</h2>
+<p>A <strong>turn</strong> (one wakeup → think → do → sleep cycle) starts from exactly one of these eight triggers. Nothing else can start a turn.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Trigger</th>
+<th>Human analogy</th>
+<th>Materialized as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Direct address</strong></td>
+<td>Someone DMs or @mentions you</td>
+<td><code>inbound_events</code> row from chat/email connector</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Channel activity</strong></td>
+<td>You overhear something in a room you sit in</td>
+<td><code>inbound_events</code> row from room subscription (opt-in per room)</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Inbound from outside</strong></td>
+<td>Email or external chat arrives</td>
+<td><code>inbound_events</code> row from email/external connector</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Timer</strong></td>
+<td>A scheduled obligation comes due</td>
+<td><code>agent_timers</code> firing → <code>inbound_events</code> row</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Watcher fires</strong></td>
+<td>Something you were keeping an eye on changed</td>
+<td><code>agent_watchers</code> firing → <code>inbound_events</code> row</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Self-prompt</strong></td>
+<td>You remember a follow-up you owed yourself</td>
+<td>Same mechanism as (4), set by the agent itself</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Peer delegation</strong></td>
+<td>A colleague asks you for help</td>
+<td><code>inbound_events</code> row created by another agent's <code>delegate</code> action</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>Approval response</strong></td>
+<td>Your owner got back to you on something you staged</td>
+<td><code>pending_approvals</code> resolution → <code>inbound_events</code> row resuming the original <code>run_id</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="21-properties-of-triggers">2.1 Properties of triggers</h3>
+<ol>
+<li><strong>Every trigger materializes as a row in <code>inbound_events</code>.</strong> The runtime polls one queue, not eight; trigger type is a field on the row.</li>
+<li><strong>Triggers 4–6 are time-based.</strong> They are how an agent acts without being externally prompted. See Section 6.</li>
+<li><strong>Trigger 8 resumes a prior turn</strong> rather than starting a new one. This is what makes approvals feel like the agent waiting on an answer rather than starting fresh.</li>
+<li><strong>Triggers 1 and 2 are different.</strong> Direct address obligates a response; channel activity invites attention. The agent decides whether to act on (2). Channel-activity subscription is off by default per room and must be opted-in.</li>
+<li><strong>Trigger 7 carries the original requester chain.</strong> Per <a href="SECURITY_SPEC.html">SECURITY_SPEC §10</a>, delegation does not launder authority.</li>
+</ol>
+<hr />
+<h2 id="3-the-action-model">3. The Action Model</h2>
+<p>During a turn, an agent may emit any combination of these 14 actions. The runtime exposes exactly these; anything else is composed from them.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Action</th>
+<th>Effect</th>
+<th>Default approval bucket</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>say</strong></td>
+<td>Reply on the channel the turn started on (or stay silent)</td>
+<td>always allowed</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>post</strong></td>
+<td>Send a message on a <em>different</em> channel</td>
+<td><code>can_write</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>read</strong></td>
+<td>Pull from a connector</td>
+<td><code>can_read</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>draft</strong></td>
+<td>Compose a connector-side artifact without publishing</td>
+<td><code>can_write</code> (draft only)</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>execute</strong></td>
+<td>Publish or mutate something in a connector</td>
+<td><code>requires_approval</code> or <code>can_write</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>open_task</strong></td>
+<td>Create a structured task with owner/status</td>
+<td>always allowed</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>remember</strong></td>
+<td>Write to the agent's memory scope</td>
+<td>always allowed</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>recall</strong></td>
+<td>Read from memory + indexed company context</td>
+<td>always allowed</td>
+</tr>
+<tr>
+<td>9</td>
+<td><strong>schedule_self</strong></td>
+<td>Set a timer for a future wakeup (triggers 4 or 6)</td>
+<td>always allowed</td>
+</tr>
+<tr>
+<td>10</td>
+<td><strong>watch</strong></td>
+<td>Subscribe to a connector resource (trigger 5)</td>
+<td>subject to <code>can_read</code></td>
+</tr>
+<tr>
+<td>11</td>
+<td><strong>delegate</strong></td>
+<td>Call another agent (their trigger 7)</td>
+<td>depends on hierarchy recipe</td>
+</tr>
+<tr>
+<td>12</td>
+<td><strong>request_approval</strong></td>
+<td>Stage an action for the owner even if it would be allowed</td>
+<td>always allowed</td>
+</tr>
+<tr>
+<td>13</td>
+<td><strong>escalate</strong></td>
+<td>Hand work back to the human owner/manager with context</td>
+<td>always allowed</td>
+</tr>
+<tr>
+<td>14</td>
+<td><strong>close</strong></td>
+<td>Mark a Task or Conversation done with an outcome</td>
+<td>always allowed</td>
+</tr>
+</tbody>
+</table>
+<h3 id="31-why-draft-and-execute-are-separated">3.1 Why draft and execute are separated</h3>
+<p>The split between <strong>draft</strong> (4) and <strong>execute</strong> (5) is load-bearing. Most of the "approve before send" behavior in <a href="SECURITY_SPEC.html">SECURITY_SPEC §7</a> and <a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW §4.5</a> is the gate refusing <code>execute</code> while permitting <code>draft</code>. A drafted email exists as a connector-side resource (or as <code>pending_approvals.drafted_body</code>) until a commander explicitly executes it.</p>
+<h3 id="32-composability">3.2 Composability</h3>
+<p>Actions compose to produce the higher-level behaviors described in <a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a>:</p>
+<table>
+<thead>
+<tr>
+<th>Higher-level behavior</th>
+<th>Composed from</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Investigate" action button</td>
+<td><code>read</code> + <code>recall</code> + <code>say</code></td>
+</tr>
+<tr>
+<td>"Draft" action button</td>
+<td><code>read</code> + <code>draft</code> + <code>say</code></td>
+</tr>
+<tr>
+<td>"Execute" action button</td>
+<td><code>read</code> + (optional <code>request_approval</code>) + <code>execute</code> + <code>say</code></td>
+</tr>
+<tr>
+<td>Standup digest</td>
+<td><code>recall</code> + <code>post</code></td>
+</tr>
+<tr>
+<td>Follow-up scheduling</td>
+<td><code>say</code> + <code>schedule_self</code></td>
+</tr>
+<tr>
+<td>Cross-role escalation</td>
+<td><code>escalate</code> or <code>delegate</code></td>
+</tr>
+<tr>
+<td>Pulse query response</td>
+<td><code>recall</code> + <code>say</code></td>
+</tr>
+</tbody>
+</table>
+<p>The product surface (action buttons, recipe behaviors, room rules) is implemented as combinations of these 14 primitives.</p>
+<hr />
+<h2 id="4-sense-of-time">4. Sense of Time</h2>
+<p>LLMs are stateless about time. A model call is a self-contained prompt; the model does not know what time it is, how long ago the last message was, or how old anything in front of it is unless the runtime injects those facts as text.</p>
+<p>Without this, agents do dumb things: replying to a 3-day-old thread as if it just arrived; failing to act on a deadline because they don't know whether the date is past or future; waking on a timer without knowing why they set it.</p>
+<p>The runtime injects three categories of temporal facts into every turn's context.</p>
+<h3 id="41-absolute-time">4.1 Absolute time</h3>
+<p>A single line near the top of the prompt:</p>
+<pre><code class="language-text">now: 2026-05-29T18:23:04+03:00
+</code></pre>
+<h3 id="42-elapsed-time-on-referenced-entities">4.2 Elapsed time on referenced entities</h3>
+<p>Whenever the runtime includes a conversation, task, document, or event in the prompt, it annotates how old each thing is relative to <code>now</code>:</p>
+<pre><code class="language-text">Conversation #482 with Dana Levi (started 4 days ago)
+  [4 days ago] Dana:   Can you check the PO on invoice 4421?
+  [4 days ago] Jane:   Looking into it now.
+  [just now]   Dana:   Any update?
+</code></pre>
+<h3 id="43-pending-self-obligations">4.3 Pending self-obligations</h3>
+<p>When a turn runs, the runtime injects the agent's own pending <code>agent_timers</code> and <code>agent_watchers</code> rows as a glance at the agent's "calendar":</p>
+<pre><code class="language-text">My scheduled wakeups:
+  3pm today    - follow up with Dana on PO question (set this morning)
+  9am tomorrow - daily inbox summary
+  Friday       - check on Acme renewal
+
+Things I'm watching:
+  jira:FIN-123 - customer waiting on resolution
+</code></pre>
+<p>This is what makes an agent "know when to act": it can see what it has already committed to and reason about whether to schedule, cancel, or wait.</p>
+<h3 id="44-what-this-is-not">4.4 What this is not</h3>
+<p>The MVP "sense of time" is intentionally minimal. It does not include:</p>
+<ul>
+<li>Timezone-aware calendar arithmetic</li>
+<li>Recurring schedule expressions (<code>cron</code>-style)</li>
+<li>Business-hours awareness</li>
+<li>SLA computation</li>
+<li>Deadline projection</li>
+</ul>
+<p>Those layer on top later. The MVP primitive is: stamp <code>now</code>, annotate ages, show pending obligations.</p>
+<hr />
+<h2 id="5-memory-and-knowledge-scopes">5. Memory and Knowledge Scopes</h2>
+<p>Three scopes. <strong>Conversation state</strong> is in the DB; <strong>agent memory and document text</strong> are files on disk for MVP.</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Contents</th>
+<th>Storage</th>
+<th>Writer</th>
+<th>Readers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Agent memory</strong></td>
+<td>Facts, decisions, preferences, outcomes</td>
+<td><code>memory/&lt;handle&gt;/journal.md</code></td>
+<td>this agent via <code>remember</code></td>
+<td>this agent only</td>
+</tr>
+<tr>
+<td><strong>Conversation state</strong></td>
+<td>Open threads, last message, who's waiting on what</td>
+<td>DB (<code>conversations</code>, <code>messages</code>)</td>
+<td>runtime + this agent</td>
+<td>this agent only (per conversation)</td>
+</tr>
+<tr>
+<td><strong>Company context</strong></td>
+<td>Ingested documents, workspace directory</td>
+<td>DB catalog + <code>docs/*.txt</code> files</td>
+<td>runtime (ingestion) + admin</td>
+<td>agents with <code>document_access_grants</code></td>
+</tr>
+</tbody>
+</table>
+<p>Humans keep notebooks, not SQL tables. Agents do the same for MVP — an append-only journal per agent, greppable and readable in any editor.</p>
+<h3 id="51-per-agent-memory-isolation">5.1 Per-agent memory isolation</h3>
+<p>Each agent has its own <code>memory/&lt;handle&gt;/</code> directory. Jane's journal is invisible to Max. Cross-agent context flows only through company documents (with access grants) or explicit <code>delegate</code>.</p>
+<h3 id="52-memory-journal-format">5.2 Memory journal format</h3>
+<p>Each <code>remember</code> appends a dated block to <code>journal.md</code>:</p>
+<pre><code class="language-markdown">## 2026-05-30T15:04:12Z — fact
+Acme Corp uses NET-60 payment terms.
+(source: turn pg_8f31)
+</code></pre>
+<p>Kinds: <code>fact</code>, <code>decision</code>, <code>preference</code>, <code>outcome</code>, <code>reminder</code> — tagged in the heading for grep.</p>
+<h3 id="53-recall-mvp">5.3 Recall (MVP)</h3>
+<p>The <code>recall</code> action:</p>
+<ol>
+<li>Reads the <strong>tail</strong> of the agent's <code>journal.md</code> (default ~8 KB).</li>
+<li>If the turn has searchable keywords, <strong>greps</strong> the journal for matching lines.</li>
+<li>For granted documents, <strong>greps</strong> <code>docs/*.txt</code> or reads whole file if under size cap (~32 KB).</li>
+</ol>
+<p>No embeddings, no vector DB, no chunk tables. Upgrade search on the file layer when volume demands it.</p>
+<p>Journals grow without bound; <strong>memory cleaning is required</strong> over the agent lifecycle. Mechanism is not defined in MVP — see <a href="MEMORY_SPEC.html">MEMORY_SPEC.md</a>.</p>
+<hr />
+<h2 id="6-self-prompting">6. Self-Prompting</h2>
+<p>This is what turns a chatbot into an employee. Self-prompting is the composition of <code>schedule_self</code> (action 9) and <code>watch</code> (action 10) with triggers 4 and 5:</p>
+<pre><code>At end of any turn, the agent MAY emit:
+  schedule_self(at=2026-05-30T15:00, reason=&quot;follow up with Dana on PO question&quot;)
+  watch(resource=&quot;jira:FIN-123&quot;, until=resolved, reason=&quot;customer waiting&quot;)
+
+Later, when that timer fires or watcher trips:
+  Trigger 4 or 5 starts a new turn.
+  Context includes the original reason and the elapsed time.
+  The agent acts (or chooses to wait further) and may re-schedule.
+
+This is how an agent acts without external prompting.
+</code></pre>
+<h3 id="61-safety-properties-enforced-by-the-runtime">6.1 Safety properties enforced by the runtime</h3>
+<ol>
+<li><strong>Trust label inheritance.</strong> Self-prompts inherit the <code>trust_label</code> of the turn that created them (stored on <code>agent_timers.inherited_trust_label</code>). A turn triggered by <code>untrusted-content</code> cannot escalate itself to <code>internal-authenticated</code> via a self-prompt.</li>
+<li><strong>Budget.</strong> Each agent has a per-day cap on pending self-prompts (<code>max_pending_timers</code>) and on wakeups (<code>max_wakeups_per_day</code>). Configurable per recipe; defaults TBD (Open Decision 4). Prevents runaway self-prompting from any source — buggy recipe, prompt injection, infinite-loop logic.</li>
+<li><strong>Cancellation.</strong> An agent can cancel its own pending timers (via a corresponding internal action). Cancellation goes through the gate like any other action.</li>
+</ol>
+<hr />
+<h2 id="7-turn-lifecycle">7. Turn Lifecycle</h2>
+<p>A turn is the atomic unit of agent work. One trigger → one turn (with optional resumes).</p>
+<h3 id="71-phases">7.1 Phases</h3>
+<pre><code>1. Trigger materializes as an inbound_events row (processing_status='pending').
+2. Runtime resolves principal and attaches trust_label (see SECURITY_SPEC §3-4).
+3. Runtime starts or resumes a turn:
+   - New turn: insert into turns, link via inbound_events.resulting_turn_id.
+   - Resume:   load turn referenced by inbound_events.resumes_turn_id.
+4. Runtime builds context:
+   - trigger payload
+   - conversation state (if any)
+   - agent memory entries (via recall on trigger content)
+   - referenced company documents (filtered by document_access_grants)
+   - pending self-obligations (agent_timers, agent_watchers)
+   - resolved permission profile (recipe + workspace overrides + employee overrides)
+   - sense-of-time injection per Section 4
+5. Runtime calls the LLM. Full request and response logged as a model_invocations row.
+6. The LLM emits 0+ actions. Each goes through the policy gate (Section 8).
+7. Accepted actions execute; agent_action_log rows written for every gate decision.
+8. If the model wants another iteration (saw a tool result, needs to think more):
+   - Loop back to step 5.
+9. Turn ends in one of:
+   - completed: all actions resolved
+   - suspended: one or more pending_approvals open; turn parks until trigger 8
+   - failed:    runtime error
+   - refused:   gate refused enough actions that nothing meaningful proceeds
+</code></pre>
+<h3 id="72-concurrency">7.2 Concurrency</h3>
+<ul>
+<li><strong>One turn at a time per <code>(ai_employee_id, conversation_id)</code>.</strong> Parallel turns across different conversations are fine.</li>
+<li><strong>Suspended turns hold no in-memory state.</strong> A turn waiting on approval can wait hours or days; state lives entirely in the DB.</li>
+<li><strong>Crash-resumable.</strong> On runtime startup, any <code>inbound_events.processing_status = 'pending'</code> rows are picked up; any <code>turns.current_status = 'running'</code> rows are reconciled (timed-out turns marked <code>failed</code> and optionally retried).</li>
+</ul>
+<h3 id="73-sub-turns-via-delegate">7.3 Sub-turns via delegate</h3>
+<p>When agent A's turn invokes <code>delegate</code> to agent B:</p>
+<ul>
+<li>A new <code>inbound_events</code> row is created (trigger 7) addressed to B</li>
+<li>The originating turn's <code>id</code> is recorded as <code>parent_turn_id</code> on the new event</li>
+<li>A's turn may either wait on the result (suspends, resumes on B's completion event) or fire-and-forget</li>
+<li>Authorization propagates: B sees both <code>requester=agentA</code> and the chain back to the original human requester, per <a href="SECURITY_SPEC.html">SECURITY_SPEC §10</a></li>
+</ul>
+<hr />
+<h2 id="8-the-policy-gate">8. The Policy Gate</h2>
+<p>Every action the LLM emits is gated before it can produce a side effect. The gate is a pure function:</p>
+<pre><code>gate(principal, trust_label, ai_employee, action) -&gt; decision
+
+decision in {
+  accept,                  // action executes
+  stage_as_pending_approval,
+  stage_as_external_intake,
+  quarantine,
+  refuse,                  // policy violation or blocked
+}
+</code></pre>
+<h3 id="81-inputs-to-the-gate">8.1 Inputs to the gate</h3>
+<ul>
+<li><code>principal</code> — from the originating <code>inbound_events</code> row</li>
+<li><code>trust_label</code> — from the originating event</li>
+<li><code>ai_employee.invocation_policy</code> — derived from the recipe + hierarchy (commanders / requesters / external_intake / untrusted, per <a href="SECURITY_SPEC.html">SECURITY_SPEC §5</a>)</li>
+<li><code>ai_employee.permission_profile</code> — resolved (<code>can_read</code> / <code>can_write</code> / <code>requires_approval</code> / <code>blocked</code>, per <a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW §4-5</a>)</li>
+<li><code>action.type</code> and <code>action.params</code></li>
+</ul>
+<h3 id="82-instructions-vs-data-enforcement">8.2 Instructions vs. data enforcement</h3>
+<p>The gate refuses any action whose causal trigger is <code>untrusted-content</code> with no commander instruction in the same turn (per <a href="SECURITY_SPEC.html">SECURITY_SPEC §6</a>). Concretely: a turn whose trigger had <code>trust_label = untrusted-content</code>, or a turn that pulled in untrusted content via <code>read</code>, cannot have that content originate a <code>post</code>/<code>draft</code>/<code>execute</code> call.</p>
+<h3 id="83-where-the-gate-lives">8.3 Where the gate lives</h3>
+<p>The gate runs <strong>outside the LLM</strong>, in runtime code. The LLM never makes the final call about whether a tool fires. This is the single most important enforcement point in the system.</p>
+<p>For MVP, the gate is an in-process pure function. The contract is small enough that it can be lifted into its own service later without changing callers.</p>
+<h3 id="84-audit-invariant">8.4 Audit invariant</h3>
+<p><strong>Every gate decision produces an <code>agent_action_log</code> row</strong>, regardless of outcome (<code>executed</code> / <code>staged</code> / <code>refused</code> / <code>failed</code>). The audit log is the projection of every gate decision the system ever made. There is no "silent refusal." This is what makes the diagnostics view and the Pulse view possible from the same source of truth.</p>
+<hr />
+<h2 id="9-mvp-runtime-architecture">9. MVP Runtime Architecture</h2>
+<p>For MVP, the runtime is a single process running locally, capable of offline operation.</p>
+<h3 id="91-process-model">9.1 Process model</h3>
+<p>One <code>pidgind</code> process containing:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Scheduler</strong></td>
+<td>Wakes on the soonest <code>agent_timers.scheduled_at</code> across loaded workspaces; converts fired timers into <code>inbound_events</code> rows</td>
+</tr>
+<tr>
+<td><strong>Watcher dispatcher</strong></td>
+<td>Receives connector-side change notifications; converts into <code>inbound_events</code> rows</td>
+</tr>
+<tr>
+<td><strong>Event dispatcher</strong></td>
+<td>Picks up <code>inbound_events</code> rows with <code>processing_status='pending'</code>; starts or resumes turns</td>
+</tr>
+<tr>
+<td><strong>Turn executor</strong></td>
+<td>Runs the lifecycle of Section 7</td>
+</tr>
+<tr>
+<td><strong>Policy gate</strong></td>
+<td>In-process function called for every action</td>
+</tr>
+<tr>
+<td><strong>LLM gateway</strong></td>
+<td>Module behind a single <code>call(messages, tools, budget) → response</code> interface; HTTP-backed</td>
+</tr>
+<tr>
+<td><strong>Connector layer</strong></td>
+<td>One module per integration (Slack, Email, Jira, Google Workspace, ...) implementing a uniform contract</td>
+</tr>
+<tr>
+<td><strong>Diagnostics web server</strong></td>
+<td>Read-only views over the DB</td>
+</tr>
+<tr>
+<td><strong>Main web/desktop UI</strong></td>
+<td>The user-facing workspace (rooms, conversations, agents, tasks, Pulse)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="92-storage">9.2 Storage</h3>
+<ul>
+<li><strong>One workspace directory</strong> per tenant: plain <code>db.sqlite</code> + <code>memory/</code>, <code>docs/</code>, <code>blobs/</code> text files.</li>
+<li><strong>Each workspace has its own password.</strong> Caller supplies it at open time; Pidgin verifies against a bcrypt hash in <code>auth.json</code> and <strong>never stores the password</strong>. For MVP the operator keeps passwords wherever they like; production injects from K8s secrets / Vault / env.</li>
+<li><strong>No OS keychain, no Argon2id, no AES credential encryption</strong> in MVP — keep it simple.</li>
+<li>See <a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md §4</a> for layout and lifecycle commands.</li>
+</ul>
+<h3 id="93-llm-gateway">9.3 LLM gateway</h3>
+<p>A single module behind a <code>call(messages, tools, budget) → response</code> interface. In MVP it makes direct HTTPS calls to the model provider; in the future it can be extracted to a sidecar service without changing callers.</p>
+<p>Responsibilities:</p>
+<ul>
+<li>Provider routing (Anthropic / OpenAI / local model)</li>
+<li>Prompt construction (system prompt + context + tool definitions)</li>
+<li>Response parsing (extract <code>say</code> text + tool calls)</li>
+<li>Cost accounting (writes <code>model_invocations</code> row per call)</li>
+<li>Budget enforcement (per-workspace, per-agent, per-turn)</li>
+</ul>
+<h3 id="94-connector-layer">9.4 Connector layer</h3>
+<p>Each integration is a module implementing a small uniform contract:</p>
+<pre><code>read(resource, principal) -&gt; bytes | structured_data
+write(resource, payload, principal) -&gt; handle
+subscribe(resource, callback) -&gt; watcher_handle
+unsubscribe(handle)
+metadata() -&gt; { capabilities, rate_limits, ... }
+</code></pre>
+<p>All calls go through the policy gate before the connector module is invoked. <strong>Simulated connectors</strong> for interview/onboarding implement the same contract and are substituted at injection time — same Loop 3 code path, different connector implementations.</p>
+<p>Implementation details (auth modes, resource URIs, admin API, UI, build order): <a href="CONNECTORS_SPEC.html">CONNECTORS_SPEC.md</a>.</p>
+<h3 id="95-recipe-consumption">9.5 Recipe consumption</h3>
+<p>The runtime fetches recipe bundles from a <strong>separate marketplace app</strong> at hire time, verifies the bundle's sha256, and stores an immutable snapshot in <code>ai_employee_recipe_snapshots</code>. After hire, the runtime never reads the marketplace again for that agent.</p>
+<p>Recipe upgrades create new snapshot rows; running agents stay pinned to their hired version until an admin explicitly upgrades them.</p>
+<h3 id="96-separability-promises">9.6 Separability promises</h3>
+<p>The following are kept behind clean module boundaries even though they run in-process for MVP, so they can be lifted out without API changes later:</p>
+<ol>
+<li><strong>LLM gateway</strong> — module behind a single interface</li>
+<li><strong>Connector layer</strong> — module per integration with a uniform contract</li>
+<li><strong>Policy gate</strong> — pure function with a typed contract</li>
+<li><strong>Recipe marketplace</strong> — separate app, talks to runtime over HTTP only</li>
+</ol>
+<hr />
+<h2 id="10-diagnostics-and-debug-export">10. Diagnostics and Debug Export</h2>
+<h3 id="101-diagnostics-web-app">10.1 Diagnostics web app</h3>
+<p>A read-only set of views over the per-workspace DB. Routes:</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Shows</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/turns</code></td>
+<td>List of all turns (filterable by agent, conversation, status, trust label, policy decision)</td>
+</tr>
+<tr>
+<td><code>/turns/&lt;run_id&gt;</code></td>
+<td>Single-turn timeline: trigger → principal → context → LLM call(s) → action(s) → gate decisions → audit rows</td>
+</tr>
+<tr>
+<td><code>/agents/&lt;id&gt;</code></td>
+<td>Agent profile: pending timers, watchers, recent turns, resolved permission profile, recipe version</td>
+</tr>
+<tr>
+<td><code>/audit</code></td>
+<td>Raw <code>agent_action_log</code> with filters by trust label, policy decision, action type</td>
+</tr>
+<tr>
+<td><code>/pulse</code></td>
+<td>Same data, curated for end users (filters / summaries)</td>
+</tr>
+</tbody>
+</table>
+<p>The diagnostics view and the Pulse view read from the same <code>agent_action_log</code> and supporting tables. Pulse is the curated/summarized view for end users; diagnostics is the raw view for developers.</p>
+<h3 id="102-file-export-flag-controlled-off-by-default">10.2 File export (flag-controlled, off by default)</h3>
+<p>When enabled per workspace, every turn flushes a folder as it runs:</p>
+<pre><code>workspaces/&lt;id&gt;/_debug/
+  2026-05-29/
+    18-23-04__pg_8f31__jane__followup-on-PO/
+      turn.md
+      prompt.txt
+      response.txt
+      gate-decisions.jsonl
+      tool-calls.jsonl
+      audit.jsonl
+      events.jsonl
+</code></pre>
+<p><code>turn.md</code> renders the same timeline as the web app's single-turn view, in a format that is:</p>
+<ul>
+<li>Greppable with regular tools</li>
+<li>Pasteable into bug reports</li>
+<li>Loadable as context by AI coding tools</li>
+<li>Readable in any editor</li>
+</ul>
+<h3 id="103-security-trade-off">10.3 Security trade-off</h3>
+<p>Debug export creates plaintext files of prompts and responses on disk. For MVP this is consistent with the DB itself being plaintext; the flag remains <strong>off by default</strong>, requires explicit opt-in per workspace, surfaces a clear warning at enable time, and auto-purges after a configurable retention (default 7 days).</p>
+<p>When full DB encryption lands post-MVP, an "encrypted debug export" mode can be added that writes the same files encrypted under the workspace key, without breaking the use case for tooling that holds the key.</p>
+<hr />
+<h2 id="11-out-of-scope">11. Out of Scope</h2>
+<p>Deferred to separate specs:</p>
+<ul>
+<li>Recipe authoring schema and marketplace UX → future <code>RECIPES_SPEC.md</code></li>
+<li>Interview scenario harness and scoring rubric → future <code>INTERVIEW_SPEC.md</code></li>
+<li>Reviewer agent and recipe improvement loop → future <code>REVIEWER_SPEC.md</code></li>
+<li>Pulse query language and summarization rules → future <code>PULSE_SPEC.md</code></li>
+<li>Voice notes, calls, meetings, screen-share (MVP is text only)</li>
+<li>Vector / semantic search over memory and documents</li>
+<li>Multi-machine deployment, high availability, cross-tenant federation</li>
+<li>OS keychain integration and credential encryption at rest (MVP uses external password supply + plaintext connector JSON)</li>
+<li>Authentication protocols (DKIM/DMARC, OAuth, mTLS) → future <code>SECURITY_PROTOCOLS_SPEC.md</code></li>
+</ul>
+<hr />
+<h2 id="12-open-decisions">12. Open Decisions</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Language and runtime</td>
+<td><strong>Python 3.12+</strong> — see <a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Web framework</td>
+<td><strong>FastAPI</strong> — see TECH_STACK_SPEC</td>
+</tr>
+<tr>
+<td>3</td>
+<td>LLM client library</td>
+<td>Official <code>anthropic</code> + <code>openai</code> SDKs</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Self-prompt budget defaults</td>
+<td>Recommendation: 50 pending timers, 100 wakeups/day</td>
+</tr>
+<tr>
+<td>5</td>
+<td>DB encryption (post-MVP)</td>
+<td>SQLCipher when multi-tenant</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Channel activity default (trigger 2)</td>
+<td>Off-by-default per room</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Debug export retention</td>
+<td>7 days default</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Turn failure retry policy</td>
+<td>Auto-retry network errors once</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Memory recall tail size</td>
+<td>~8 KB journal tail; grep for keywords</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Document recall size cap</td>
+<td>~32 KB whole-file; else grep</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cross-references">Cross-References</h2>
+<ul>
+<li><a href="PRODUCT_SPEC.html">PRODUCT_SPEC.md</a> — Product vision, entities, recipe model, user flows</li>
+<li><a href="SECURITY_SPEC.html">SECURITY_SPEC.md</a> — Principals, trust labels, invocation policy, gate semantics</li>
+<li><a href="INTEGRATION_WOFKLOW.html">INTEGRATION_WOFKLOW.md</a> — Connector model, attribution, permission buckets</li>
+<li><a href="SCHEMA_SPEC.html">SCHEMA_SPEC.md</a> — Per-workspace DB schema backing this runtime</li>
+<li><a href="TECH_STACK_SPEC.html">TECH_STACK_SPEC.md</a> — Language, libraries, and MVP tooling choices</li>
+</ul>
+<footer>Part of the <a href="index.html">Pidgin spec set</a> · static HTML, no build server required.</footer>
+</div>
+  </main>
+</div>
+</body>
+</html>
