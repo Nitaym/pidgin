@@ -166,7 +166,7 @@
     <table>
       <thead><tr><th>#</th><th>Source</th><th>Probe reads</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td class="d">New inbound events</td><td><code>inbound_events</code> for this agent with <code>received_at &gt; last_ran_at</code> (DMs, channel activity, external mail).</td></tr>
+        <tr><td>1</td><td class="d">New inbound events</td><td><code>inbound_events</code> for this agent with <code>received_at &gt; last_ran_at</code> (DMs, channel activity, external mail) — counted <strong>even if already processed</strong> by their own trigger.</td></tr>
         <tr><td>2</td><td class="d">Task state change</td><td><code>tasks_status_log</code> entries since baseline (new/unblocked), plus tasks whose <code>due_at</code> crossed the <code>last_ran_at → now</code> window (computed).</td></tr>
         <tr><td>3</td><td class="d">Approvals resolved</td><td><code>pending_approvals</code> for this agent resolved since baseline.</td></tr>
         <tr><td>4</td><td class="d">Watched-resource change</td><td>Fired <code>agent_watchers</code> / watcher <code>inbound_events</code> since baseline — <strong>only for resources the agent explicitly watches</strong>, never ambient connector activity.</td></tr>
@@ -216,8 +216,23 @@
       <strong>09:00</strong>; an operator can add more in the Advanced panel (e.g. 09:00, 13:00, 17:00) — each is a
       guaranteed full pass regardless of change. This is the liveness floor beneath the gated pollers.
     </p>
+    <p>
+      These times are anchored to the <strong>system timezone</strong>, which is set once at installation during
+      onboarding (there is no per-agent timezone). Per the platform's time-display convention (§4.6), every wake
+      time is rendered <em>with</em> its zone — never a bare "09:00".
+    </p>
 
-    <h3>4.6 Recording a skip</h3>
+    <h3>4.6 Time display convention (system-wide)</h3>
+    <p>
+      A timezone is <strong>never optional</strong> when a time is shown. Just as a price is written
+      <code>$12,873</code> and never a bare <code>12873</code>, every time reference in the product carries its
+      zone — inline or as fine-print beside the value (e.g. <em>09:00 <span style="color:var(--faint)">Europe/Berlin</span></em>).
+      This applies everywhere this feature surfaces a time: the guaranteed wake times, the skip-strip time ranges,
+      and the <code>last_ran_at</code> baseline in a probe snapshot. The single source of truth is the system
+      timezone chosen at install; this spec does not introduce a second clock.
+    </p>
+
+    <h3>4.7 Recording a skip</h3>
     <p>
       A skip still <strong>creates a turn record</strong> so it is a first-class, auditable object in the turns
       table and dashboard — but a terminal one with no LLM call:
@@ -229,14 +244,16 @@
       <li><code>inbound_events.processing_status = 'skipped'</code>; one audit row per skip.</li>
     </ul>
     <p>
-      The dashboard <strong>collapses consecutive skips</strong> into one strip — e.g.
-      <em>"⤳ 12 recurring wakeups skipped (nothing changed) · 08:00–14:00"</em> — that expands to the individual
-      firings and their snapshots. Real turns stay legible; skips stay auditable. Expanding a skip shows exactly
-      why it was safe: <em>"0 new events · 0 task changes · 0 approvals · 0 watched-resource changes · 0 delegated
-      returns since 08:30."</em>
+      The turns view is always <strong>per-agent</strong>, so consecutive skips are collapsed <strong>per-timer</strong>
+      within it — otherwise two interleaved pollers' skips would merge into one meaningless strip. Each strip covers a
+      run of one timer's skips — e.g.
+      <em>"⤳ 12 skipped · campaign-poller (30m) · nothing changed · 08:00–14:00 <span style="color:var(--faint)">Europe/Berlin</span>"</em>
+      — and expands to the individual firings and their snapshots. Real turns stay legible; skips stay auditable.
+      Expanding one shows exactly why it was safe: <em>"0 new events · 0 task changes · 0 approvals ·
+      0 watched-resource changes · 0 delegated returns since 08:30 <span style="color:var(--faint)">Europe/Berlin</span>."</em>
     </p>
 
-    <h3>4.7 Budget</h3>
+    <h3>4.8 Budget</h3>
     <p>
       Skips <strong>do not draw against <code>max_wakeups_per_day</code></strong> — that counter meters real
       (LLM-running) turns only. Charging empty wakeups would defeat the feature and could starve an agent out of
@@ -246,7 +263,7 @@
       diagnostics even though it's unmetered).
     </p>
 
-    <h3>4.8 Configuration</h3>
+    <h3>4.9 Configuration</h3>
     <p>
       The gate and the daily floor are <strong>universal, on-by-default runtime behavior</strong>. Every knob is
       overridable <strong>per agent</strong> in an <strong>Advanced</strong> configuration panel on the agent's
@@ -265,7 +282,7 @@
       timer out of gating (the compliance "prove you're alive" tick).
     </p>
 
-    <h3>4.9 Schema (additive)</h3>
+    <h3>4.10 Schema (additive)</h3>
     <ul>
       <li><code>agent_timers.last_ran_at TEXT NULL</code> — per-timer baseline; stamped only on a real run.</li>
       <li><code>agent_timers.always_run INTEGER NOT NULL DEFAULT 0</code> — per-timer gate opt-out.</li>
@@ -294,6 +311,10 @@
         <tr><td class="q">How is a skip recorded?</td><td class="d">Create a real turn record with <code>status = skipped</code> + probe snapshot; UI collapses consecutive skips.</td><td>A skip should be a first-class, auditable object ("no silent drop"), but no thinking happened — so terminal, no LLM, and quiet in the timeline.</td></tr>
         <tr><td class="q">Do skips count against the wakeup budget?</td><td class="d">No. <code>max_wakeups_per_day</code> meters real turns only — and its docs must say so explicitly.</td><td>Charging empty wakeups would defeat the feature and could defer an agent out of real work. Runaway arming is already bounded by <code>max_pending_timers</code>.</td></tr>
         <tr><td class="q">Universal or configurable?</td><td class="d">Universal on-by-default runtime behavior; every knob overridable per agent in an Advanced panel. Plus per-timer <code>always_run</code>.</td><td>Safe default for everyone; advanced operators tune per agent without recipe edits. No global "empty wakeups back" switch — there's no legitimate need.</td></tr>
+        <tr><td class="q">Do already-processed inbound events count (source 1)?</td><td class="d">Yes — an inbound event counts if <code>received_at &gt; last_ran_at</code>, even if it already fired its own trigger-1/2/3 turn.</td><td>The recurring review synthesizes across everything since its last real run; excluding processed events would blind it to the day's activity. A chatty agent skipping rarely is the correct outcome — there genuinely was work.</td></tr>
+        <tr><td class="q">How is a <code>due_at</code> crossing detected (source 2)?</td><td class="d">Compute at probe time: tasks with <code>last_ran_at &lt; due_at &le; now</code>. No synthetic "task due" event is materialized.</td><td>A deadline passing is time advancing, not an event; a pure query is cheaper and needs no clock/writer to emit due-events.</td></tr>
+        <tr><td class="q">How do skips collapse in the dashboard?</td><td class="d">The turns view is always per-agent, so skips collapse <em>per-timer</em> within it — one strip per timer's run of skips.</td><td>Collapsing across timers in a per-agent view would merge two interleaved pollers into one unreadable strip; per-timer keeps each strip meaningful.</td></tr>
+        <tr><td class="q">What timezone anchors displayed times?</td><td class="d">The system timezone, set once at install during onboarding — no per-agent clock. Every displayed time carries its zone (fine-print), always.</td><td>One source of truth avoids ambiguity; a bare time is as broken as a bare price (<code>$12,873</code>, never <code>12873</code>). The zone belongs wherever the time appears.</td></tr>
       </tbody>
     </table>
   </section>
@@ -301,21 +322,11 @@
   <!-- OPEN QUESTIONS -->
   <section>
     <h2><span class="num">6</span>Open questions</h2>
-    <div class="callout">
-      <ul>
-        <li><strong>Already-processed inbound events (source 1).</strong> An inbound event fires its own trigger-1/2/3
-            turn. Should it <em>also</em> count as "change" for a later recurring gate? Leaning yes (the review may want to
-            synthesize across the day) — but a chatty agent would then almost never skip. Confirm, or restrict source 1 to
-            <em>unprocessed</em> events.</li>
-        <li><strong><code>due_at</code> crossing detection (source 2).</strong> A task becoming due is time passing, not a row
-            insert. Leaning compute-at-probe (tasks with <code>last_ran_at &lt; due_at &le; now</code>) rather than
-            materializing a task-due event. Confirm.</li>
-        <li><strong>Skip-strip aggregation.</strong> Collapse consecutive skips per-timer or across all of an agent's timers?
-            UI detail, but affects how the strip reads. Leaning per-agent, expandable to per-timer.</li>
-        <li><strong>Timezone for guaranteed wake times.</strong> Reuses the autonomy spec's open decision (workspace tz,
-            fall back to UTC). Confirm no separate per-agent tz here.</li>
-      </ul>
-    </div>
+    <p>
+      None outstanding. The four questions raised during design — whether already-processed inbound events count,
+      how <code>due_at</code> crossings are detected, how skips collapse in the dashboard, and which timezone anchors
+      displayed times — were all resolved and moved into §5 (Decisions &amp; rationale) and §4.
+    </p>
   </section>
 
   <!-- BUILD ORDER -->
