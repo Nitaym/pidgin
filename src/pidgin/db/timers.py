@@ -68,6 +68,7 @@ def create_timer(
     originating_turn_id: str | None = None,
     kind: str = "oneshot",
     recurrence_json: str | None = None,
+    always_run: bool = False,
 ) -> str:
     timer_id = new_ulid()
     now = utc_now_iso()
@@ -75,8 +76,9 @@ def create_timer(
         """
         INSERT INTO agent_timers (
           id, ai_employee_id, scheduled_at, reason, originating_turn_id,
-          inherited_trust_label, kind, recurrence_json, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+          inherited_trust_label, kind, recurrence_json, always_run, status,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
         """,
         (
             timer_id,
@@ -87,6 +89,7 @@ def create_timer(
             inherited_trust_label,
             kind,
             recurrence_json,
+            1 if always_run else 0,
             now,
             now,
         ),
@@ -164,16 +167,38 @@ def count_pending_timers(conn: sqlite3.Connection, *, ai_employee_id: str) -> in
 
 
 def count_wakeups_today(conn: sqlite3.Connection, *, ai_employee_id: str) -> int:
-    """Timer-triggered turns for this agent since 00:00 UTC — the daily budget."""
+    """Real timer-triggered turns for this agent since 00:00 UTC — the daily budget.
+
+    Change-gated wakeups that skipped never ran an LLM turn, so they do NOT
+    count against ``max_wakeups_per_day`` — charging empty wakeups would defeat
+    the gate and could defer an agent out of real work
+    (specs/CHANGE_GATED_WAKEUP_SPEC.html §4.8). Skipped events are excluded here.
+    """
     midnight = datetime.now(tz=UTC).strftime("%Y-%m-%dT00:00:00.000Z")
     row = conn.execute(
         """
         SELECT COUNT(*) AS n FROM inbound_events
-        WHERE target_ai_employee_id = ? AND trigger_type = 'timer' AND received_at >= ?
+        WHERE target_ai_employee_id = ? AND trigger_type = 'timer'
+          AND processing_status != 'skipped' AND received_at >= ?
         """,
         (ai_employee_id, midnight),
     ).fetchone()
     return int(row["n"]) if row else 0
+
+
+def stamp_timer_ran(conn: sqlite3.Connection, timer_id: str) -> None:
+    """Advance a timer's baseline to now — its last real (non-skipped) run.
+
+    The change probe measures "anything since last_ran_at?"; stamping at run
+    time (not skip time) is what stops a change during a quiet streak from being
+    swallowed by a later skip (spec §4.3).
+    """
+    now = utc_now_iso()
+    conn.execute(
+        "UPDATE agent_timers SET last_ran_at = ?, updated_at = ? WHERE id = ?",
+        (now, now, timer_id),
+    )
+    conn.commit()
 
 
 def mark_timer_fired(

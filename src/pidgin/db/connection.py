@@ -13,6 +13,7 @@ MIGRATION_VERSIONS = (
     "004_slack_messaging",
     "005_autonomy",
     "006_execution_grants",
+    "007_change_gated_wakeup",
 )
 SYSTEM_EMPLOYEE_ID = "000000000000000000000000"
 

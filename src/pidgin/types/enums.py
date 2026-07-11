@@ -60,3 +60,7 @@ class ProcessingStatus(StrEnum):
     DISPATCHING = "dispatching"
     DONE = "done"
     FAILED = "failed"
+    # A change-gated recurring wakeup whose probe found nothing changed: the
+    # event is anchored but never dispatched into an LLM turn. See
+    # specs/CHANGE_GATED_WAKEUP_SPEC.html §4.7.
+    SKIPPED = "skipped"

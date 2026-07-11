@@ -15,16 +15,85 @@ import sqlite3
 
 from pidgin.db.employees import get_agent_by_handle, transition_employee_status
 from pidgin.db.principals import get_or_create_operator_principal
-from pidgin.db.timers import cancel_agent_timers, create_timer
+from pidgin.db.timers import cancel_agent_timers, create_timer, iso_utc, next_occurrence
 from pidgin.recipes.models import RoleRecipe
 from pidgin.types import TrustLabel
 from pidgin.util.ids import utc_now_iso
 
 log = logging.getLogger(__name__)
 
+# The guaranteed-wake floor: even a totally quiet agent does a real pass at these
+# times each day. These timers are always_run, so change-gating never skips them
+# (spec §4.5). Overridable per agent via guaranteed_wake_times_json.
+_DEFAULT_GUARANTEED_WAKE_TIMES = ("09:00",)
+
 
 class ActivationError(Exception):
     pass
+
+
+def _guaranteed_wake_times(conn: sqlite3.Connection, ai_employee_id: str) -> list[str]:
+    import json
+
+    row = conn.execute(
+        "SELECT guaranteed_wake_times_json FROM ai_employees WHERE id = ?",
+        (ai_employee_id,),
+    ).fetchone()
+    raw = row["guaranteed_wake_times_json"] if row else None
+    if not raw:
+        return list(_DEFAULT_GUARANTEED_WAKE_TIMES)
+    try:
+        times = json.loads(raw)
+    except (ValueError, TypeError):
+        return list(_DEFAULT_GUARANTEED_WAKE_TIMES)
+    return [str(t) for t in times] or list(_DEFAULT_GUARANTEED_WAKE_TIMES)
+
+
+def resync_guaranteed_wakes(conn: sqlite3.Connection, ai_employee_id: str) -> int:
+    """Rebuild an active agent's guaranteed-wake floor from current config.
+
+    Cancels the existing ungated daily timers and re-arms from
+    guaranteed_wake_times_json, so an operator editing the wake times in the
+    Advanced panel sees them take effect now, not at the next activation.
+    """
+    conn.execute(
+        """
+        UPDATE agent_timers SET status = 'cancelled', updated_at = ?
+        WHERE ai_employee_id = ? AND status = 'pending'
+          AND always_run = 1 AND kind = 'recurring'
+        """,
+        (utc_now_iso(), ai_employee_id),
+    )
+    conn.commit()
+    return _arm_guaranteed_wakes(conn, ai_employee_id)
+
+
+def _arm_guaranteed_wakes(conn: sqlite3.Connection, ai_employee_id: str) -> int:
+    """Arm one ungated daily recurring timer per guaranteed wake time."""
+    import json
+    from datetime import UTC, datetime
+
+    armed = 0
+    for at_local_time in _guaranteed_wake_times(conn, ai_employee_id):
+        recurrence = {"kind": "daily", "at_local_time": at_local_time}
+        first = next_occurrence(recurrence, after=datetime.now(tz=UTC))
+        create_timer(
+            conn,
+            ai_employee_id=ai_employee_id,
+            scheduled_at=iso_utc(first),
+            reason=(
+                "[Daily review] A full pass over your responsibilities — advance "
+                "your open tasks, then go quiet. This runs every day regardless of "
+                "whether anything changed."
+            ),
+            inherited_trust_label=TrustLabel.INTERNAL_AUTHENTICATED.value,
+            originating_turn_id=None,  # self-anchored
+            kind="recurring",
+            recurrence_json=json.dumps(recurrence),
+            always_run=True,  # the floor is never change-gated
+        )
+        armed += 1
+    return armed
 
 
 def _load_recipe(conn: sqlite3.Connection, recipe_snapshot_id: str) -> RoleRecipe | None:
@@ -168,10 +237,14 @@ def activate_agent(
         originating_turn_id=None,  # self-anchored: no conversation
         kind="bootstrap",
     )
+    armed = _arm_guaranteed_wakes(conn, agent["id"])
     conn.execute(
         "UPDATE ai_employees SET bootstrapped_at = ?, updated_at = ? WHERE id = ?",
         (utc_now_iso(), utc_now_iso(), agent["id"]),
     )
     conn.commit()
-    log.info("[activation] %s activated + bootstrap timer %s enqueued", handle, timer_id)
+    log.info(
+        "[activation] %s activated + bootstrap timer %s + %d guaranteed daily wake(s)",
+        handle, timer_id, armed,
+    )
     return {"handle": handle, "current_status": "active", "bootstrapped": "true"}

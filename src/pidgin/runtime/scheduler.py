@@ -65,6 +65,75 @@ def _timer_fired_message(timer: dict, requester: str) -> str:
     return f"{lead} You scheduled this for yourself{by}: {timer['reason']}\n{tail}"
 
 
+def _is_gated(conn: sqlite3.Connection, timer: dict) -> bool:
+    """True if this due timer should be probed for change before running.
+
+    Only recurring timers are gated, and only once they have a baseline to
+    compare against (first fire always runs). ``always_run`` timers — the
+    guaranteed daily floor and compliance ticks — are never gated, and an
+    operator can disable gating per agent. See spec §4.4.
+    """
+    from pidgin.db.change_probe import agent_gating_config
+
+    if timer["kind"] != "recurring" or timer["always_run"] or not timer["last_ran_at"]:
+        return False
+    enabled, _sources = agent_gating_config(conn, timer["ai_employee_id"])
+    return enabled
+
+
+def _record_skipped_wakeup(conn: sqlite3.Connection, timer: dict, snapshot: dict) -> str:
+    """Materialize a skipped wakeup: an anchored (never-dispatched) event and a
+    terminal ``skipped`` turn carrying the probe snapshot that justified it.
+
+    The turn is a first-class, auditable object (spec §4.7) — no LLM ran, so it
+    is created already-terminal and its event is marked ``skipped`` so the
+    dispatcher never picks it up.
+    """
+    import json
+
+    from pidgin.util.ids import new_ulid, utc_now_iso
+
+    now = utc_now_iso()
+    event_id = new_ulid()
+    turn_id = new_ulid()
+    conn.execute(
+        """
+        INSERT INTO inbound_events (
+          id, trigger_type, target_ai_employee_id, sender_principal_id,
+          trust_label, payload_json, processing_status, resulting_turn_id,
+          completed_at, received_at
+        ) VALUES (?, 'timer', ?, NULL, ?, ?, 'skipped', ?, ?, ?)
+        """,
+        (
+            event_id,
+            timer["ai_employee_id"],
+            timer["inherited_trust_label"],
+            json.dumps({"timer_id": timer["id"], "timer_reason": timer["reason"]}),
+            turn_id,
+            now,
+            now,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO turns (
+          id, ai_employee_id, conversation_id, triggering_event_id,
+          current_status, skip_reason, probe_snapshot_json, started_at, ended_at
+        ) VALUES (?, ?, NULL, ?, 'skipped', 'nothing_changed', ?, ?, ?)
+        """,
+        (
+            turn_id,
+            timer["ai_employee_id"],
+            event_id,
+            json.dumps({"baseline": timer["last_ran_at"], "counts": snapshot}),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return event_id
+
+
 def fire_due_timers(conn: sqlite3.Connection, *, limit: int = 10) -> int:
     """Convert due agent_timers into inbound_events (trigger_type=timer).
 
@@ -72,20 +141,51 @@ def fire_due_timers(conn: sqlite3.Connection, *, limit: int = 10) -> int:
     delivered verbatim), and recurring (fire + re-arm to next occurrence).
     Self-anchored timers (no originating_turn_id) fire with no conversation
     context. Per-agent daily wakeup budget defers over-cap timers.
+
+    Change-gating: a recurring wakeup whose cheap DB probe finds nothing changed
+    since it last ran is recorded as a ``skipped`` turn and re-armed without ever
+    building an LLM turn — it draws no wakeup budget and does not advance the
+    timer's baseline. The return value counts only real (dispatched) wakeups.
     """
     import json
 
     from pidgin.db import insert_inbound_event
+    from pidgin.db.change_probe import probe_changes, total_changes
     from pidgin.db.timers import (
         count_wakeups_today,
         list_due_timers,
         mark_timer_fired,
         rearm_recurring_timer,
+        stamp_timer_ran,
     )
     from pidgin.types import InboundEventCreate, TriggerType, TrustLabel
 
     fired = 0
     for timer in list_due_timers(conn, limit=limit):
+        # Change gate: probe before paying for a turn. Nothing changed → skip.
+        if _is_gated(conn, timer):
+            from pidgin.db.change_probe import agent_gating_config
+
+            _enabled, sources = agent_gating_config(conn, timer["ai_employee_id"])
+            snapshot = probe_changes(
+                conn,
+                ai_employee_id=timer["ai_employee_id"],
+                since=timer["last_ran_at"],
+                sources=sources,
+            )
+            if total_changes(snapshot) == 0:
+                skip_event_id = _record_skipped_wakeup(conn, timer, snapshot)
+                if timer["recurrence_json"]:
+                    rearm_recurring_timer(
+                        conn, timer["id"],
+                        recurrence_json=timer["recurrence_json"], fired_event_id=skip_event_id,
+                    )
+                log.info(
+                    "[scheduler] recurring wakeup skipped (nothing changed) — "
+                    "timer_id=%s snapshot=%s", timer["id"], snapshot,
+                )
+                continue
+
         if count_wakeups_today(conn, ai_employee_id=timer["ai_employee_id"]) >= _DEFAULT_MAX_WAKEUPS_PER_DAY:
             log.warning(
                 "[scheduler] wakeup budget exhausted — agent=%s timer_id=%s deferred",
@@ -128,6 +228,8 @@ def fire_due_timers(conn: sqlite3.Connection, *, limit: int = 10) -> int:
             ),
         )
         if timer["kind"] == "recurring" and timer["recurrence_json"]:
+            # A real run advances the baseline the change probe measures against.
+            stamp_timer_ran(conn, timer["id"])
             nxt = rearm_recurring_timer(
                 conn, timer["id"],
                 recurrence_json=timer["recurrence_json"], fired_event_id=event_id,

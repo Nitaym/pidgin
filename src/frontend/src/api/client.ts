@@ -283,12 +283,29 @@ export type AuditEntry = {
   action_params?: Record<string, unknown> | string | null;
 };
 
+export type ProbeSnapshot = {
+  baseline: string | null;
+  counts: Record<string, number>;
+};
+
 export type AgentInspectTurn = {
   id: string;
   current_status: string;
   started_at: string;
   ended_at: string | null;
   trigger_type: string | null;
+  // Present only on skipped (change-gated) wakeups:
+  skip_reason?: string | null;
+  probe_snapshot?: ProbeSnapshot | null;
+  timer_id?: string | null;
+  timer_reason?: string | null;
+};
+
+export type ChangeGatingConfig = {
+  change_gating_enabled: boolean;
+  guaranteed_wake_times: string[];
+  change_sources: string[];
+  all_sources: { key: string; label: string }[];
 };
 
 export type AgentInspectTimer = {
@@ -325,6 +342,7 @@ export type AgentInspect = {
   recent_turns: AgentInspectTurn[];
   recent_actions: AuditEntry[];
   open_approvals: { id: string; proposed_action: string; current_status: string; created_at: string }[];
+  change_gating: ChangeGatingConfig;
 };
 
 function workspaceBase(slug: string) {
@@ -458,6 +476,17 @@ export const api = {
     ),
   inspectAgent: (slug: string, handle: string) =>
     request<AgentInspect>(`${workspaceBase(slug)}/agents/${handle}/inspect`),
+  getChangeGating: (slug: string, handle: string) =>
+    request<ChangeGatingConfig>(`${workspaceBase(slug)}/agents/${handle}/change-gating`),
+  putChangeGating: (slug: string, handle: string, config: {
+    change_gating_enabled: boolean;
+    guaranteed_wake_times: string[];
+    change_sources: string[];
+  }) =>
+    request<ChangeGatingConfig>(`${workspaceBase(slug)}/agents/${handle}/change-gating`, {
+      method: "PUT",
+      body: JSON.stringify(config),
+    }),
   createTemplateFromAgent: (
     slug: string,
     handle: string,

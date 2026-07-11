@@ -94,7 +94,9 @@ def test_deactivate_stops_agent_and_cancels_timers(pidgin_home: Path, recipe_pat
 
     result = deactivate_agent(conn, handle="vp-marketing")
     assert result["current_status"] == "draft"
-    assert result["timers_cancelled"] == "1"  # the bootstrap timer
+    # The bootstrap timer + one ungated guaranteed daily wake (the change-gating
+    # floor, armed at activation) — both cancelled on deactivation.
+    assert result["timers_cancelled"] == "2"
 
     emp = conn.execute(
         "SELECT bootstrapped_at, current_status FROM ai_employees WHERE id = ?",

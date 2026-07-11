@@ -5,6 +5,8 @@ import {
   type Agent,
   type AgentInspect,
   type AgentInspectTimer,
+  type AgentInspectTurn,
+  type ChangeGatingConfig,
   type LlmInvocation,
 } from "../api/client";
 import { useApp } from "../context/AppContext";
@@ -46,6 +48,250 @@ function OutcomeBadge({ outcome }: { outcome: string }) {
     failed: "failed",
   };
   return <span className={`badge outcome-${outcome}`}>{labels[outcome] ?? outcome}</span>;
+}
+
+// All displayed times carry their zone (spec §4.6). We show the viewer's local
+// zone via toLocaleString; guaranteed wake times are stored as UTC HH:MM.
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { timeZoneName: "short" });
+}
+
+const SOURCE_SHORT: Record<string, string> = {
+  inbound_events: "new messages",
+  task_state: "task changes",
+  approvals: "approvals",
+  watched_resources: "watched resources",
+  delegated_returns: "delegated returns",
+};
+
+// Group the turn list into real turns and runs of consecutive skips of the SAME
+// timer — the per-agent view collapses skips per-timer (spec §4.7).
+type WakeupGroup =
+  | { kind: "turn"; turn: AgentInspectTurn }
+  | { kind: "skips"; timerId: string | null; reason: string; turns: AgentInspectTurn[] };
+
+function groupWakeups(turns: AgentInspectTurn[]): WakeupGroup[] {
+  const groups: WakeupGroup[] = [];
+  for (const turn of turns) {
+    if (turn.current_status === "skipped") {
+      const last = groups[groups.length - 1];
+      if (last && last.kind === "skips" && last.timerId === (turn.timer_id ?? null)) {
+        last.turns.push(turn);
+      } else {
+        groups.push({
+          kind: "skips",
+          timerId: turn.timer_id ?? null,
+          reason: turn.timer_reason ?? "recurring wake-up",
+          turns: [turn],
+        });
+      }
+    } else {
+      groups.push({ kind: "turn", turn });
+    }
+  }
+  return groups;
+}
+
+function SkipStrip({ group }: { group: Extract<WakeupGroup, { kind: "skips" }> }) {
+  const [open, setOpen] = useState(false);
+  const turns = group.turns;
+  const newest = turns[0];
+  const oldest = turns[turns.length - 1];
+  const label = (group.reason.length > 60 ? `${group.reason.slice(0, 60)}…` : group.reason).trim();
+  const range =
+    turns.length === 1
+      ? fmtTime(newest.started_at)
+      : `${fmtTime(oldest.started_at)} – ${fmtTime(newest.started_at)}`;
+
+  return (
+    <li style={{ padding: "0.3rem 0", borderTop: "1px solid var(--border,#2a2a2a)" }}>
+      <button
+        type="button"
+        className="secondary"
+        onClick={() => setOpen((v) => !v)}
+        style={{ width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
+      >
+        <span className="muted">⤳ </span>
+        <strong>{turns.length}</strong> skipped
+        <span className="muted"> · nothing changed · {label} · {range} </span>
+        <span className="muted">{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? (
+        <ul style={{ listStyle: "none", margin: "0.3rem 0 0", padding: "0 0 0 1rem" }}>
+          {turns.map((t) => {
+            const counts = t.probe_snapshot?.counts ?? {};
+            const summary = Object.keys(counts).length
+              ? Object.entries(counts).map(([k, v]) => `${v} ${SOURCE_SHORT[k] ?? k}`).join(" · ")
+              : "no sources checked";
+            return (
+              <li key={t.id} className="muted" style={{ fontSize: "0.8rem", padding: "0.15rem 0" }}>
+                <span style={{ fontFamily: "monospace" }}>{fmtTime(t.started_at)}</span> — {summary}
+                {t.probe_snapshot?.baseline ? (
+                  <span> · since {fmtTime(t.probe_snapshot.baseline)}</span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+function RecentWakeups({ turns }: { turns: AgentInspectTurn[] }) {
+  const groups = groupWakeups(turns);
+  const skipped = turns.filter((t) => t.current_status === "skipped").length;
+  return (
+    <div className="panel stack">
+      <h4 style={{ margin: 0 }}>
+        Recent wake-ups{skipped > 0 ? <span className="muted"> · {skipped} skipped</span> : null}
+      </h4>
+      {groups.length === 0 ? (
+        <p className="muted">No wake-ups yet.</p>
+      ) : (
+        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+          {groups.map((g, i) =>
+            g.kind === "skips" ? (
+              <SkipStrip key={`skips-${i}`} group={g} />
+            ) : (
+              <li
+                key={g.turn.id}
+                className="row"
+                style={{ gap: "0.6rem", alignItems: "baseline", padding: "0.3rem 0", borderTop: "1px solid var(--border,#2a2a2a)" }}
+              >
+                <span className="muted" style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+                  {fmtTime(g.turn.started_at)}
+                </span>
+                <span className="badge">{g.turn.current_status}</span>
+                <span className="muted">{g.turn.trigger_type ?? "?"}</span>
+              </li>
+            ),
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ChangeGatingPanel({
+  slug,
+  handle,
+  config,
+  onSaved,
+}: {
+  slug: string;
+  handle: string;
+  config: ChangeGatingConfig;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [enabled, setEnabled] = useState(config.change_gating_enabled);
+  const [times, setTimes] = useState<string[]>(config.guaranteed_wake_times);
+  const [sources, setSources] = useState<string[]>(config.change_sources);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.putChangeGating(slug, handle, {
+        change_gating_enabled: enabled,
+        guaranteed_wake_times: times,
+        change_sources: sources,
+      });
+      setMsg("Saved.");
+      onSaved();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleSource(key: string) {
+    setSources((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
+  }
+
+  return (
+    <div className="panel stack">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}
+      >
+        <h4 style={{ margin: 0 }}>
+          Advanced · change-gated wake-ups <span className="muted">{open ? "▾" : "▸"}</span>
+        </h4>
+      </button>
+      {open ? (
+        <div className="stack" style={{ gap: "0.75rem" }}>
+          <label className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            <span>
+              Skip a recurring wake-up when nothing changed
+              <span className="muted"> — off means every wake-up runs a full turn</span>
+            </span>
+          </label>
+
+          <div>
+            <div className="muted" style={{ fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+              Guaranteed daily wake times (always run, even with no change) · UTC
+            </div>
+            <div className="row" style={{ flexWrap: "wrap", gap: "0.4rem", alignItems: "center" }}>
+              {times.map((t, i) => (
+                <span key={i} className="row" style={{ gap: "0.2rem", alignItems: "center" }}>
+                  <input
+                    type="time"
+                    value={t}
+                    onChange={(e) =>
+                      setTimes((arr) => arr.map((v, j) => (j === i ? e.target.value : v)))
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => setTimes((arr) => arr.filter((_, j) => j !== i))}
+                    aria-label="Remove wake time"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <button type="button" className="secondary" onClick={() => setTimes((arr) => [...arr, "12:00"])}>
+                + add time
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="muted" style={{ fontSize: "0.85rem", marginBottom: "0.25rem" }}>
+              Changes that count as a reason to wake
+            </div>
+            <div className="stack" style={{ gap: "0.2rem" }}>
+              {config.all_sources.map((s) => (
+                <label key={s.key} className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={sources.includes(s.key)}
+                    onChange={() => toggleSource(s.key)}
+                  />
+                  <span>{s.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+            <button type="button" disabled={busy} onClick={() => void save()}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            {msg ? <span className="muted">{msg}</span> : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function AgentDetail({ slug, handle }: { slug: string; handle: string }) {
@@ -227,6 +473,10 @@ function AgentDetail({ slug, handle }: { slug: string; handle: string }) {
           ))}
         </div>
       </div>
+
+      <RecentWakeups turns={data.recent_turns} />
+
+      <ChangeGatingPanel slug={slug} handle={handle} config={data.change_gating} onSaved={() => void load()} />
 
       <div className="panel stack">
         <h4 style={{ margin: 0 }}>Recent actions</h4>

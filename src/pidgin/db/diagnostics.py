@@ -155,20 +155,36 @@ def agent_inspect(conn: sqlite3.Connection, handle: str) -> dict[str, Any] | Non
         timer["recurrence"] = _loads_or(timer.pop("recurrence_json"), None)
         timers.append(timer)
 
+    # A high-frequency poller can skip many times a day, so pull a wider window
+    # than the real-turn count would need; the dashboard collapses runs of skips.
     turn_rows = conn.execute(
         """
-        SELECT t.id, t.current_status, t.started_at, t.ended_at, e.trigger_type
+        SELECT t.id, t.current_status, t.started_at, t.ended_at, t.skip_reason,
+               t.probe_snapshot_json, e.trigger_type, e.payload_json AS event_payload_json
         FROM turns t
         LEFT JOIN inbound_events e ON e.id = t.triggering_event_id
         WHERE t.ai_employee_id = ?
         ORDER BY t.started_at DESC
-        LIMIT 20
+        LIMIT 60
         """,
         (agent_row["id"],),
     ).fetchall()
-    turns = [_row_to_dict(row) for row in turn_rows]
-    # "What it's doing now" — the latest turn, flagged live when still open.
-    current_turn = turns[0] if turns else None
+    turns = []
+    for row in turn_rows:
+        turn = _row_to_dict(row)
+        if turn.get("current_status") == "skipped":
+            turn["probe_snapshot"] = _loads_or(turn.get("probe_snapshot_json"), None)
+            payload = _loads_or(turn.pop("event_payload_json", None), {}) or {}
+            turn["timer_id"] = payload.get("timer_id")
+            turn["timer_reason"] = payload.get("timer_reason")
+        else:
+            turn.pop("event_payload_json", None)
+        turn.pop("probe_snapshot_json", None)
+        turns.append(turn)
+    # "What it's doing now" — the latest real turn, flagged live when still open.
+    # A skipped turn isn't activity, so it never counts as the current turn.
+    real_turns = [t for t in turns if t["current_status"] != "skipped"]
+    current_turn = real_turns[0] if real_turns else None
     is_working = bool(current_turn and current_turn["current_status"] in ("running", "suspended"))
 
     approvals = [
@@ -184,6 +200,8 @@ def agent_inspect(conn: sqlite3.Connection, handle: str) -> dict[str, Any] | Non
         ).fetchall()
     ]
 
+    from pidgin.db.agent_config import read_change_gating_config
+
     return {
         "agent": {
             "id": agent_row["id"],
@@ -196,6 +214,7 @@ def agent_inspect(conn: sqlite3.Connection, handle: str) -> dict[str, Any] | Non
             if "bootstrapped_at" in agent_row.keys()
             else None,
         },
+        "change_gating": read_change_gating_config(conn, agent_row["id"]),
         "is_working": is_working,
         "current_turn": current_turn,
         "tools": tools,

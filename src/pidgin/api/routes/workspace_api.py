@@ -176,6 +176,12 @@ class ResetMemoryBody(BaseModel):
     confirm_name: str = Field(min_length=1)
 
 
+class ChangeGatingBody(BaseModel):
+    change_gating_enabled: bool
+    guaranteed_wake_times: list[str]
+    change_sources: list[str]
+
+
 class CommonInstructionsBody(BaseModel):
     body_markdown: str = Field(min_length=1)
 
@@ -469,6 +475,44 @@ def api_deactivate_agent(workspace_slug: str, handle: str, request: Request) -> 
         detail = str(exc)
         status = 404 if "not found" in detail.lower() else 400
         raise HTTPException(status_code=status, detail=detail) from exc
+
+
+@router.get("/agents/{handle}/change-gating")
+def api_get_change_gating(workspace_slug: str, handle: str, request: Request) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    agent = get_agent_by_handle(session.conn, handle)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    from pidgin.db.agent_config import read_change_gating_config
+
+    return read_change_gating_config(session.conn, agent["id"])
+
+
+@router.put("/agents/{handle}/change-gating")
+def api_put_change_gating(
+    workspace_slug: str,
+    handle: str,
+    body: ChangeGatingBody,
+    request: Request,
+) -> dict:
+    session = require_workspace_session(request, workspace_slug)
+    agent = get_agent_by_handle(session.conn, handle)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    from pidgin.db.agent_config import read_change_gating_config, write_change_gating_config
+    from pidgin.services.activation import resync_guaranteed_wakes
+
+    write_change_gating_config(
+        session.conn,
+        agent["id"],
+        change_gating_enabled=body.change_gating_enabled,
+        guaranteed_wake_times=body.guaranteed_wake_times,
+        change_sources=body.change_sources,
+    )
+    # An active agent's daily floor re-arms now so edited wake times take effect.
+    if agent["current_status"] == "active":
+        resync_guaranteed_wakes(session.conn, agent["id"])
+    return read_change_gating_config(session.conn, agent["id"])
 
 
 @router.post("/agents/{handle}/archive")
