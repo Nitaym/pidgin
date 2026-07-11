@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<!-- Operating Partner — self-contained spec. All CSS inline. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operating Partner — Spec</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1b1f24;
+    --muted: #5b6570;
+    --faint: #8a939d;
+    --line: #e5e9ee;
+    --accent: #3b5bdb;
+    --accent-soft: #edf1ff;
+    --code-bg: #f4f6f9;
+    --ok: #2f9e44;
+    --warn: #e8590c;
+    --radius: 8px;
+    --maxw: 820px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a; --fg: #e6e9ec; --muted: #9aa4ad; --faint: #6b757e;
+      --line: #262b31; --accent: #7a93ff; --accent-soft: #1c2230;
+      --code-bg: #1b1f24;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.62 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; padding: 56px 28px 96px; }
+  header.spec-head { border-bottom: 1px solid var(--line); padding-bottom: 22px; margin-bottom: 34px; }
+  .eyebrow { text-transform: uppercase; letter-spacing: .08em; font-size: 12px; font-weight: 600; color: var(--faint); margin: 0 0 8px; }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; letter-spacing: -.01em; }
+  .oneliner { font-size: 18px; color: var(--muted); margin: 0 0 18px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13.5px; color: var(--muted); }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+          background: var(--accent-soft); color: var(--accent); border: 1px solid transparent; }
+  h2 { font-size: 20px; margin: 40px 0 12px; letter-spacing: -.01em; }
+  h2 .num { color: var(--faint); font-weight: 600; margin-right: 8px; }
+  h3 { font-size: 16px; margin: 26px 0 8px; }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 14px; padding-left: 22px; }
+  li { margin: 4px 0; }
+  a { color: var(--accent); }
+  code { background: var(--code-bg); padding: 1.5px 5px; border-radius: 4px; font-size: 13.5px;
+         font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  pre { background: var(--code-bg); padding: 14px 16px; border-radius: var(--radius); overflow-x: auto;
+        font-size: 13px; line-height: 1.5; margin: 0 0 18px;
+        font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  pre code { background: none; padding: 0; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 620px) { .cols { grid-template-columns: 1fr; } }
+  .card { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
+  .card h3 { margin-top: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 6px 0 18px; font-size: 14.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); font-weight: 600; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.q { font-weight: 600; width: 26%; }
+  td.d { width: 30%; }
+  .callout { border-left: 3px solid var(--warn); background: var(--code-bg); padding: 12px 16px;
+             border-radius: 0 var(--radius) var(--radius) 0; margin: 6px 0 18px; }
+  .callout p:last-child { margin-bottom: 0; }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line);
+           font-size: 13px; color: var(--faint); }
+  @media print {
+    body { font-size: 12pt; }
+    .wrap { padding: 0; max-width: none; }
+    h2 { page-break-after: avoid; }
+    tr, .card, .callout { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="spec-head">
+    <p class="eyebrow">Feature Spec</p>
+    <h1>Operating Partner</h1>
+    <p class="oneliner">A hire-on-demand, per-endeavor startup-management expert that consults with the founder, authors and owns the living plan, tracks it autonomously against reality, and pushes the company forward — showing up in Slack and Drive like a real employee.</p>
+    <div class="meta">
+      <span class="pill">Draft</span>
+      <span>Author: Nitay</span>
+      <span>2026-07-11</span>
+    </div>
+  </header>
+
+  <!-- SUMMARY -->
+  <section>
+    <h2><span class="num">1</span>Summary</h2>
+    <p>
+      Pidgin is ready to run itself, and the first thing a founder needs is a management layer. The
+      <a href="HIRE_UX.html">Executive Assistant</a> already exists; what's missing is the seasoned operator who helps
+      <em>direct</em> near-term decisions and keeps a living plan honest. The <strong>Operating Partner</strong> is a new
+      bundled recipe for exactly that: an <strong>advisory</strong> C-level partner with real <strong>startup-management
+      expertise</strong>, hired on demand, one per <strong>endeavor</strong>. It <strong>consults</strong> on decisions,
+      <strong>authors</strong> and owns <em>the plan and the priorities</em>, tracks it, and has a bias toward
+      <strong>pushing the company forward</strong> — while the EA owns the logistics stream. Its plan lives as the operator's
+      <strong>own spreadsheet</strong> in Drive (source of truth), backed by the task backlog for teeth. It
+      <strong>self-runs</strong> on the <a href="AUTONOMY_SPEC.html">autonomy layer</a>: quiet daily
+      <a href="CHANGE_GATED_WAKEUP_SPEC.html">change-gated</a> tracking, a weekly digest, and exception pings — treating
+      the plan as agile and proposing revisions when reality drifts. It <strong>cannot command</strong> anyone; it advises
+      with conviction, and hands work to the EA as a peer request in a channel the owner can see. It talks to the owner in
+      Slack/email like an employee — the in-pidgin DM is a diagnostic path only.
+    </p>
+  </section>
+
+  <!-- SCOPE -->
+  <section>
+    <h2><span class="num">2</span>Scope</h2>
+    <div class="cols">
+      <div class="card">
+        <h3>In scope</h3>
+        <ul>
+          <li>A new bundled <code>operating-partner</code> recipe: <strong>hire-on-demand, non-singleton, one per endeavor</strong>.</li>
+          <li>An <strong>expert, opinionated persona</strong> — startup-management fluency and a forward-pushing bias, not a neutral facilitator.</li>
+          <li><strong>Advisory posture</strong> across strategy and tactics — consults, authors, and owns the plan and priorities; <code>delegate</code> blocked.</li>
+          <li>Plan artifact = the operator's <strong>own spreadsheet</strong> in Drive (source of truth), backed by the <strong>task backlog</strong>.</li>
+          <li><strong>Operator-configurable plan format</strong> — the recipe adopts the operator's existing template, not a fixed layout.</li>
+          <li>Self-running autonomy: daily <strong>change-gated</strong> tracking, a <strong>weekly digest</strong> (supervisor report), and <strong>exception pings</strong>.</li>
+          <li>Agile plan stewardship: proactively <strong>proposes plan revisions</strong> when reality drifts.</li>
+          <li>A <strong>two-tier write model</strong> scoped to its stewarded sheet: tracking cells ungated, canon staged for approval; careful-guest mode on any other document.</li>
+          <li><strong>Real-employee interface</strong> — Slack/email; peer hand-offs to the EA in a human-visible channel.</li>
+          <li>Hire-time capture of: display name (a person's first name), operator-set <strong>role title</strong>, <strong>endeavor scope</strong>, and the <strong>plan-sheet</strong> it stewards.</li>
+          <li>The three platform enablers, delivered as part of this plan — <a href="https://linear.app/pidginwork/issue/PID-15">PID-15</a> (Sheets read/write), <a href="https://linear.app/pidginwork/issue/PID-16">PID-16</a> (configurable cadence), <a href="https://linear.app/pidginwork/issue/PID-17">PID-17</a> (template-declared fields + HR coach).</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Out of scope</h3>
+        <ul>
+          <li><strong>Singleton enforcement</strong> — deliberately none; "one Chief of Staff" is operator judgment, not a guardrail.</li>
+          <li><strong>Multi-level agent-to-agent reporting</strong> (an Operating Partner reporting up to an org-wide CoS) — reports go to the human owner for now.</li>
+          <li>The Executive Assistant recipe — already exists and unchanged.</li>
+          <li>New connectors — Slack and Drive already exist; this builds no new integration.</li>
+          <li>Commanding other agents or owning the logistics stream (calendar, inbox, errands) — that stays with the EA.</li>
+          <li>Giving financial or investment advice — it maintains the owner's own P&amp;L section as data; it is not an advisor of record.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROBLEM -->
+  <section>
+    <h2><span class="num">3</span>Why this exists</h2>
+    <p>
+      The trigger is dogfooding: using Pidgin to run Pidgin. Starting a company, the founder needs management before
+      anything else — a PA, and a seasoned operator to <em>help direct the immediate decisions and plan the near future
+      while keeping the plan on track</em>. The first half already ships: the <a href="HIRE_UX.html">Executive Assistant</a>
+      recipe covers inbox triage, calendar, reminders, and delegation. The second half has no home. Nothing in
+      <code>recipes/</code> covers consulting-plus-planning-plus-tracking; the closest,
+      <code>marketing-campaign-manager</code>, is domain-specific.
+    </p>
+    <p>
+      In a real startup this role is the founder's right hand — an experienced operator who consults on what matters,
+      writes the plan, tracks it, and pushes the company forward. It sits <em>below</em> a Chief of Staff in rank and
+      <em>above</em> an administrative coordinator in scope: it plans <em>with</em> the founder and keeps them updated,
+      without directing the org top-down. Pidgin has the primitives — the <a href="AUTONOMY_SPEC.html">autonomy layer</a>,
+      the task backlog, the <a href="CHANGE_GATED_WAKEUP_SPEC.html">change-gated wakeup</a>, the Drive connector, and the
+      owner-approval gate — but no recipe that composes them into this role, and a few capability gaps underneath it that
+      this plan closes.
+    </p>
+  </section>
+
+  <!-- DEFINITION / HOW IT WORKS -->
+  <section>
+    <h2><span class="num">4</span>How it works</h2>
+
+    <h3>4.1 Role, altitude &amp; expertise</h3>
+    <p>
+      The Operating Partner is an <strong>advisory C-level partner with startup-management expertise</strong>, scoped to a
+      single <strong>endeavor</strong> (a venture or initiative; for the top-level hire, the whole company). It is not a
+      neutral scribe: it brings a point of view — prioritization instinct, stage-awareness, "here's what matters now and
+      why" — and a bias toward <strong>pushing the company forward</strong>. It spans <em>strategy and tactics</em>: it
+      helps think through the roadmap <em>and</em> the next concrete moves. But its authority is influence, not command —
+      it advises with conviction and it never directs people. It is <strong>not a singleton</strong>: several can run in
+      parallel, one per endeavor, each owning its own plan. Naming a hire "Chief of Staff" and scoping it org-wide makes it
+      behave as the singleton CoS — but that's convention, set by the operator, not enforced in code.
+    </p>
+
+    <h3>4.2 The plan artifact</h3>
+    <p>
+      The plan has a durable home: the operator's <strong>own spreadsheet</strong> in Drive is the <strong>source of
+      truth</strong> (for visibility and posterity), and the <strong>task backlog</strong> gives it teeth — actionable
+      lines mirrored to tracked tasks with real <code>open</code>/<code>in_progress</code>/<code>blocked</code> status.
+      The plan's <em>format is operator-configurable</em>: there is no single right layout, so the recipe <strong>adopts
+      the operator's existing template</strong> rather than imposing one. For the first target operator that's an Excel/Sheets
+      workbook with tabs like P&amp;L, short-term objective, product vision, hiring, and major blockers. Bootstrap is
+      therefore <strong>ingest, not blank-slate interview</strong>: on first run it reads
+      <a href="AGENT_ONBOARDING.html">Enablement's</a> company context, then reads the existing sheet, understands its
+      sections, and works with it — asking the owner to fill gaps rather than inventing structure. This also cleanly
+      separates it from Enablement: <strong>Enablement owns <em>what the company is</em>; the Operating Partner owns <em>what
+      we're doing next</em></strong>.
+    </p>
+
+    <h3>4.3 Rhythm &amp; autonomy</h3>
+    <p>
+      The Operating Partner runs itself on the autonomy layer. On activation its bootstrap wake reads company context,
+      reads its endeavor scope, ingests its plan sheet, opens its mission as a task, and arms its own schedules. It runs on
+      <strong>three separate clocks</strong>:
+    </p>
+    <ul>
+      <li><strong>Daily tracking wake (change-gated)</strong> — reconciles plan vs. reality; if nothing material moved it
+          goes back to sleep silently. Its default cadence is <strong>daily, not the 30-minute work heartbeat</strong> —
+          a strategic partner thrashing every half hour is noise (this default is why <a href="https://linear.app/pidginwork/issue/PID-16">PID-16</a> exists).</li>
+      <li><strong>Weekly digest</strong> — fires on schedule regardless (the standing "you'll hear from me Friday"
+          contract); it is the Operating Partner's <em>supervisor report</em>. In a quiet week it's a one-liner: "no
+          material change, plan on track."</li>
+      <li><strong>Exception ping</strong> — fires immediately when a signal crosses a severity line (a deadline about to
+          slip, a milestone blocked).</li>
+    </ul>
+    <p>
+      It treats the plan as <strong>agile</strong>: when reality drifts or new information lands, it proactively drafts a
+      <em>proposed plan revision</em> (staged as a canon-cell change for owner approval — see 4.5) rather than clinging to
+      a stale plan or silently rewriting it.
+    </p>
+
+    <h3>4.4 What counts as "changed" — the daily wake's gate</h3>
+    <p>
+      The daily wake does real work (and may ping the owner) only if, since its last real run, one of these fired. This
+      maps onto the <a href="CHANGE_GATED_WAKEUP_SPEC.html">change-gated wakeup</a> probe:
+    </p>
+    <table>
+      <thead><tr><th>#</th><th>Signal</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="d">Backlog delta</td><td>A tracked task under its endeavor flipped to <code>blocked</code>/<code>done</code>/at-risk, or a new task appeared.</td></tr>
+        <tr><td>2</td><td class="d">Someone edited its plan sheet</td><td>Another actor changed the sheet — especially a <em>canon</em> cell (objective, priority, P&amp;L, vision). The owner's edits pull it in to reconcile.</td></tr>
+        <tr><td>3</td><td class="d">Deadline-state <em>transition</em></td><td><strong>Edge-triggered:</strong> fires once when an item crosses on-track → approaching → overdue, deduped per item. Sitting overdue is <em>not</em> a daily re-trigger — it lives in the weekly digest's at-risk section.</td></tr>
+        <tr><td>4</td><td class="d">Escalation / report on its endeavor</td><td>An escalation or report touching its endeavor landed.</td></tr>
+        <tr><td>5</td><td class="d">Explicit "stop skipping"</td><td>A human poke ("run a cycle," "wake up") forces a full wake regardless of the gate — the on-demand escape hatch.</td></tr>
+      </tbody>
+    </table>
+    <div class="callout">
+      <p>
+        <strong>General Slack chatter is not a trigger by itself.</strong> It reads channels for <em>context</em> when it
+        wakes for a real signal, but a busy channel does not wake it — otherwise the 30-minute thrash we designed away
+        comes back through the side door.
+      </p>
+    </div>
+
+    <h3>4.5 The write model — two tiers, scoped by ownership</h3>
+    <p>
+      "Tracks on its own" and "every mutation is owner-approved" collide, so writes split by <em>what part of the sheet</em>
+      — and the privilege is <strong>scoped to the one artifact it stewards</strong>:
+    </p>
+    <ul>
+      <li><strong>Tracking cells → ungated.</strong> The columns/sections it owns as the tracker — status, last-updated
+          dates, an observed-blockers log, backlog-synced state. It writes these freely; it's mirroring reality, which is
+          the whole point of tracking on its own.</li>
+      <li><strong>Canon cells → staged for approval.</strong> The owner's decisions — objective, priorities/ordering,
+          product vision, hiring plan, P&amp;L numbers. Changes here are <strong>batched into one approval</strong>
+          ("here's my proposed plan revision — approve?"), not per-cell, reusing the batch-approval flow.</li>
+      <li><strong>Any other document → careful guest.</strong> On files it doesn't steward, it stages everything for
+          approval, keeps a minimal footprint, never bulk-edits, and when in doubt doesn't touch. The ungated privilege
+          applies to <em>only</em> the plan sheet it was pointed at during hire.</li>
+    </ul>
+    <div class="callout">
+      <p>
+        This deliberately <strong>bends the "one uniform write gate" principle</strong> from the Enablement design (all
+        shared-storage writes owner-approved). It's a conscious trade to kill approval fatigue, defensible because tracking
+        cells are factual mirrors, not authored content. Broken on purpose, not by accident.
+      </p>
+    </div>
+
+    <h3>4.6 Coordination &amp; hand-offs</h3>
+    <p>
+      Because <code>delegate</code> is blocked, the Operating Partner cannot assign work. When the plan needs the EA to do
+      something (book a planning review, chase a vendor), it makes a <strong>peer request in Slack</strong> — colleague to
+      colleague — <strong>in a channel the owner shares</strong>, so the owner is always privy to what was asked and why.
+      It is a request the EA can decline, and the EA's own owner-approval gate on calendar/outbound is the real control
+      point: the Operating Partner physically cannot cause an unapproved side effect by asking. When a hand-off is
+      ambiguous or high-stakes, it <code>escalate</code>s to the owner instead of guessing. This keeps it advisory and on
+      the record — no shadow boss, no hidden agent-to-agent backchannel.
+    </p>
+
+    <h3>4.7 Interface &amp; visibility</h3>
+    <p>
+      Pidgin is the control plane, not the workplace. The Operating Partner lives in the company's real spaces and shows up
+      like an employee:
+    </p>
+    <ul>
+      <li><strong>Everyday interface = Slack/email.</strong> The owner DMs it in Slack; it delivers the weekly digest and
+          exception pings as Slack messages (or email); the plan is a real Drive spreadsheet. <strong>DMing it inside
+          pidgin is a diagnostic/debug path only</strong>, not the workflow.</li>
+      <li><strong>Broad read of shared, private write.</strong> It reads shared surfaces (the Slack channels it's a member
+          of, shared Drive, the backlog) — none of which are privileged, they're shared by design. Candid planning happens
+          in a <strong>private founder DM</strong>. It's blind to other agents' private journals and other owners' 1:1s.</li>
+      <li><strong>Channel membership is a rollout dial.</strong> Its visibility is which real Slack channels it's invited
+          into, exactly like an employee. Start lean (founder DM + <code>#general</code> + wherever the roadmap lives),
+          widen as it's visibly missing signal.</li>
+    </ul>
+
+    <h3>4.8 Boundary with the Executive Assistant</h3>
+    <p>
+      The split is <strong>domain, not horizon</strong>. The Operating Partner spans strategy and tactics; what it does
+      <em>not</em> own is the logistics stream.
+    </p>
+    <table>
+      <thead><tr><th></th><th>Executive Assistant</th><th>Operating Partner</th></tr></thead>
+      <tbody>
+        <tr><td class="q">Owns</td><td class="d">The inbox / calendar / logistics stream</td><td>The plan and the priorities</td></tr>
+        <tr><td class="q">Posture</td><td class="d">Reactive</td><td>Proactive, opinionated</td></tr>
+        <tr><td class="q">"Remind me to email Bob"</td><td class="d">Handles it</td><td>Not its job</td></tr>
+        <tr><td class="q">"Are we on track to ship, and what's first?"</td><td class="d">Not its job</td><td>Handles it</td></tr>
+      </tbody>
+    </table>
+    <p>
+      The Operating Partner decides <em>what matters and in what order</em>; the EA handles <em>the mechanics of doing it</em>.
+      When the plan implies a logistics action, it hands it to the EA (4.6) rather than doing it — no dueling reminders, no
+      touching the owner's calendar.
+    </p>
+
+    <h3>4.9 Identity &amp; hire customization</h3>
+    <ul>
+      <li><strong><code>display_name</code></strong> — a person's first name (John, Jack, Sarah), set at hire, like the EA
+          recipe. Presented as a real employee.</li>
+      <li><strong><code>role_title</code></strong> — <em>operator-set at hire</em>, recipe supplies a default
+          (<code>Operating Partner</code>). Behavior is fixed by the recipe; the title is positioning the operator chooses —
+          "Chief Strategy Officer," "Chief of Staff," "Founder's Associate," "StratOps." (Hire-time override is
+          <a href="https://linear.app/pidginwork/issue/PID-17">PID-17</a>.)</li>
+      <li><strong>Endeavor scope</strong> — captured at hire: what this Operating Partner coordinates.</li>
+      <li><strong>Plan sheet</strong> — the specific Drive file it stewards; the only place the tracking-write privilege
+          (4.5) applies.</li>
+      <li><strong>Tone</strong> — expert, opinionated, proactive; concise; respects the owner's attention (the change-gated
+          design <em>is</em> the tone made real); recommends rather than surveys, and says what it would do.</li>
+    </ul>
+
+    <h3>4.10 Permissions</h3>
+    <table>
+      <thead><tr><th>Bucket</th><th>Actions</th></tr></thead>
+      <tbody>
+        <tr><td class="q">can_read</td><td><code>read</code>, <code>recall</code>, <code>watch</code> — broad read of shared surfaces + the sheet it watches.</td></tr>
+        <tr><td class="q">can_write</td><td><code>say</code>, <code>post</code>, <code>remember</code>, <code>draft</code>, <code>open_task</code>, <code>schedule_self</code>, <code>request_approval</code>, <code>escalate</code>, <code>close</code>.</td></tr>
+        <tr><td class="q">requires_approval</td><td><code>execute</code> — canon-cell sheet writes and any write to a non-stewarded document.</td></tr>
+        <tr><td class="q">blocked</td><td><code>delegate</code> — advisory only; it cannot command peers.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Note: the two-tier gate (4.5) means <em>tracking-cell</em> writes to its own sheet must resolve as <strong>ungated
+      execute on the stewarded file</strong> — the mechanism for distinguishing tracking vs. canon cells is an open
+      question (see §6) and depends on <a href="https://linear.app/pidginwork/issue/PID-15">PID-15</a>.
+    </p>
+
+    <h3>4.11 Platform enablers (in scope, delivered with this)</h3>
+    <table>
+      <thead><tr><th>Ticket</th><th>Delivers</th><th>Gating</th></tr></thead>
+      <tbody>
+        <tr><td class="q"><a href="https://linear.app/pidginwork/issue/PID-15">PID-15</a></td><td class="d">Drive connector reads all tabs and <em>updates</em> a Sheet (+ threads the mutation-approval gate).</td><td>Hard — the plan artifact (4.2) and the write model (4.5) don't exist without it.</td></tr>
+        <tr><td class="q"><a href="https://linear.app/pidginwork/issue/PID-16">PID-16</a></td><td class="d">Work-heartbeat cadence configurable (template default → hire override → post-hire edit).</td><td>Hard — the daily-not-30-min rhythm (4.3) needs it.</td></tr>
+        <tr><td class="q"><a href="https://linear.app/pidginwork/issue/PID-17">PID-17</a></td><td class="d">Template-declared customizable fields consumed by the HR coach (role title, endeavor scope, plan sheet, cadence).</td><td>Soft — degrades the hire experience, not the agent's function.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- DECISIONS & RATIONALE -->
+  <section>
+    <h2><span class="num">5</span>Decisions &amp; rationale</h2>
+    <table>
+      <thead>
+        <tr><th>Question / topic</th><th>Decision</th><th>Why</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="q">What is this role?</td><td class="d">An advisory startup-management expert scoped to an endeavor — consults, authors, and tracks the plan, and pushes the company forward. Below a CoS in rank, above an admin coordinator in scope.</td><td>The founder wants a seasoned right hand that helps direct decisions and drive the near future, without directing the org top-down.</td></tr>
+        <tr><td class="q">"Coordinator" or something more?</td><td class="d">Named <strong>Operating Partner</strong>; the recipe carries an expert, opinionated, forward-pushing persona.</td><td>"Coordinator" flattened it to a plan-tracker. The role also consults and writes the plan and is a management expert — the persona and name must carry that.</td></tr>
+        <tr><td class="q">Where does "the plan" live?</td><td class="d">The operator's own spreadsheet in Drive is the source of truth (visibility + posterity); the task backlog gives it teeth.</td><td>A plan you can't open isn't one you plan <em>with</em>; but prose you re-read isn't tracking — the backlog supplies real status.</td></tr>
+        <tr><td class="q">One fixed plan format?</td><td class="d">No — format is operator-configurable; the recipe adopts the operator's existing template. Bootstrap ingests it rather than interviewing from blank.</td><td>Different founders run their business off different artifacts; imposing one layout is wrong. The first operator already uses an Excel P&amp;L/plan template.</td></tr>
+        <tr><td class="q">Does it command other agents?</td><td class="d">No — advisory only. <code>delegate</code> blocked; it routes work through the owner or as peer requests.</td><td>"Not ranked high enough to direct decisions" means not ranked high enough to direct people. Prevents a silent shadow boss as the team grows.</td></tr>
+        <tr><td class="q">How does a hand-off reach the EA?</td><td class="d">A peer Slack request in a channel the owner shares — not delegation, not always through the owner.</td><td>Matches "agents act like employees," keeps the owner off the critical path, and stays on the record. The EA's own approval gate is the real control.</td></tr>
+        <tr><td class="q">Boundary with the EA?</td><td class="d">Domain, not horizon: it owns plan + priorities (strategy <em>and</em> tactics); EA owns the logistics stream. It never touches the calendar/inbox.</td><td>Both are owner-facing and both can open tasks/schedule — without a clean line they'd nag about the same thing twice.</td></tr>
+        <tr><td class="q">Where does it talk to the owner?</td><td class="d">Slack/email like a real employee; candid planning in a private founder DM. The in-pidgin DM is a diagnostic path only.</td><td>Pidgin is the control plane; agents live in the company's real spaces. C-level planning is frank and shouldn't broadcast.</td></tr>
+        <tr><td class="q">How are sheet writes gated?</td><td class="d">Two tiers, scoped to the stewarded sheet: tracking cells ungated, canon cells staged (batched) for approval. Careful-guest mode on any other document.</td><td>"Tracks on its own" + "every mutation approved" collide; per-cell approval on status is fatigue, no gate on P&amp;L is dangerous. The line follows ownership.</td></tr>
+        <tr><td class="q">Rhythm?</td><td class="d">Quiet daily change-gated tracking; a weekly digest (its supervisor report); exception pings on severity. Agile — proposes plan revisions on drift.</td><td>Three clocks separate silent tracking from interrupting the owner. The digest is the liveness contract even in a quiet week.</td></tr>
+        <tr><td class="q">Default work-heartbeat cadence?</td><td class="d">Daily (change-gated), overriding the standard 30-minute heartbeat. Cadence made a configurable per-agent field (PID-16).</td><td>A strategic partner thrashing every 30 minutes is pure noise; but the cadence shouldn't be hardcoded for anyone.</td></tr>
+        <tr><td class="q">Deadline signal granularity?</td><td class="d">Edge-triggered on a deadline-state transition (on-track → approaching → overdue), once per item; not time-since-overdue.</td><td>Level-triggered would re-wake forever on the same overdue item. Overdue items persist in the weekly digest instead.</td></tr>
+        <tr><td class="q">Singleton?</td><td class="d">No enforcement. Multiple allowed, one per endeavor; "one CoS" is operator judgment. Hire-on-demand, not seeded.</td><td>Endeavors are plural; a CoS is conceptually singular but that's a naming/scoping choice. Seeding would spawn a broken agent with no plan sheet.</td></tr>
+        <tr><td class="q">Identity / naming?</td><td class="d"><code>display_name</code> is a person's first name; <code>role_title</code> is operator-set at hire with a recipe default (<code>Operating Partner</code>).</td><td>Behavior is fixed by the recipe; the title is positioning that belongs to the operator (CSO / CoS / Founder's Associate / StratOps).</td></tr>
+        <tr><td class="q">Are the platform gaps in or out of scope?</td><td class="d">In scope — PID-15/16/17 are delivered as part of this plan, as children of the epic.</td><td>They're hard/soft blockers of the role; calling them "external" while depending on them was incoherent.</td></tr>
+        <tr><td class="q">Is the hire flow ready for this?</td><td class="d">No — the HR coach is hardcoded to four fields and can't tune <code>role_title</code> or new fields. Make the customizable surface template-declared and coach-consumed (PID-17).</td><td>The operator should be able to modify the role and have HR suggest alternate titles; today the customizable surface is hardcoded in <code>coach.py</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- OPEN QUESTIONS -->
+  <section>
+    <h2><span class="num">6</span>Open questions</h2>
+    <div class="callout">
+      <ul>
+        <li><strong>Tracking vs. canon cell mechanism.</strong> How does the Operating Partner (and the connector's
+            approval gate) know which cells are ungated tracking vs. staged canon? Leaning a hire-time declaration of
+            tracking ranges/columns (named ranges or a designated tab), so the split is data, not guesswork. Depends on
+            <a href="https://linear.app/pidginwork/issue/PID-15">PID-15</a>.</li>
+        <li><strong>Endeavor-scope representation.</strong> What is "endeavor scope" concretely — free-text mission + a set
+            of Slack channels + the plan sheet, or something more structured that the change-probe can filter tasks/events
+            by? Needs pinning before backlog signals (4.4 #1, #4) can be scoped to "this endeavor."</li>
+        <li><strong>Sheet-edit as a change signal (4.4 #2).</strong> Detecting "someone edited the plan sheet" implies a
+            Drive watcher — source 4 of the <a href="CHANGE_GATED_WAKEUP_SPEC.html">change-gated probe</a>, which notes
+            connector-side watcher push is not yet wired. Interim: reconcile the sheet on the daily floor wake rather than
+            react to the edit in real time.</li>
+        <li><strong>Deadline thresholds.</strong> Default N for "approaching" (e.g. within 3 days)? Per-endeavor override?</li>
+        <li><strong>End of an endeavor.</strong> When an endeavor completes, what happens to its Operating Partner —
+            archived, or repurposed? No lifecycle defined yet.</li>
+        <li><strong>Multi-level reporting.</strong> An endeavor-scoped Operating Partner reporting up to an org-wide CoS
+            reuses the "report transport when manager is another agent" piece the autonomy spec flags as not-yet-wired.
+            Deferred; reports go to the human owner for now.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- BUILD ORDER -->
+  <section>
+    <h2><span class="num">7</span>Build order</h2>
+    <table>
+      <thead>
+        <tr><th>Slice</th><th>Delivers</th><th>Touches</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="q">A — Recipe</td><td class="d">The <code>operating-partner</code> recipe (JSON + catalog registration + system prompt + expert persona + permissions + autonomy block). Hireable immediately, limited runtime function. Unblocked.</td><td><code>recipes/operating-partner-v0.1.json</code>, <code>recipes/catalog.py</code>.</td></tr>
+        <tr><td class="q">B — PID-17 + hire fields</td><td class="d">Template-declared customizable fields + HR coach; capture endeavor scope + plan-sheet + operator-set role title at hire.</td><td><a href="https://linear.app/pidginwork/issue/PID-17">PID-17</a>; <code>HireCustomization</code>, hire service/wizard, <code>coach.py</code>.</td></tr>
+        <tr><td class="q">C — PID-15 + sheet ownership</td><td class="d">Drive Sheets read (all tabs) + update with the mutation-approval gate; two-tier write (tracking ungated, canon staged) on the stewarded sheet.</td><td><a href="https://linear.app/pidginwork/issue/PID-15">PID-15</a>; connector; tracking-range declaration (see §6).</td></tr>
+        <tr><td class="q">D — PID-16 + cadence &amp; gate</td><td class="d">Configurable work-heartbeat cadence; daily change-gated tracking wake; weekly digest; exception pings wired to the five signals.</td><td><a href="https://linear.app/pidginwork/issue/PID-16">PID-16</a>; change-probe scoping to the endeavor.</td></tr>
+        <tr><td class="q">E — Autonomy brief</td><td class="d">Bootstrap brief: ingest context + sheet, open mission, arm schedules, propose-revision behavior.</td><td><code>services/activation.py</code> bootstrap brief; recipe autonomy guidance.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    Generated with the <code>spec-writer</code> skill · grilled before written.
+  </footer>
+
+</div>
+</body>
+</html>
