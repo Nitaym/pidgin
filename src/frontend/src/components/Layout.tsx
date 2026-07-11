@@ -60,6 +60,7 @@ export function Layout({ showNav = true }: LayoutProps) {
               <p className="sidebar-section-label">System</p>
               <SidebarApprovals slug={workspace.slug} base={base} />
               <NavLink to={`${base}/integrations`}>Integrations</NavLink>
+              <NavLink to={`${base}/usage`}>Usage</NavLink>
               <NavLink to={`${base}/debug`} end>
                 Diagnostics
               </NavLink>

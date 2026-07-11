@@ -29,6 +29,10 @@ from pidgin.db.diagnostics import (
     list_inbound_events,
     list_model_invocations,
     list_turns,
+    token_usage_by_agent,
+    token_usage_by_model,
+    token_usage_series,
+    token_usage_totals,
 )
 from pidgin.db.employees import get_agent_by_handle, list_agents
 from pidgin.db.principals import get_or_create_operator_principal
@@ -1088,6 +1092,58 @@ def api_list_llm_invocations(
     return list_model_invocations(
         session.conn, limit=min(limit, 200), after=after, ai_employee_id=agent_id
     )
+
+
+@router.get("/usage/tokens/summary")
+def api_token_usage_summary(
+    workspace_slug: str,
+    request: Request,
+    since: str | None = None,
+    agent_id: str | None = None,
+) -> dict:
+    """Summed token usage plus per-agent and per-model breakdowns.
+
+    `since` is an ISO timestamp lower bound (for a windowed total like today or
+    the last 30 days); omit for all-time. `agent_id` scopes the totals and the
+    model breakdown to one agent (the per-agent view); the agent breakdown is
+    only returned for the whole-workspace view.
+    """
+    session = require_workspace_session(request, workspace_slug)
+    return {
+        "totals": token_usage_totals(
+            session.conn, ai_employee_id=agent_id, since=since
+        ),
+        "by_agent": (
+            [] if agent_id else token_usage_by_agent(session.conn, since=since)
+        ),
+        "by_model": token_usage_by_model(
+            session.conn, ai_employee_id=agent_id, since=since
+        ),
+    }
+
+
+@router.get("/usage/tokens/series")
+def api_token_usage_series(
+    workspace_slug: str,
+    request: Request,
+    granularity: str = "day",
+    start: str | None = None,
+    end: str | None = None,
+    agent_id: str | None = None,
+) -> dict:
+    """Token usage bucketed over time (UTC). `granularity` is 'day' or 'hour';
+    for 'hour', pass a bounded `start`/`end` so the series stays small."""
+    session = require_workspace_session(request, workspace_slug)
+    if granularity not in ("day", "hour"):
+        raise HTTPException(status_code=400, detail="granularity must be 'day' or 'hour'")
+    buckets = token_usage_series(
+        session.conn,
+        granularity=granularity,
+        start=start,
+        end=end,
+        ai_employee_id=agent_id,
+    )
+    return {"granularity": granularity, "buckets": buckets}
 
 
 @router.get("/integrations/catalog")

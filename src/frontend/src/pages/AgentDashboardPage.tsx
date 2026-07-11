@@ -408,6 +408,14 @@ function AgentDetail({ slug, handle }: { slug: string; handle: string }) {
               } · ${new Date(data.current_turn.started_at).toLocaleString()}`
             : "No turns yet."}
         </p>
+        <p className="muted" style={{ margin: 0, fontSize: "0.85rem" }}>
+          Tokens (all time): {data.token_usage.totals.total_tokens.toLocaleString()}
+          {" "}({data.token_usage.totals.input_tokens.toLocaleString()} in ·{" "}
+          {data.token_usage.totals.output_tokens.toLocaleString()} out) ·{" "}
+          ${(data.token_usage.totals.cost_usd_micros / 1_000_000).toFixed(4)} ·{" "}
+          {data.token_usage.totals.invocation_count.toLocaleString()} calls ·{" "}
+          <Link to={`/${slug}/usage?agent=${agent.id}`}>usage history</Link>
+        </p>
       </div>
 
       {data.open_approvals.length > 0 ? (

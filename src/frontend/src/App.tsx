@@ -16,6 +16,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TeamPage } from "./pages/TeamPage";
 import { TurnDetailPage } from "./pages/TurnDetailPage";
+import { UsagePage } from "./pages/UsagePage";
 import { WelcomePage } from "./pages/WelcomePage";
 
 function RootRedirect() {
@@ -70,6 +71,7 @@ function WorkspaceApp() {
         <Route path="hire/marketplace/candidates/:templateId" element={<CandidateProfilePage />} />
         <Route path="agents/:handle" element={<AgentProfilePage />} />
         <Route path="agents/:handle/chat" element={<AgentChatPage />} />
+        <Route path="usage" element={<UsagePage />} />
         <Route path="debug" element={<DebugPage />} />
         <Route path="debug/llm" element={<LlmInspectorPage />} />
         <Route path="debug/turns/:turnId" element={<TurnDetailPage />} />

@@ -113,6 +113,183 @@ def _loads_or(raw: Any, default: Any) -> Any:
         return default
 
 
+def token_usage_totals(
+    conn: sqlite3.Connection,
+    *,
+    ai_employee_id: str | None = None,
+    since: str | None = None,
+) -> dict[str, Any]:
+    """Summed token usage across model invocations.
+
+    Every LLM call is a permanent row in ``model_invocations`` carrying its
+    input/output tokens and estimated cost, joined to its agent through
+    ``turns``. Pass ``ai_employee_id`` to scope to one agent (its lifetime
+    spend); omit it for the whole workspace. ``since`` is an ISO timestamp lower
+    bound on ``invoked_at`` for a windowed total (e.g. today or the last 30
+    days). Skipped turns run no invocations, so they contribute nothing.
+    """
+    where, params = _usage_where(ai_employee_id=ai_employee_id, since=since)
+    row = conn.execute(
+        f"""
+        SELECT COALESCE(SUM(mi.input_tokens), 0)   AS input_tokens,
+               COALESCE(SUM(mi.output_tokens), 0)  AS output_tokens,
+               COALESCE(SUM(mi.cost_usd_micros), 0) AS cost_usd_micros,
+               COUNT(*)                            AS invocation_count
+        FROM model_invocations mi
+        JOIN turns t ON t.id = mi.turn_id
+        {where}
+        """,
+        params,
+    ).fetchone()
+    return _usage_totals_row(row)
+
+
+def token_usage_by_agent(
+    conn: sqlite3.Connection,
+    *,
+    since: str | None = None,
+) -> list[dict[str, Any]]:
+    """Token usage grouped by agent, biggest spender first — the 'per agent' view."""
+    where, params = _usage_where(since=since)
+    rows = conn.execute(
+        f"""
+        SELECT t.ai_employee_id,
+               a.handle       AS agent_handle,
+               a.display_name AS agent_display_name,
+               COALESCE(SUM(mi.input_tokens), 0)   AS input_tokens,
+               COALESCE(SUM(mi.output_tokens), 0)  AS output_tokens,
+               COALESCE(SUM(mi.cost_usd_micros), 0) AS cost_usd_micros,
+               COUNT(*)                            AS invocation_count
+        FROM model_invocations mi
+        JOIN turns t ON t.id = mi.turn_id
+        LEFT JOIN ai_employees a ON a.id = t.ai_employee_id
+        {where}
+        GROUP BY t.ai_employee_id
+        ORDER BY (COALESCE(SUM(mi.input_tokens), 0)
+                  + COALESCE(SUM(mi.output_tokens), 0)) DESC
+        """,
+        params,
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = _usage_totals_row(row)
+        item["ai_employee_id"] = row["ai_employee_id"]
+        item["agent_handle"] = row["agent_handle"]
+        item["agent_display_name"] = row["agent_display_name"]
+        out.append(item)
+    return out
+
+
+def token_usage_by_model(
+    conn: sqlite3.Connection,
+    *,
+    ai_employee_id: str | None = None,
+    since: str | None = None,
+) -> list[dict[str, Any]]:
+    """Token usage grouped by model id, biggest first."""
+    where, params = _usage_where(ai_employee_id=ai_employee_id, since=since)
+    rows = conn.execute(
+        f"""
+        SELECT mi.model_id, mi.provider,
+               COALESCE(SUM(mi.input_tokens), 0)   AS input_tokens,
+               COALESCE(SUM(mi.output_tokens), 0)  AS output_tokens,
+               COALESCE(SUM(mi.cost_usd_micros), 0) AS cost_usd_micros,
+               COUNT(*)                            AS invocation_count
+        FROM model_invocations mi
+        JOIN turns t ON t.id = mi.turn_id
+        {where}
+        GROUP BY mi.model_id, mi.provider
+        ORDER BY (COALESCE(SUM(mi.input_tokens), 0)
+                  + COALESCE(SUM(mi.output_tokens), 0)) DESC
+        """,
+        params,
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = _usage_totals_row(row)
+        item["model_id"] = row["model_id"]
+        item["provider"] = row["provider"]
+        out.append(item)
+    return out
+
+
+def token_usage_series(
+    conn: sqlite3.Connection,
+    *,
+    granularity: str = "day",
+    start: str | None = None,
+    end: str | None = None,
+    ai_employee_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Token usage bucketed over time — the usage history.
+
+    ``invoked_at`` is a UTC ISO timestamp, so the day bucket is its first 10
+    chars ("2026-07-12") and the hour bucket its first 13 ("2026-07-12T14");
+    buckets are therefore UTC. Use ``granularity="day"`` for the all-time trend
+    and ``"hour"`` (with a bounded ``start``/``end``) to drill into a day. Each
+    bucket keeps input and output split apart. ``ai_employee_id`` scopes to one
+    agent; omit it to chart all agents combined.
+    """
+    bucket_len = 13 if granularity == "hour" else 10
+    where, where_params = _usage_where(
+        ai_employee_id=ai_employee_id, since=start, until=end
+    )
+    rows = conn.execute(
+        f"""
+        SELECT substr(mi.invoked_at, 1, ?) AS bucket,
+               COALESCE(SUM(mi.input_tokens), 0)   AS input_tokens,
+               COALESCE(SUM(mi.output_tokens), 0)  AS output_tokens,
+               COALESCE(SUM(mi.cost_usd_micros), 0) AS cost_usd_micros,
+               COUNT(*)                            AS invocation_count
+        FROM model_invocations mi
+        JOIN turns t ON t.id = mi.turn_id
+        {where}
+        GROUP BY bucket
+        ORDER BY bucket ASC
+        """,
+        (bucket_len, *where_params),
+    ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = _usage_totals_row(row)
+        item["bucket"] = row["bucket"]
+        out.append(item)
+    return out
+
+
+def _usage_where(
+    *,
+    ai_employee_id: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if ai_employee_id:
+        clauses.append("t.ai_employee_id = ?")
+        params.append(ai_employee_id)
+    if since:
+        clauses.append("mi.invoked_at >= ?")
+        params.append(since)
+    if until:
+        clauses.append("mi.invoked_at < ?")
+        params.append(until)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return where, params
+
+
+def _usage_totals_row(row: sqlite3.Row) -> dict[str, Any]:
+    input_tokens = int(row["input_tokens"])
+    output_tokens = int(row["output_tokens"])
+    return {
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "cost_usd_micros": int(row["cost_usd_micros"]),
+        "invocation_count": int(row["invocation_count"]),
+    }
+
+
 def agent_inspect(conn: sqlite3.Connection, handle: str) -> dict[str, Any] | None:
     """Everything worth knowing to inspect a single agent, for the dashboard.
 
@@ -215,6 +392,10 @@ def agent_inspect(conn: sqlite3.Connection, handle: str) -> dict[str, Any] | Non
             else None,
         },
         "change_gating": read_change_gating_config(conn, agent_row["id"]),
+        "token_usage": {
+            "totals": token_usage_totals(conn, ai_employee_id=agent_row["id"]),
+            "by_model": token_usage_by_model(conn, ai_employee_id=agent_row["id"]),
+        },
         "is_working": is_working,
         "current_turn": current_turn,
         "tools": tools,

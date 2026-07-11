@@ -324,6 +324,40 @@ export type AgentInspectTask = {
   created_at: string;
 };
 
+export type TokenTotals = {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  cost_usd_micros: number;
+  invocation_count: number;
+};
+
+export type TokenUsageByAgent = TokenTotals & {
+  ai_employee_id: string;
+  agent_handle: string | null;
+  agent_display_name: string | null;
+};
+
+export type TokenUsageByModel = TokenTotals & {
+  model_id: string;
+  provider: string;
+};
+
+export type TokenUsageBucket = TokenTotals & {
+  bucket: string;
+};
+
+export type TokenUsageSummary = {
+  totals: TokenTotals;
+  by_agent: TokenUsageByAgent[];
+  by_model: TokenUsageByModel[];
+};
+
+export type TokenUsageSeries = {
+  granularity: "day" | "hour";
+  buckets: TokenUsageBucket[];
+};
+
 export type AgentInspect = {
   agent: {
     id: string;
@@ -343,6 +377,7 @@ export type AgentInspect = {
   recent_actions: AuditEntry[];
   open_approvals: { id: string; proposed_action: string; current_status: string; created_at: string }[];
   change_gating: ChangeGatingConfig;
+  token_usage: { totals: TokenTotals; by_model: TokenUsageByModel[] };
 };
 
 function workspaceBase(slug: string) {
@@ -575,6 +610,32 @@ export const api = {
     const query = params.toString();
     return request<LlmInvocation[]>(
       `${workspaceBase(slug)}/llm-invocations${query ? `?${query}` : ""}`,
+    );
+  },
+  tokenUsageSummary: (
+    slug: string,
+    opts: { since?: string; agentId?: string } = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (opts.since) params.set("since", opts.since);
+    if (opts.agentId) params.set("agent_id", opts.agentId);
+    const query = params.toString();
+    return request<TokenUsageSummary>(
+      `${workspaceBase(slug)}/usage/tokens/summary${query ? `?${query}` : ""}`,
+    );
+  },
+  tokenUsageSeries: (
+    slug: string,
+    opts: { granularity?: "day" | "hour"; start?: string; end?: string; agentId?: string } = {},
+  ) => {
+    const params = new URLSearchParams();
+    if (opts.granularity) params.set("granularity", opts.granularity);
+    if (opts.start) params.set("start", opts.start);
+    if (opts.end) params.set("end", opts.end);
+    if (opts.agentId) params.set("agent_id", opts.agentId);
+    const query = params.toString();
+    return request<TokenUsageSeries>(
+      `${workspaceBase(slug)}/usage/tokens/series${query ? `?${query}` : ""}`,
     );
   },
   getIntegrationsCatalog: (slug: string) =>
