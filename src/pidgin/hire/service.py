@@ -53,6 +53,8 @@ class HireRequest:
     owner_principal_id: str | None = None
     manager_principal_id: str | None = None
     hire_customization_json: str | None = None
+    # Operator-set job title; falls back to the recipe's role_title when empty.
+    role_title: str | None = None
 
 
 @dataclass
@@ -122,7 +124,7 @@ def hire_from_recipe(
         conn,
         employee_id=employee_id,
         display_name=request.display_name,
-        role_title=recipe.role_title,
+        role_title=(request.role_title or "").strip() or recipe.role_title,
         handle=handle,
         recipe_snapshot_id=snapshot_id,
         human_owner_principal_id=owner_id,
@@ -239,6 +241,7 @@ def hire_with_template(
             handle=request.handle,
             manager_principal_id=request.manager_principal_id,
             hire_customization_json=customization.to_json(),
+            role_title=customization.role_title or None,
         ),
     )
     conversation_id = _setup_default_conversation(conn, hired=hired, recipe=recipe)

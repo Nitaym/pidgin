@@ -10,6 +10,24 @@ type HrAssistPanelProps = {
   onApplyCustomization: (next: HireCustomization) => void;
 };
 
+// Apply a coach suggestion by its dotted field key (e.g. "role_title",
+// "job_requirements.mission"). Driven by the key rather than a hardcoded list, so
+// any field a recipe declares customizable (see effective_customizable_fields)
+// can be filled without a frontend change.
+function setByPath(target: HireCustomization, path: string, text: string): void {
+  const parts = path.split(".");
+  let obj: Record<string, unknown> = target as unknown as Record<string, unknown>;
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const child = obj[parts[i]];
+    if (typeof child !== "object" || child === null) return;
+    obj = child as Record<string, unknown>;
+  }
+  const leaf = parts[parts.length - 1];
+  if (typeof obj[leaf] === "string" || obj[leaf] === undefined) {
+    obj[leaf] = text;
+  }
+}
+
 function applySuggestion(
   customization: HireCustomization,
   suggestion: HrAssistMessage["suggestion"],
@@ -22,14 +40,7 @@ function applySuggestion(
     return next;
   }
   for (const [path, text] of Object.entries(suggestion.targets)) {
-    if (path === "job_requirements.mission") next.job_requirements.mission = text;
-    if (path === "ideal_candidate.tone") next.ideal_candidate.tone = text;
-    if (path === "ideal_candidate.decision_framework") {
-      next.ideal_candidate.decision_framework = text;
-    }
-    if (path === "ideal_candidate.escalation_rules") {
-      next.ideal_candidate.escalation_rules = text;
-    }
+    setByPath(next, path, text);
   }
   return next;
 }

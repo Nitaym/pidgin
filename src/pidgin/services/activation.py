@@ -16,8 +16,9 @@ import sqlite3
 from pidgin.db.employees import get_agent_by_handle, transition_employee_status
 from pidgin.db.principals import get_or_create_operator_principal
 from pidgin.db.timers import cancel_agent_timers, create_timer, iso_utc, next_occurrence
-from pidgin.recipes.models import RoleRecipe
+from pidgin.recipes.models import DEFAULT_WORK_HEARTBEAT, RoleRecipe, WorkHeartbeat
 from pidgin.types import TrustLabel
+from pidgin.types.customization import HireCustomization
 from pidgin.util.ids import utc_now_iso
 
 log = logging.getLogger(__name__)
@@ -106,8 +107,55 @@ def _load_recipe(conn: sqlite3.Connection, recipe_snapshot_id: str) -> RoleRecip
     return RoleRecipe.model_validate_json(row["bundle_json"])
 
 
-def _bootstrap_brief(recipe: RoleRecipe | None) -> str:
+def _effective_work_heartbeat(
+    recipe: RoleRecipe | None, customization: HireCustomization | None
+) -> WorkHeartbeat:
+    """Resolve an agent's work-heartbeat cadence: hire override, else the recipe
+    default, else the legacy 30-minute interval (so existing recipes are unchanged).
+    """
+    if customization is not None and customization.work_heartbeat is not None:
+        return customization.work_heartbeat
+    if recipe is not None and recipe.autonomy and recipe.autonomy.work_heartbeat:
+        return recipe.autonomy.work_heartbeat
+    return DEFAULT_WORK_HEARTBEAT
+
+
+def _heartbeat_step(hb: WorkHeartbeat) -> str:
+    """Render bootstrap step 3 for the resolved heartbeat cadence."""
+    if hb.kind == "none":
+        return (
+            "3. You run no polling heartbeat. Your guaranteed daily wake does a full "
+            "pass over your work, and you also wake on events (approvals, replies, "
+            "escalations). Don't arm an interval timer."
+        )
+    if hb.kind == "daily":
+        at = hb.at_local_time or "09:00"
+        return (
+            "3. Arm your work heartbeat: call schedule_self with recurrence "
+            f'{{"kind": "daily", "at_local_time": "{at}"}} and a reason like '
+            '"Reconcile my plan and advance my open tasks." Once a day you will wake, '
+            "reconcile against reality, and push your open work forward — and if "
+            "nothing has changed since your last real run, the wake is skipped so you "
+            "stay quiet. This is your one standing heartbeat."
+        )
+    every = hb.every_minutes or 30
+    return (
+        "3. Arm your work heartbeat: call schedule_self with recurrence "
+        f'{{"kind": "interval", "every_minutes": {every}}} and a reason like '
+        f'"Advance my open tasks." Every {every} minutes you will wake, look at your '
+        "open tasks, and push the most important one forward — this is the heartbeat "
+        "that drives your work to completion without anyone prompting you. Every agent "
+        "runs exactly one."
+    )
+
+
+def _bootstrap_brief(
+    recipe: RoleRecipe | None,
+    *,
+    work_heartbeat: WorkHeartbeat | None = None,
+) -> str:
     """The verbatim instruction delivered when the bootstrap timer fires."""
+    hb = work_heartbeat or _effective_work_heartbeat(recipe, None)
     lines = [
         "[Activation] You are now active. This is your first turn — nobody is "
         "waiting on a reply. Set yourself up to run independently, then go quiet:",
@@ -116,11 +164,7 @@ def _bootstrap_brief(recipe: RoleRecipe | None) -> str:
         "relevant to your role.",
         "2. Turn your mission and responsibilities into a backlog: open_task one "
         "durable task per standing responsibility you own.",
-        "3. Arm your work heartbeat: call schedule_self with recurrence "
-        '{"kind": "interval", "every_minutes": 30} and a reason like "Advance my '
-        'open tasks." Every 30 minutes you will wake, look at your open tasks, and '
-        "push the most important one forward — this is the heartbeat that drives your "
-        "work to completion without anyone prompting you. Every agent runs exactly one.",
+        _heartbeat_step(hb),
         "4. Schedule a recurring status report to your operator via schedule_self "
         "+ escalate — this is a standing rule for every agent.",
         "5. If anything blocks you from starting (a missing tool or unclear "
@@ -228,11 +272,18 @@ def activate_agent(
         return {"handle": handle, "current_status": "active", "bootstrapped": "false"}
 
     recipe = _load_recipe(conn, agent["recipe_snapshot_id"])
+    raw_cust = (
+        agent["hire_customization_json"]
+        if "hire_customization_json" in agent.keys()
+        else None
+    )
+    customization = HireCustomization.from_json(raw_cust)
+    work_heartbeat = _effective_work_heartbeat(recipe, customization)
     timer_id = create_timer(
         conn,
         ai_employee_id=agent["id"],
         scheduled_at=utc_now_iso(),  # fire on the next worker tick
-        reason=_bootstrap_brief(recipe),
+        reason=_bootstrap_brief(recipe, work_heartbeat=work_heartbeat),
         inherited_trust_label=TrustLabel.INTERNAL_AUTHENTICATED.value,
         originating_turn_id=None,  # self-anchored: no conversation
         kind="bootstrap",

@@ -14,7 +14,11 @@ _RECIPES_DIR = Path(__file__).resolve().parents[2] / "recipes"
 
 @pytest.mark.parametrize(
     "filename",
-    ["support-agent-v0.1.json", "executive-assistant-v0.1.json"],
+    [
+        "support-agent-v0.1.json",
+        "executive-assistant-v0.1.json",
+        "operating-partner-v0.1.json",
+    ],
 )
 def test_bundled_role_recipe_validates(filename: str) -> None:
     data = json.loads((_RECIPES_DIR / filename).read_text(encoding="utf-8"))

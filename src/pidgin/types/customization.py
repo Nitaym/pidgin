@@ -4,7 +4,7 @@ import json
 
 from pydantic import BaseModel, Field
 
-from pidgin.recipes.models import RoleRecipe
+from pidgin.recipes.models import RoleRecipe, WorkHeartbeat
 
 
 class JobRequirements(BaseModel):
@@ -27,6 +27,12 @@ class HireCustomization(BaseModel):
     gender: str = ""
     # Voice preset key from pidgin.voice.catalog ("" → auto-pick by gender)
     voice: str = ""
+    # Operator-set job title ("" → use the recipe's role_title). The recipe fixes
+    # behavior; the title is positioning the operator chooses at hire.
+    role_title: str = ""
+    # Operator-set work-heartbeat cadence (None → use the recipe's default). Lets
+    # the operator dial an agent's tracking cadence at hire without a recipe edit.
+    work_heartbeat: WorkHeartbeat | None = None
 
     def to_json(self) -> str:
         return json.dumps(self.model_dump(), separators=(",", ":"))

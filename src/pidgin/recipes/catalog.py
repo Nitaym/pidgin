@@ -18,6 +18,7 @@ BUNDLED_RECIPE_FILES: dict[str, str] = {
     "marketing-social-manager": "marketing-social-manager-v0.1.json",
     "hr-onboarding": "hr-onboarding-v0.1.json",
     "enablement": "enablement-v0.1.json",
+    "operating-partner": "operating-partner-v0.1.json",
 }
 
 

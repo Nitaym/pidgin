@@ -18,6 +18,8 @@ export type HireCustomization = {
   gender?: "" | "female" | "male";
   /** Voice preset key (see utils/voicePresets); "" → auto-pick by gender */
   voice?: string;
+  /** Operator-set job title ("" → use the recipe's role_title). */
+  role_title?: string;
 };
 
 export const emptyCustomization = (): HireCustomization => ({
@@ -26,6 +28,7 @@ export const emptyCustomization = (): HireCustomization => ({
   your_take: "",
   gender: "",
   voice: "",
+  role_title: "",
 });
 
 export type TemplateSummary = {

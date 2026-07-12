@@ -10,6 +10,7 @@ from pidgin.util.ids import new_ulid, utc_now_iso
 if TYPE_CHECKING:
     import sqlite3
 
+    from pidgin.recipes.models import RoleRecipe
     from pidgin.types.customization import HireCustomization
 
 ContextType = Literal["hire", "agent", "template"]
@@ -175,6 +176,28 @@ def stub_assist_reply(operator_message: str) -> tuple[str, dict[str, Any] | None
     )
 
 
+def _resolve_context_recipe(
+    workspace_root: Path, session_id: str
+) -> RoleRecipe | None:
+    """Best-effort: the bundled recipe this session is hiring/editing, so the
+    coach can offer its declared customizable fields (e.g. alternate role titles).
+    Returns None if the context doesn't map to a known bundled recipe — the coach
+    then falls back to the baseline fields.
+    """
+    try:
+        session = get_session(workspace_root, session_id)
+    except HrAssistError:
+        return None
+    if session.context_type not in ("hire", "template"):
+        return None
+    from pidgin.recipes.catalog import load_bundled_recipe
+
+    try:
+        return load_bundled_recipe(session.context_id)
+    except Exception:  # noqa: BLE001 — best-effort; unknown context → baseline fields
+        return None
+
+
 def send_operator_message(
     workspace_root: Path,
     session_id: str,
@@ -200,6 +223,7 @@ def send_operator_message(
             history=history,
             operator_message=body_text,
             draft_customization=draft_customization,
+            recipe=_resolve_context_recipe(workspace_root, session_id),
         )
     if reply is None:
         reply_text, suggestion = stub_assist_reply(body_text)
