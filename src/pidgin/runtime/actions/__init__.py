@@ -152,10 +152,23 @@ def _execute_execute(action_ctx: ActionContext, action: ProposedAction) -> str:
     try:
         resource = parse_resource_uri(uri)
         connector = resolve_resource(conn, resource)
+        # Reaching here means the approval gate accepted this execute, so mark it
+        # owner-approved — the signal a connector uses to allow a gated mutation
+        # (e.g. editing an existing Drive file) vs. an ungated post/say.
+        extra: dict[str, Any] = {
+            "kind": str(action.params.get("kind") or "file"),
+            "owner_approved": True,
+        }
+        op = str(action.params.get("op") or "").strip()
+        if op:
+            extra["op"] = op
+            for key in ("range", "values", "value_input"):
+                if action.params.get(key) is not None:
+                    extra[key] = action.params.get(key)
         payload = WritePayload(
             text=str(action.params.get("content") or ""),
             subject=(str(action.params.get("name") or "").strip() or None),
-            extra={"kind": str(action.params.get("kind") or "file")},
+            extra=extra,
         )
         result = connector.write(
             conn,

@@ -59,14 +59,16 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
     "execute": ToolSpec(
         name="execute",
         description=(
-            "Create new content in a connector resource — e.g. add a document to "
-            "Google Drive. Target the parent folder URI (gdrive:folder/<id>); to "
-            "create at the top level of Drive use gdrive:folder/root. Set "
-            "`name`, and choose `kind`: use \"doc\" for a real Google Doc (your "
-            "markdown content becomes headings/lists), \"folder\" for a subfolder, or "
-            "\"file\" for a raw text file. Prefer \"doc\" for anything people will read "
-            "in Drive. Creating is additive; editing or deleting existing files is a "
-            "separate, owner-approved action and is not done here."
+            "Create or update content in a connector resource (owner-approved). "
+            "To CREATE: target the parent folder URI (gdrive:folder/<id>, or "
+            "gdrive:folder/root for the top level), set `name`, and choose `kind` — "
+            "\"doc\" for a real Google Doc (markdown becomes headings/lists), "
+            "\"folder\" for a subfolder, or \"file\" for a raw text file. "
+            "To UPDATE an existing Google Sheet: target the sheet's file URI "
+            "(gdrive:file/<id>), set `op` to \"update_cells\" (overwrite a range) or "
+            "\"append_rows\" (add rows), give a `range` in A1 notation (e.g. "
+            "\"P&L!B2\" or \"Objectives!A1\"), and `values` as a list of rows. "
+            "Editing an existing file is an owner-approved action."
         ),
         parameters={
             "type": "object",
@@ -74,19 +76,21 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
                 "resource_uri": {
                     "type": "string",
                     "description": (
-                        "Parent folder to create inside, e.g. gdrive:folder/<id>. "
-                        "Use gdrive:folder/root for the top level of Drive."
+                        "For a create: the parent folder, e.g. gdrive:folder/<id> "
+                        "(or gdrive:folder/root). For a Sheet update: the sheet file, "
+                        "e.g. gdrive:file/<id>."
                     ),
                 },
                 "content": {
                     "type": "string",
                     "description": (
-                        "Body text (markdown) for a doc or file. Omit when creating a folder."
+                        "Body text (markdown) for a doc or file. Omit when creating a "
+                        "folder or updating a sheet."
                     ),
                 },
                 "name": {
                     "type": "string",
-                    "description": "Name of the new doc, file, or folder.",
+                    "description": "Name of the new doc, file, or folder (create only).",
                 },
                 "kind": {
                     "type": "string",
@@ -94,7 +98,38 @@ _TOOL_DEFS: dict[str, ToolSpec] = {
                     "description": (
                         "What to create: \"doc\" = native Google Doc (recommended for "
                         "readable content), \"folder\" = subfolder, \"file\" = raw text "
-                        "file. Defaults to file."
+                        "file. Defaults to file. Omit when updating a sheet."
+                    ),
+                },
+                "op": {
+                    "type": "string",
+                    "enum": ["update_cells", "append_rows"],
+                    "description": (
+                        "Sheet update only: \"update_cells\" overwrites the given "
+                        "range, \"append_rows\" adds rows after the last one."
+                    ),
+                },
+                "range": {
+                    "type": "string",
+                    "description": (
+                        "Sheet update only: A1 range, e.g. \"P&L!B2\" or "
+                        "\"Blockers!A1\". Include the tab name."
+                    ),
+                },
+                "values": {
+                    "type": "array",
+                    "items": {"type": "array", "items": {}},
+                    "description": (
+                        "Sheet update only: rows of cell values, e.g. "
+                        "[[\"Runway\", 14]] — a list of rows, each a list of cells."
+                    ),
+                },
+                "value_input": {
+                    "type": "string",
+                    "enum": ["USER_ENTERED", "RAW"],
+                    "description": (
+                        "Sheet update only: USER_ENTERED (parse like typing, default) "
+                        "or RAW (store verbatim)."
                     ),
                 },
             },

@@ -22,6 +22,7 @@ from pidgin.connectors.types import (
 
 DRIVE_API = "https://www.googleapis.com/drive/v3"
 UPLOAD_API = "https://www.googleapis.com/upload/drive/v3"
+SHEETS_API = "https://sheets.googleapis.com/v4/spreadsheets"
 TEXT_MIME = "text/plain; charset=utf-8"
 GDOC_MIME = "application/vnd.google-apps.document"
 MARKDOWN_MIME = "text/markdown; charset=utf-8"
@@ -33,13 +34,14 @@ _DOC_KINDS = {"doc", "gdoc", "document", "google_doc", "googledoc"}
 MAX_READ_BYTES = 32 * 1024
 
 # Google-native types must be exported rather than downloaded; map each to the
-# text-ish format we feed the model.
+# text-ish format we feed the model. Spreadsheets are handled via the Sheets API
+# (all tabs), not this first-tab-only CSV export.
 _EXPORT_MIME = {
     "application/vnd.google-apps.document": "text/plain",
-    "application/vnd.google-apps.spreadsheet": "text/csv",
     "application/vnd.google-apps.presentation": "text/plain",
 }
 _FOLDER_MIME = "application/vnd.google-apps.folder"
+SPREADSHEET_MIME = "application/vnd.google-apps.spreadsheet"
 
 
 class GoogleDriveConnector:
@@ -125,6 +127,9 @@ class GoogleDriveConnector:
         if mime == _FOLDER_MIME:
             return self._read_folder(client, file_id)
 
+        if mime == SPREADSHEET_MIME:
+            return self._read_spreadsheet(client, file_id, name)
+
         if mime in _EXPORT_MIME:
             export_mime = _EXPORT_MIME[mime]
             resp = client.get(
@@ -146,6 +151,55 @@ class GoogleDriveConnector:
                 "mime_type": mime,
                 "truncated": truncated,
                 "file_id": file_id,
+            },
+        )
+
+    def _read_spreadsheet(self, client: Any, file_id: str, name: str) -> ReadResult:
+        """Read every tab of a Google Sheet via the Sheets API.
+
+        Drive's CSV export only yields the first tab; a plan workbook is
+        multi-tab (P&L, objectives, hiring, …), so we list the tabs then
+        ``values:batchGet`` them, rendering each as a titled CSV block. The
+        Drive read scope already grants Sheets read — no new auth.
+        """
+        meta = client.get(
+            f"{SHEETS_API}/{file_id}", params={"fields": "sheets.properties.title"}
+        )
+        self._raise_for_status(meta, f"read spreadsheet {file_id}")
+        titles = [
+            s.get("properties", {}).get("title", "")
+            for s in (meta.json().get("sheets") or [])
+        ]
+        titles = [t for t in titles if t]
+        if not titles:
+            return ReadResult(
+                text="(empty spreadsheet)",
+                metadata={"name": name, "mime_type": SPREADSHEET_MIME, "file_id": file_id},
+            )
+        resp = client.get(
+            f"{SHEETS_API}/{file_id}/values:batchGet",
+            params={"ranges": titles, "majorDimension": "ROWS"},
+        )
+        self._raise_for_status(resp, f"read spreadsheet values {file_id}")
+        ranges = resp.json().get("valueRanges") or []
+        blocks: list[str] = []
+        for title, value_range in zip(titles, ranges, strict=False):
+            rows = value_range.get("values") or []
+            body = "\n".join(",".join(str(cell) for cell in row) for row in rows)
+            blocks.append(f"## {title}\n{body or '(empty)'}")
+        text = "\n\n".join(blocks)
+        truncated = len(text.encode("utf-8")) > MAX_READ_BYTES
+        if truncated:
+            text = text.encode("utf-8")[:MAX_READ_BYTES].decode("utf-8", errors="ignore")
+            text += "\n\n[... truncated ...]"
+        return ReadResult(
+            text=text,
+            metadata={
+                "name": name,
+                "mime_type": SPREADSHEET_MIME,
+                "file_id": file_id,
+                "tabs": titles,
+                "truncated": truncated,
             },
         )
 
@@ -184,15 +238,29 @@ class GoogleDriveConnector:
         mode: WriteMode,
     ) -> WriteResult:
         _ = conn, principal
-        # Creation is additive and ungated. Editing/deleting an existing file is
-        # a mutation that must be owner-approved — that gate isn't wired yet, so
-        # the connector only creates. A file-target write is therefore refused
-        # (this also closes any ungated path, e.g. via `post`).
+        extra = payload.extra or {}
+        # Editing an existing file is a gated mutation. It lands here only as an
+        # owner-approved execute: the execute action stamps ``owner_approved``
+        # after the approval gate accepts it. Ungated post/say writes never set
+        # that flag (and target channels, not Drive files), so this stays closed
+        # to them.
         if resource.kind == "file":
-            raise ValueError(
-                "Editing an existing Drive file requires owner approval, which is not "
-                "available yet — this connector can only create new files and folders."
-            )
+            if not (mode == "execute" and extra.get("owner_approved")):
+                raise ValueError(
+                    "Editing an existing Drive file requires owner approval, which is "
+                    "not available yet — this connector can only create new files and "
+                    "folders."
+                )
+            op = str(extra.get("op") or "").lower()
+            if op not in ("update_cells", "append_rows"):
+                raise ValueError(
+                    f"google_drive file update op unsupported: {op or '(none)'}"
+                )
+            token = self._access_token(DRIVE_WRITE_SCOPE)
+            with self._client(token) as client:
+                return self._write_sheet_values(
+                    client, resource.resource_id, extra, append=(op == "append_rows")
+                )
         if mode != "execute":
             raise ValueError("Google Drive write requires execute mode")
         if resource.kind != "folder":
@@ -200,7 +268,7 @@ class GoogleDriveConnector:
 
         token = self._access_token(DRIVE_WRITE_SCOPE)
         with self._client(token) as client:
-            kind = str((payload.extra or {}).get("kind") or "file").lower()
+            kind = str(extra.get("kind") or "file").lower()
             name = (payload.subject or "").strip() or "Untitled"
             if kind == "folder":
                 return self._create_folder(client, parent_id=resource.resource_id, name=name)
@@ -211,6 +279,50 @@ class GoogleDriveConnector:
             return self._create_file(
                 client, parent_id=resource.resource_id, name=name, content=payload.text or ""
             )
+
+    def _write_sheet_values(
+        self, client: Any, file_id: str, extra: dict[str, Any], *, append: bool
+    ) -> WriteResult:
+        """Update or append cell values on a Google Sheet via the Sheets API.
+
+        ``extra`` carries ``range`` (A1, e.g. ``"P&L!B2"``), ``values`` (a list of
+        rows), and optional ``value_input`` (USER_ENTERED|RAW). The Drive write
+        scope already grants Sheets write — no new auth.
+        """
+        a1 = str(extra.get("range") or "").strip()
+        if not a1:
+            raise ValueError('google_drive sheet write requires a "range" (e.g. "P&L!B2")')
+        values = extra.get("values")
+        if not isinstance(values, list) or not all(isinstance(row, list) for row in values):
+            raise ValueError('google_drive sheet write requires "values" as a list of rows')
+        value_input = str(extra.get("value_input") or "USER_ENTERED").upper()
+        if value_input not in ("USER_ENTERED", "RAW"):
+            value_input = "USER_ENTERED"
+        if append:
+            resp = client.post(
+                f"{SHEETS_API}/{file_id}/values/{a1}:append",
+                params={
+                    "valueInputOption": value_input,
+                    "insertDataOption": "INSERT_ROWS",
+                },
+                json={"values": values},
+            )
+        else:
+            resp = client.put(
+                f"{SHEETS_API}/{file_id}/values/{a1}",
+                params={"valueInputOption": value_input},
+                json={"values": values},
+            )
+        self._raise_for_status(resp, f"write sheet {file_id}")
+        return WriteResult(
+            handle=file_id,
+            external_ref={
+                "id": file_id,
+                "kind": "sheet",
+                "range": a1,
+                "op": "append" if append else "update",
+            },
+        )
 
     def _create_folder(self, client: Any, *, parent_id: str, name: str) -> WriteResult:
         body = {"name": name, "mimeType": _FOLDER_MIME, "parents": [parent_id]}

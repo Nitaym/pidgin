@@ -224,6 +224,16 @@ class WriteFakeClient:
         self.calls.append(("PATCH", url, {"params": params, "content": content}))
         return self._handler("PATCH", url, content)
 
+    def put(
+        self,
+        url: str,
+        json: Any = None,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> FakeResponse:
+        self.calls.append(("PUT", url, {"json": json, "params": params}))
+        return self._handler("PUT", url, json)
+
 
 def _write_connector(
     monkeypatch: pytest.MonkeyPatch, handler: WriteHandler, scopes: list[str]
@@ -380,6 +390,112 @@ def test_write_unsupported_kind_rejected(monkeypatch: pytest.MonkeyPatch) -> Non
             ResourceUri(prefix="gdrive", kind="comment", resource_id="x"),
             WritePayload(text="hi"),
         )
+
+
+def test_read_spreadsheet_reads_all_tabs(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(path: str, params: dict[str, str]) -> FakeResponse:
+        if path == "/files/sh1" and "fields" in params:
+            return FakeResponse(
+                payload={
+                    "id": "sh1",
+                    "name": "Plan",
+                    "mimeType": "application/vnd.google-apps.spreadsheet",
+                }
+            )
+        if path == "https://sheets.googleapis.com/v4/spreadsheets/sh1":
+            assert params["fields"] == "sheets.properties.title"
+            return FakeResponse(
+                payload={
+                    "sheets": [
+                        {"properties": {"title": "P&L"}},
+                        {"properties": {"title": "Hiring"}},
+                    ]
+                }
+            )
+        if path == "https://sheets.googleapis.com/v4/spreadsheets/sh1/values:batchGet":
+            assert params["ranges"] == ["P&L", "Hiring"]
+            return FakeResponse(
+                payload={
+                    "valueRanges": [
+                        {"values": [["Runway", "14"], ["Burn", "50"]]},
+                        {"values": [["Role", "Eng"]]},
+                    ]
+                }
+            )
+        raise AssertionError(f"unexpected request {path} {params}")
+
+    connector = _connector(monkeypatch, handler)
+    result = _read(connector, ResourceUri(prefix="gdrive", kind="file", resource_id="sh1"))
+    assert "## P&L" in result.text
+    assert "Runway,14" in result.text
+    assert "## Hiring" in result.text
+    assert result.metadata["tabs"] == ["P&L", "Hiring"]
+
+
+def test_write_update_sheet_cells(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.connectors.types import WritePayload
+
+    def handler(method: str, url: str, body: object) -> FakeResponse:
+        assert method == "PUT"
+        assert url == "https://sheets.googleapis.com/v4/spreadsheets/sh1/values/P&L!B2"
+        assert body == {"values": [["14"]]}
+        return FakeResponse(payload={"updatedCells": 1})
+
+    connector, client = _write_connector(monkeypatch, handler, [])
+    result = _write(
+        connector,
+        ResourceUri(prefix="gdrive", kind="file", resource_id="sh1"),
+        WritePayload(
+            extra={
+                "owner_approved": True,
+                "op": "update_cells",
+                "range": "P&L!B2",
+                "values": [["14"]],
+            }
+        ),
+    )
+    assert result.external_ref["kind"] == "sheet"
+    assert result.external_ref["op"] == "update"
+    assert any(c[0] == "PUT" for c in client.calls)
+
+
+def test_write_append_sheet_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.connectors.types import WritePayload
+
+    def handler(method: str, url: str, body: object) -> FakeResponse:
+        assert method == "POST"
+        assert url.endswith("/spreadsheets/sh1/values/Blockers!A1:append")
+        assert body == {"values": [["late vendor"]]}
+        return FakeResponse(payload={"updates": {"updatedRows": 1}})
+
+    connector, _ = _write_connector(monkeypatch, handler, [])
+    result = _write(
+        connector,
+        ResourceUri(prefix="gdrive", kind="file", resource_id="sh1"),
+        WritePayload(
+            extra={
+                "owner_approved": True,
+                "op": "append_rows",
+                "range": "Blockers!A1",
+                "values": [["late vendor"]],
+            }
+        ),
+    )
+    assert result.external_ref["op"] == "append"
+
+
+def test_write_file_approved_but_unknown_op_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An approved file write still needs a supported op; no HTTP call otherwise.
+    from pidgin.connectors.types import WritePayload
+
+    connector, client = _write_connector(monkeypatch, lambda m, u, b: FakeResponse(), [])
+    with pytest.raises(ValueError, match="op unsupported"):
+        _write(
+            connector,
+            ResourceUri(prefix="gdrive", kind="file", resource_id="f9"),
+            WritePayload(extra={"owner_approved": True}),
+        )
+    assert client.calls == []
 
 
 def test_health_check_ok(monkeypatch: pytest.MonkeyPatch) -> None:
