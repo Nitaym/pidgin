@@ -33,6 +33,11 @@ class HireCustomization(BaseModel):
     # Operator-set work-heartbeat cadence (None → use the recipe's default). Lets
     # the operator dial an agent's tracking cadence at hire without a recipe edit.
     work_heartbeat: WorkHeartbeat | None = None
+    # What this agent coordinates — the endeavor it is scoped to (free text).
+    endeavor_scope: str = ""
+    # The Drive spreadsheet this agent stewards, as a resource URI
+    # (e.g. "gdrive:file/<id>"). Used by plan-owning roles like Operating Partner.
+    plan_sheet_uri: str = ""
 
     def to_json(self) -> str:
         return json.dumps(self.model_dump(), separators=(",", ":"))

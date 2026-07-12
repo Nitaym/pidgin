@@ -59,6 +59,14 @@
         "Founder's Associate",
         "Head of Strategy & Operations"
       ]
+    },
+    {
+      "key": "endeavor_scope",
+      "label": "Endeavor / scope"
+    },
+    {
+      "key": "plan_sheet_uri",
+      "label": "Plan sheet (Drive URI, e.g. gdrive:file/<id>)"
     }
   ],
   "autonomy": {

@@ -64,6 +64,22 @@ def _format_customization_appendix(customization: HireCustomization) -> str:
             "## Ideal candidate profile (operator-defined)\n\n" + "\n".join(ideal_lines)
         )
 
+    endeavor_lines: list[str] = []
+    if customization.endeavor_scope.strip():
+        endeavor_lines.append(f"**Endeavor:** {customization.endeavor_scope.strip()}")
+    if customization.plan_sheet_uri.strip():
+        endeavor_lines.append(
+            f"**Plan sheet:** `{customization.plan_sheet_uri.strip()}` — the "
+            "spreadsheet you steward. Read it to load the current plan; keep its "
+            "tracking cells current and stage canon changes (objectives, priorities, "
+            "financials) for the owner's approval. This is the only file where you "
+            "have that standing."
+        )
+    if endeavor_lines:
+        sections.append(
+            "## Your endeavor and plan (operator-defined)\n\n" + "\n".join(endeavor_lines)
+        )
+
     if customization.your_take.strip():
         sections.append(f"## Your take\n\n{customization.your_take.strip()}")
 
