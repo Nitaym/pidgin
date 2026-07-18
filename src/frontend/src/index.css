@@ -712,6 +712,10 @@ button.danger:disabled {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* Allow the column to shrink below its widest child (e.g. a long code
+     block) so wide <pre> content scrolls internally instead of stretching
+     the whole message past its max-width. */
+  min-width: 0;
 }
 
 .chat-message-meta {
@@ -759,6 +763,43 @@ button.danger:disabled {
   display: flex;
   gap: var(--space-2);
   margin-top: var(--space-2);
+}
+
+/* Per-answer action row (Copy, etc.) shown under each agent reply. Sits just
+   below the bubble; buttons stay muted until the message is hovered. */
+.chat-message-actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.chat-message:hover .chat-message-actions,
+.chat-message-actions:focus-within {
+  opacity: 1;
+}
+/* Keep the row reachable on touch, where there is no hover. */
+@media (hover: none) {
+  .chat-message-actions { opacity: 1; }
+}
+
+.chat-msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.chat-msg-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
 }
 
 /* Approval "why & discuss" detail */

@@ -18,6 +18,23 @@ function MicIcon({ size = 22 }: { size?: number }) {
   );
 }
 
+function CopyIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="9" width="13" height="13" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function CheckIcon({ size = 15 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
+
 function SpeakerIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -59,6 +76,8 @@ export function ChatView({
   const [streaming, setStreaming] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendingRef = useRef(false); // synchronous guard against double-send
@@ -270,6 +289,32 @@ export function ChatView({
     }
   }
 
+  // Copy an answer's raw text to the clipboard, with a brief "Copied" state on
+  // the button that triggered it. Falls back to a hidden textarea + execCommand
+  // for non-secure contexts where the async Clipboard API is unavailable.
+  const copyMessage = useCallback(async (id: string, text: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopiedId(id);
+      if (copiedTimer.current) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      setError("Couldn't copy to clipboard");
+    }
+  }, []);
+  useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current); }, []);
+
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const { mics, speakers, micId, setMicId, speakerId, setSpeakerId, refresh: refreshDevices } = useAudioDevices();
   const { state: voiceState, warming, warmup, startRecording, stopRecording, feedText, finishSpeaking, disconnect } = useVoiceSession({
@@ -369,6 +414,20 @@ export function ChatView({
                         </button>
                       </div>
                     ) : null}
+                    {!isHuman && (
+                      <div className="chat-message-actions">
+                        <button
+                          type="button"
+                          className="chat-msg-action-btn"
+                          onClick={() => void copyMessage(message.id, message.body_text)}
+                          title="Copy answer"
+                          aria-label="Copy answer"
+                        >
+                          {copiedId === message.id ? <CheckIcon /> : <CopyIcon />}
+                          <span>{copiedId === message.id ? "Copied" : "Copy"}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
