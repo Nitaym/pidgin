@@ -21,6 +21,7 @@ from pidgin.hire import get_hr_agent
 from pidgin.llm import effective_model_ref, invoke_llm
 from pidgin.llm.types import ChatMessage, ModelRequest
 from pidgin.recipes import render_system_prompt
+from pidgin.recipes.catalog import list_bundled_template_summaries
 from pidgin.recipes.models import (
     CustomizableField,
     RoleRecipe,
@@ -74,6 +75,34 @@ def _coach_instruction(
     lines.append(
         '- your_take: use action "append_your_take" to add a note without overwriting.'
     )
+    return "\n".join(lines)
+
+
+def _marketplace_instruction() -> str | None:
+    """List the hireable marketplace templates so the coach can name real roles.
+
+    The HR persona is told to "recommend candidate profiles from the marketplace",
+    but the coach flow otherwise never sees the catalog (only the finder does), so
+    without this it can only guess. Best-effort: returns None if the catalog can't
+    be read, and the coach proceeds without it rather than breaking the wizard.
+    """
+    try:
+        summaries = list_bundled_template_summaries()
+    except Exception:  # noqa: BLE001 — catalog is advisory context, never required
+        log.exception("[hr-assist] failed to load marketplace catalog for coach")
+        return None
+    if not summaries:
+        return None
+    lines = [
+        "Marketplace templates already available to hire. When the role the owner "
+        "is describing matches one of these, say so and name it rather than "
+        "reinventing the brief from scratch:",
+    ]
+    for s in summaries:
+        lines.append(
+            f"- {s.get('name', '')} ({s.get('role_title', '')}) — "
+            f"{s.get('description', '')}"
+        )
     return "\n".join(lines)
 
 
@@ -152,6 +181,9 @@ def generate_coach_reply(
                 content=_coach_instruction(draft_customization, fields),
             ),
         ]
+        marketplace = _marketplace_instruction()
+        if marketplace:
+            messages.append(ChatMessage(role="system", content=marketplace))
         for msg in history:
             role = "assistant" if msg.get("role") == "assist" else "user"
             messages.append(ChatMessage(role=role, content=str(msg.get("body_text", ""))))

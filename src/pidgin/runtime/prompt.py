@@ -14,6 +14,44 @@ _COMMON_HEADER = (
     "take precedence on specifics._"
 )
 
+# The pre-hired hiring agent. Its brief tells it to "recommend candidate profiles
+# from the marketplace", so it — and only it — is handed the live catalog below.
+_HIRING_RECIPE_ID = "hr-onboarding"
+
+
+def _hiring_catalog_block(agent: AgentContextRecord) -> str:
+    """The marketplace templates the owner can hire, injected for the HR agent.
+
+    Without this the hiring agent is told to recommend marketplace profiles but
+    has no way to see them, so it either guesses or (correctly) refuses. Scoped
+    to the hiring recipe so every other agent's prompt is unaffected. Best-effort:
+    a catalog read failure just omits the block rather than breaking the turn.
+    """
+    if agent.recipe.recipe_id != _HIRING_RECIPE_ID:
+        return ""
+    from pidgin.recipes.catalog import list_bundled_template_summaries
+
+    try:
+        summaries = list_bundled_template_summaries()
+    except Exception:  # noqa: BLE001 — catalog is advisory context, never required
+        return ""
+    if not summaries:
+        return ""
+    lines = [
+        "# Marketplace catalog (hireable roles)",
+        "These are the role profiles the owner can hire right now. This is your "
+        "authoritative list — when asked what can be hired, answer from it rather "
+        "than saying you can't see the marketplace. Some roles are singletons that "
+        "may already be filled in this workspace.",
+        "",
+    ]
+    for s in summaries:
+        lines.append(
+            f"- **{s.get('name', '')}** ({s.get('role_title', '')}) — "
+            f"{s.get('description', '')}"
+        )
+    return "\n".join(lines)
+
 
 def build_system_prompt(
     agent: AgentContextRecord, *, common_instructions: str | None = None
@@ -67,6 +105,9 @@ def assemble_messages(
 ) -> list[ChatMessage]:
     common = common_instructions_text(ctx.paths.root)
     system_text = build_system_prompt(agent, common_instructions=common)
+    catalog = _hiring_catalog_block(agent)
+    if catalog:
+        system_text = f"{system_text}\n\n---\n{catalog}"
     obligations = _obligations_block(ctx, agent)
     if obligations:
         system_text = f"{system_text}\n\n---\n{obligations}"

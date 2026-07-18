@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from pidgin.hr_assist.coach import _parse_reply, _validate_suggestion
+from pidgin.hr_assist.coach import (
+    _marketplace_instruction,
+    _parse_reply,
+    _validate_suggestion,
+)
 from pidgin.recipes.catalog import load_bundled_recipe
 from pidgin.recipes.models import effective_customizable_fields
 
@@ -68,6 +72,15 @@ def test_validate_suggestion_rejects_unknown_action() -> None:
         is None
     )
     assert _validate_suggestion("nonsense", _BASELINE) is None
+
+
+def test_marketplace_instruction_lists_hireable_templates() -> None:
+    """The coach is handed the bundled catalog so it can name real marketplace
+    roles instead of guessing (the finder gets this; the coach used not to)."""
+    text = _marketplace_instruction()
+    assert text is not None
+    # A representative bundled role appears by its display name.
+    assert load_bundled_recipe("support-agent").display_name in text
 
 
 def test_role_title_is_a_valid_target_when_recipe_declares_it() -> None:

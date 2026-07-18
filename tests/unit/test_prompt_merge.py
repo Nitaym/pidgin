@@ -2,9 +2,39 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pidgin.recipes.catalog import load_bundled_recipe
 from pidgin.recipes.loader import load_role_recipe
 from pidgin.recipes.prompt import render_system_prompt
+from pidgin.runtime.prompt import _hiring_catalog_block
+from pidgin.storage.records import AgentContextRecord
 from pidgin.types.customization import HireCustomization, JobRequirements
+
+
+def _agent_record(recipe_id: str) -> AgentContextRecord:
+    recipe = load_bundled_recipe(recipe_id)
+    return AgentContextRecord(
+        agent_id="a1",
+        display_name="Agent",
+        role_title=recipe.role_title,
+        handle="agent",
+        agent_principal_id="p1",
+        recipe=recipe,
+        customization=HireCustomization(),
+        permission_profile=recipe.permissions.model_dump(),  # type: ignore[arg-type]
+    )
+
+
+def test_hiring_catalog_block_lists_roles_for_hr_agent() -> None:
+    """The HR agent's runtime prompt carries the live marketplace catalog so it
+    can answer 'what can we hire' instead of claiming it can't see the market."""
+    block = _hiring_catalog_block(_agent_record("hr-onboarding"))
+    assert "Marketplace catalog" in block
+    assert load_bundled_recipe("support-agent").display_name in block
+
+
+def test_hiring_catalog_block_empty_for_non_hiring_agent() -> None:
+    """Every other agent's prompt is untouched — the catalog is HR-scoped."""
+    assert _hiring_catalog_block(_agent_record("support-agent")) == ""
 
 
 def test_render_system_prompt_appends_customization() -> None:
