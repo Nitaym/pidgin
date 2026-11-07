@@ -15,6 +15,26 @@ function Entry({ e, live }: { e: TranscriptEntry; live: boolean }) {
         <span>{e.text}</span>
       </div>
     );
+  if (e.k === "user")
+    return (
+      <div className="ct-user">
+        <div>
+          <span className="ct-caret">&gt;</span>
+          <span>{e.text}</span>
+        </div>
+        <div className="ct-dim ct-from">
+          from {e.who ? `${e.who}'s ` : "a "}Linear comment
+          {e.url ? (
+            <>
+              {" · "}
+              <a href={e.url} target="_blank" rel="noreferrer">
+                open comment
+              </a>
+            </>
+          ) : null}
+        </div>
+      </div>
+    );
   if (e.k === "todos")
     return (
       <div className="ct-tool">

@@ -69,6 +69,10 @@
 .ct-body > div { margin: 0 0 8px; white-space: pre-wrap; word-break: break-word; }
 .ct-dim { color: #75757e; }
 .ct-prompt { color: #9aa5ff; }
+.ct-user { border-left: 2px solid #3a3d55; background: #15151c; padding: 6px 10px; margin: 4px 0 10px !important; }
+.ct-user .ct-caret { color: #9aa5ff; margin-right: 8px; font-weight: 600; }
+.ct-from { font-size: 11px; margin-top: 2px; padding-left: 16px; }
+.ct-from a { color: #9aa5ff; }
 .ct-say { display: flex; gap: 8px; color: #ececec; }
 .ct-dot { color: #d4d4d4; flex: none; margin-right: 6px; }
 .ct-say .ct-dot { margin-right: 0; }

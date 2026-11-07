@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Any
 
 MAX_OUT_LINES = 4
+# How the runner words a forwarded Linear comment (runner._forward_comments).
+_COMMENT_RE = re.compile(r"^(?P<who>.+?) commented on (?P<key>[A-Z][A-Z0-9]*-\d+) \((?P<url>[^)]*)\):\s*(?P<body>.*)$", re.S)
 _cache: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
 
@@ -84,6 +87,17 @@ def _result_lines(block: dict[str, Any], tool: dict[str, Any] | None) -> tuple[l
     return [ln[:240] for ln in lines[:MAX_OUT_LINES]], max(0, len(lines) - MAX_OUT_LINES)
 
 
+def _user_text(content: Any) -> str | None:
+    """The text of a user message, or None when it carries tool results."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list) or any(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+    ):
+        return None
+    return "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict))
+
+
 def _feed(state: dict[str, Any], evt: dict[str, Any]) -> None:
     entries: list[dict[str, Any]] = state["entries"]
     tools: dict[str, dict[str, Any]] = state["tools"]
@@ -92,6 +106,10 @@ def _feed(state: dict[str, Any], evt: dict[str, Any]) -> None:
     if kind == "system" and evt.get("subtype") == "init":
         if evt.get("cwd"):
             state["cwd"] = evt["cwd"]
+        # A live session re-announces itself on every turn; show it once per session.
+        if evt.get("session_id") and evt.get("session_id") == state.get("session"):
+            return
+        state["session"] = evt.get("session_id")
         entries.append(
             {
                 "k": "init",
@@ -123,6 +141,23 @@ def _feed(state: dict[str, Any], evt: dict[str, Any]) -> None:
                 entries.append(entry)
     elif kind == "user":
         content = (evt.get("message") or {}).get("content")
+        text = _user_text(content)
+        if text is not None:
+            # Messages sent into the session, echoed back by Claude Code. The first
+            # is the ticket prompt (shown at the top already); later ones are
+            # forwarded comments.
+            state["user_seen"] = state.get("user_seen", 0) + 1
+            if state["user_seen"] > 1:
+                m = _COMMENT_RE.match(text.strip())
+                entries.append(
+                    {
+                        "k": "user",
+                        "who": m.group("who") if m else None,
+                        "url": m.group("url") if m else None,
+                        "text": (m.group("body") if m else text).strip(),
+                    }
+                )
+            return
         for block in content if isinstance(content, list) else []:
             if block.get("type") != "tool_result":
                 continue

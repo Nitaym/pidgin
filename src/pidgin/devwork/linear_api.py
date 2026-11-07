@@ -270,51 +270,97 @@ class LinearClient:
         viewer_id: str | None = None,
         ready_label: str | None = None,
         first: int = 25,
+        max_pages: int = 20,
     ) -> list[Issue]:
-        """The trigger check, run every few seconds: only what rules 1-2 need.
+        """The trigger check: Todo tickets the rules can pick, filtered in Linear.
 
-        One request with two small pages filtered server-side: tickets in Todo
-        assigned to the worker, and unassigned ones with the agent-ready label.
-        Separate pages so a long agent-ready list never hides an assigned ticket.
+        (a) state = Todo and assignee = the worker; (b) only when ``ready_label`` is
+        given: state = Todo, unassigned, labelled agent-ready. Separate paginated
+        lists, so a long agent-ready list never hides an assigned ticket and no
+        ticket is missed past a page. Only the fields the rules need; blockers
+        are looked up separately for the few tickets that come back.
         """
         base: dict[str, Any] = {
             "team": {"id": {"eq": team_id}},
             "state": {"id": {"eq": todo_state_id}},
         }
-        fields = """nodes { id identifier title url priority createdAt updatedAt
-                   assignee { id } labels(first: 8) { nodes { id name } }
-                   inverseRelations(first: 4) { nodes { type issue { state { type } } } } }"""
-        parts: list[str] = []
-        params: list[str] = ["$first: Int!"]
-        variables: dict[str, Any] = {"first": first}
+        lists: dict[str, dict[str, Any]] = {}
         if viewer_id:
-            params.append("$mine: IssueFilter!")
-            parts.append(f"mine: issues(first: $first, filter: $mine) {{ {fields} }}")
-            variables["mine"] = {**base, "assignee": {"id": {"eq": viewer_id}}}
+            lists["mine"] = {**base, "assignee": {"id": {"eq": viewer_id}}}
         if ready_label:
-            params.append("$ready: IssueFilter!")
-            parts.append(f"ready: issues(first: $first, filter: $ready) {{ {fields} }}")
-            variables["ready"] = {
+            lists["ready"] = {
                 **base,
                 "assignee": {"null": True},
                 "labels": {"some": {"name": {"eqIgnoreCase": ready_label}}},
             }
-        if not parts:
-            return []
-        data = self.gql(f"query({', '.join(params)}) {{ {' '.join(parts)} }}", variables)
+        fields = """pageInfo { hasNextPage endCursor }
+                 nodes { id identifier title url priority createdAt updatedAt
+                   assignee { id } labels(first: 8) { nodes { id name } } }"""
         out: list[Issue] = []
-        for alias in ("mine", "ready"):
-            out += [_to_issue(n) for n in (data.get(alias) or {}).get("nodes", [])]
+        cursors: dict[str, str | None] = {name: None for name in lists}
+        pending = list(lists)
+        for _ in range(max_pages):
+            if not pending:
+                break
+            params = ["$first: Int!"]
+            parts: list[str] = []
+            variables: dict[str, Any] = {"first": first}
+            for name in pending:
+                params += [f"${name}: IssueFilter!", f"${name}After: String"]
+                parts.append(
+                    f"{name}: issues(first: $first, after: ${name}After, filter: ${name}) {{ {fields} }}"
+                )
+                variables[name] = lists[name]
+                variables[f"{name}After"] = cursors[name]
+            data = self.gql(f"query({', '.join(params)}) {{ {' '.join(parts)} }}", variables)
+            still: list[str] = []
+            for name in pending:
+                page = data.get(name) or {}
+                out += [_to_issue(n) for n in page.get("nodes", [])]
+                info = page.get("pageInfo") or {}
+                if info.get("hasNextPage") and info.get("endCursor"):
+                    cursors[name] = info["endCursor"]
+                    still.append(name)
+            pending = still
         return out
 
-    def issues_brief(self, issue_ids: list[str]) -> list[Issue]:
-        """Status and assignee of several tickets in one request (running-run checks)."""
+    def blocked_ids(self, issue_ids: list[str]) -> set[str]:
+        """Which of these tickets are blocked by an open ticket (one request)."""
         if not issue_ids:
-            return []
+            return set()
         data = self.gql(
             """query($ids: [ID!]!, $first: Int!) { issues(first: $first, filter: { id: { in: $ids } }) {
-                 nodes { id identifier title updatedAt state { id name type } assignee { id name } } } }""",
+                 nodes { id inverseRelations(first: 10) { nodes { type issue { state { type } } } } } } }""",
             {"ids": issue_ids, "first": len(issue_ids)},
+        )
+        return {
+            node["id"]
+            for node in (data.get("issues") or {}).get("nodes", [])
+            if _to_issue({"identifier": "", **node}).blocked
+        }
+
+    def running_check(
+        self, issue_ids: list[str], *, since: str, owner_id: str | None
+    ) -> list[Issue]:
+        """Status, assignee and the owner's new comments for running tickets, in one request.
+
+        Comments are those created after ``since`` by ``owner_id`` (never the
+        worker's own); they come back in ``issue.raw["comments"]["nodes"]``.
+        """
+        if not issue_ids:
+            return []
+        comment_filter: dict[str, Any] = {"createdAt": {"gt": since}}
+        if owner_id:
+            comment_filter["user"] = {"id": {"eq": owner_id}}
+        else:
+            comment_filter["id"] = {"eq": "none"}  # no owner set: forward nothing
+        data = self.gql(
+            """query($ids: [ID!]!, $first: Int!, $comments: CommentFilter!) {
+                 issues(first: $first, filter: { id: { in: $ids } }) {
+                   nodes { id identifier title url updatedAt state { id name type } assignee { id name }
+                     comments(first: 20, filter: $comments) {
+                       nodes { id body url createdAt user { id name displayName } } } } } }""",
+            {"ids": issue_ids, "first": len(issue_ids), "comments": comment_filter},
         )
         return [_to_issue(n) for n in (data.get("issues") or {}).get("nodes", [])]
 

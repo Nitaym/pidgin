@@ -1,7 +1,9 @@
 """Process helpers: detached spawn, liveness with start-time check, tree kill.
 
 Runs are spawned detached with output going to files (not pipes), so a Pidgin
-restart neither kills them nor loses their output. PIDs are reused on Windows,
+restart neither kills them nor loses their output. Their stdin is a pipe Pidgin
+keeps open to send messages into the session (stream-json); after a restart
+that pipe is gone, so the run finishes its current turn and exits. PIDs are reused on Windows,
 so liveness also compares the process creation time recorded at spawn.
 """
 
@@ -74,12 +76,13 @@ def spawn_detached(
     args: list[str],
     *,
     cwd: Path,
-    stdin_path: Path,
+    stdin_path: Path | None,
     stdout_path: Path,
     stderr_path: Path,
     env: dict[str, str] | None = None,
 ) -> subprocess.Popen[bytes]:
-    stdin = open(stdin_path, "rb")  # noqa: SIM115 — handed to the child
+    # No stdin file: a pipe the caller writes to (and closes to end the run).
+    stdin = open(stdin_path, "rb") if stdin_path else subprocess.PIPE  # noqa: SIM115
     stdout = open(stdout_path, "ab")  # noqa: SIM115
     stderr = open(stderr_path, "ab")  # noqa: SIM115
     kwargs: dict[str, object] = {}
@@ -101,7 +104,8 @@ def spawn_detached(
             **kwargs,  # type: ignore[arg-type]
         )
     finally:
-        stdin.close()
+        if stdin is not subprocess.PIPE:
+            stdin.close()  # type: ignore[union-attr]
         stdout.close()
         stderr.close()
     return proc

@@ -82,7 +82,7 @@ CONFIG_FIELDS = (
 )
 
 
-DEFAULT_POLL_SECONDS = 5  # the new-ticket check; running tickets are checked every 60 s
+DEFAULT_POLL_SECONDS = 15  # the new-ticket check; running tickets have their own 15 s timer
 MIN_POLL_SECONDS = 5
 MAX_POLL_SECONDS = 600
 

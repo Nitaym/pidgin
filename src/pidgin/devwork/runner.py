@@ -4,8 +4,9 @@ One background thread (``DevRunner``) inside the Pidgin server:
   * checks Linear for new tickets for each enabled developer (outbound polling
     only, every 5 s by default), slowing down on its own when Linear's
     rate-limit headers say requests are running low,
-  * checks the tickets of running runs (stopped, moved, reassigned) on their
-    own 60 s timer, in one request for all of them,
+  * checks the tickets of running runs on their own 15 s timer, in one
+    request for all of them: stopped, moved or reassigned, and the owner's new
+    comments, which are written into the running session as user messages,
   * applies the trigger rules and keeps the queue,
   * claims and starts a qualifying ticket in the same pass it is seen: a dev
     slot is put on the ticket's branch and Claude Code starts,
@@ -51,7 +52,7 @@ log = logging.getLogger(__name__)
 
 TICK_SECONDS = 0.5
 META_TTL_SECONDS = 600
-RUNNING_CHECK_SECONDS = 60  # stopped / moved / reassigned checks for running tickets
+RUNNING_CHECK_SECONDS = 15  # running tickets: stop signals + the owner's new comments
 HEARTBEAT_SECONDS = 5
 SLOTS_CACHE_SECONDS = 60
 # Linear allows 2,500 requests/hour per user, shared by every key acting as it.
@@ -88,6 +89,16 @@ def _git(repo: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
             f"git {' '.join(args)}: {result.stderr.strip() or result.stdout.strip()}"
         )
     return result.stdout.strip()
+
+
+def _is_user_text(evt: dict[str, Any]) -> bool:
+    """A user message (ours, echoed back), not a tool result."""
+    content = (evt.get("message") or {}).get("content")
+    if isinstance(content, str):
+        return True
+    return isinstance(content, list) and not any(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in content
+    )
 
 
 def poll_plan(
@@ -243,6 +254,12 @@ class DevRunner:
         self._first_output_seen: set[str] = set()
         self._slots_cache: dict[str, tuple[float, bool]] = {}
         self._poll_state: dict[str, dict[str, Any]] = {}
+        self._blocked_cache: dict[str, tuple[float, bool]] = {}
+        # Live sessions: messages written to each run's stdin vs. echoed back by
+        # Claude (--replay-user-messages), and the latest result event per run.
+        self._sent: dict[str, int] = {}
+        self._replayed: dict[str, int] = {}
+        self._results: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._recovered = False
 
@@ -432,6 +449,7 @@ class DevRunner:
                     else None
                 ),
             )
+            self._mark_blocked(client, issues)
             poll_ms = int((time.monotonic() - t0) * 1000)
             rate = client.rate
             self._note_rate(worker, client, poll_ms, rate.last_complexity if rate else None)
@@ -457,6 +475,21 @@ class DevRunner:
             store.update_worker(conn, wid, {"last_poll_error": str(exc)[:500]})
             log.warning("[devrunner] poll failed for %s: %s", wid, exc)
         return False
+
+    def _mark_blocked(self, client: LinearClient, issues: list[Issue]) -> None:
+        """Blocked check for just the tickets the trigger query returned, cached a minute."""
+        now = time.monotonic()
+        stale = [
+            i.id
+            for i in issues
+            if now - self._blocked_cache.get(i.id, (0.0, False))[0] >= RUNNING_CHECK_SECONDS * 4
+        ]
+        if stale:
+            blocked = client.blocked_ids(stale)
+            for issue_id in stale:
+                self._blocked_cache[issue_id] = (now, issue_id in blocked)
+        for issue in issues:
+            issue.blocked = self._blocked_cache.get(issue.id, (0.0, False))[1]
 
     def _queue_from(
         self, conn: sqlite3.Connection, worker: dict[str, Any], issues: list[Issue]
@@ -533,9 +566,17 @@ class DevRunner:
         running = [r for r in store.active_runs(conn, wid) if r["status"] == "running"]
         if not running:
             return
+        cursors = [r.get("comment_cursor") or r.get("started_at") or r["created_at"] for r in running]
         try:
             client = linear_for_worker(conn, worker)
-            issues = {i.id: i for i in client.issues_brief([r["ticket_id"] for r in running])}
+            issues = {
+                i.id: i
+                for i in client.running_check(
+                    [r["ticket_id"] for r in running],
+                    since=min(cursors),
+                    owner_id=worker.get("owner_linear_id"),
+                )
+            }
             self._note_rate(worker, client, None, None)
         except LinearError as exc:
             log.warning("[devrunner] running-ticket check failed for %s: %s", wid, exc)
@@ -556,6 +597,65 @@ class DevRunner:
                         "stop",
                         f"Stopped from Linear (status {issue.state_name}, assignee {issue.assignee_name or 'none'})",
                     )
+                continue
+            self._forward_comments(conn, run, issue)
+
+    def _forward_comments(self, conn: sqlite3.Connection, run: dict[str, Any], issue: Issue) -> None:
+        """Write the owner's new comments into the running session, oldest first."""
+        cursor = run.get("comment_cursor") or run.get("started_at") or run["created_at"]
+        comments = sorted(
+            (
+                c
+                for c in (issue.raw.get("comments") or {}).get("nodes", [])
+                if str(c.get("createdAt") or "") > cursor
+            ),
+            key=lambda c: str(c.get("createdAt")),
+        )
+        for c in comments:
+            who = (c.get("user") or {}).get("name") or "The owner"
+            body = str(c.get("body") or "").strip()
+            url = str(c.get("url") or issue.url or "")
+            text = f"{who} commented on {issue.key} ({url}):\n\n{body}"
+            fresh = store.get_run(conn, run["id"]) or run
+            if fresh.get("outcome") or fresh.get("stop_requested"):
+                sent = False
+                why = "the run is already finishing"
+            else:
+                sent = self._write_user(run["id"], text)
+                why = "the run started before Pidgin restarted, so its input is closed"
+            store.add_event(
+                conn,
+                run["id"],
+                "comment" if sent else "comment_skipped",
+                (f"Forwarded {who}'s comment into the session" if sent else f"Not forwarded: {why}")
+                + f": {body.splitlines()[0][:200] if body else ''}",
+                {"who": who, "body": body[:4000], "url": url, "comment_id": c.get("id")},
+            )
+            store.update_run(conn, run["id"], comment_cursor=str(c.get("createdAt")))
+
+    # -- live session input -------------------------------------------------------
+    def _write_user(self, run_id: str, text: str) -> bool:
+        """Send a user message into the run's Claude Code session (stream-json stdin)."""
+        popen = self._procs.get(run_id)
+        if popen is None or popen.stdin is None or popen.stdin.closed or popen.poll() is not None:
+            return False
+        line = json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n"
+        try:
+            popen.stdin.write(line.encode("utf-8"))
+            popen.stdin.flush()
+        except OSError:
+            return False
+        self._sent[run_id] = self._sent.get(run_id, 0) + 1
+        return True
+
+    def _close_stdin(self, run_id: str) -> None:
+        """End the session's input: Claude finishes its turn and exits."""
+        popen = self._procs.get(run_id)
+        if popen is not None and popen.stdin is not None and not popen.stdin.closed:
+            try:
+                popen.stdin.close()
+            except OSError:
+                pass
 
     # -- admission -------------------------------------------------------------------
     def _admit(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> None:
@@ -800,8 +900,11 @@ class DevRunner:
         args = [
             exe,
             "-p",
+            "--input-format",
+            "stream-json",
             "--output-format",
             "stream-json",
+            "--replay-user-messages",
             "--verbose",
             "--append-system-prompt-file",
             str(log_dir / "rules.md"),
@@ -843,12 +946,21 @@ class DevRunner:
         process = proc.spawn_detached(
             args,
             cwd=path,
-            stdin_path=log_dir / "prompt.md",
+            stdin_path=None,
             stdout_path=log_dir / "stream.jsonl",
             stderr_path=log_dir / "stderr.log",
             env=env,
         )
         self._procs[run_id] = process
+        self._sent[run_id] = self._replayed[run_id] = 0
+        self._results.pop(run_id, None)
+        self._write_user(run_id, prompt)  # the ticket prompt is the first message
+        comment_times = [
+            str(c.get("createdAt")) for c in (full.get("comments") or {}).get("nodes", []) if c.get("createdAt")
+        ]
+        store.update_run(
+            conn, run_id, comment_cursor=max(comment_times) if comment_times else full.get("createdAt")
+        )
         now = utc_now_iso()
         store.update_run(
             conn,
@@ -994,12 +1106,21 @@ class DevRunner:
                 and evt.get("session_id")
             ):
                 store.update_run(conn, run["id"], session_id=evt["session_id"])
+            elif evt.get("type") == "user" and _is_user_text(evt):
+                self._replayed[run["id"]] = self._replayed.get(run["id"], 0) + 1
             elif evt.get("type") == "assistant" and run["id"] not in self._first_output_seen:
                 self._first_output_seen.add(run["id"])
                 if not run.get("first_output_at"):
                     store.update_run(conn, run["id"], first_output_at=utc_now_iso())
             elif evt.get("type") == "result":
                 result = evt
+                self._results[run["id"]] = evt
+                # The turn is over. A message sent mid-turn reaches Claude at its next
+                # tool step (it is echoed back then); one sent after its last step
+                # starts another turn. Close the input only when nothing is waiting,
+                # so an open stdin never keeps a finished run alive.
+                if self._replayed.get(run["id"], 0) >= self._sent.get(run["id"], 0):
+                    self._close_stdin(run["id"])
         return result
 
     def _record_usage(self, conn: sqlite3.Connection, run_id: str, result: dict[str, Any]) -> None:
@@ -1043,8 +1164,18 @@ class DevRunner:
             self._last_heartbeat[run["id"]] = time.monotonic()
             store.update_run(conn, run["id"], heartbeat_at=utc_now_iso())
         fresh = store.get_run(conn, run["id"]) or run
+        if fresh.get("outcome"):
+            self._close_stdin(run["id"])  # handed off: let it finish the turn and exit
+        elif run["id"] in self._results:
+            # A turn ended but a message looked pending: if nothing happens for a
+            # minute, end the input anyway rather than wait for the idle limit.
+            quiet = _parse(fresh.get("last_output_at"))
+            if quiet and (_now() - quiet).total_seconds() > 60:
+                self._close_stdin(run["id"])
+        result = result or self._results.get(run["id"])
 
         if fresh["stop_requested"]:
+            self._close_stdin(run["id"])
             if alive and run.get("pid"):
                 proc.kill_tree(int(run["pid"]))
             self._finalize(conn, fresh, "cancelled", result)
@@ -1060,6 +1191,7 @@ class DevRunner:
             elif last_out and (_now() - last_out).total_seconds() > idle * 60:
                 reason = f"no output for {idle} min"
             if reason:
+                self._close_stdin(run["id"])
                 proc.kill_tree(int(fresh["pid"]))
                 store.update_run(conn, run["id"], failure_reason=reason)
                 self._finalize(conn, fresh, "timed_out", result)
@@ -1069,6 +1201,7 @@ class DevRunner:
             result = self._read_stream(conn, fresh)
             if result is not None:
                 self._record_usage(conn, run["id"], result)
+        result = result or self._results.get(run["id"])
         exit_code = popen.returncode if popen is not None else None
         store.update_run(conn, run["id"], exit_code=exit_code)
         self._finalize(conn, store.get_run(conn, run["id"]) or fresh, "exited", result)
@@ -1077,8 +1210,11 @@ class DevRunner:
     def _finalize(
         self, conn: sqlite3.Connection, run: dict[str, Any], how: str, result: dict[str, Any] | None
     ) -> None:
+        self._close_stdin(run["id"])
         self._procs.pop(run["id"], None)
         self._last_heartbeat.pop(run["id"], None)
+        for table in (self._sent, self._replayed, self._results):
+            table.pop(run["id"], None)
         worker = store.get_worker(conn, run["ai_employee_id"]) or {}
         head = ""
         commits: list[str] = []

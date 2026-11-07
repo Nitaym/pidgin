@@ -301,9 +301,9 @@ def test_dev_slots_take_create_and_lock(tmp_path: Path) -> None:
 # -- fast pickup: 5 s new-ticket checks, 60 s running checks, rate budget ---------
 
 
-def test_new_worker_polls_every_5_seconds(conn: sqlite3.Connection) -> None:
+def test_new_worker_polls_every_15_seconds(conn: sqlite3.Connection) -> None:
     worker = store.ensure_worker(conn, "dev1", "claude")
-    assert worker["poll_seconds"] == 5
+    assert worker["poll_seconds"] == 15
     assert DevRunner._base_interval({"poll_seconds": 1}) == 5  # minimum 5 s
 
 
@@ -358,24 +358,37 @@ def test_poll_plan_backs_off_when_requests_run_low() -> None:
     assert note and "complexity" in note
 
 
-def test_todo_query_is_two_small_filtered_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_todo_query_filters_in_linear_and_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
     from pidgin.devwork.linear_api import LinearClient
 
-    seen: dict = {}
+    calls: list[dict] = []
+
+    def node(key: str) -> dict:
+        return {"id": f"id-{key}", "identifier": key, "assignee": {"id": "me"}}
 
     def fake_gql(self, query, variables=None):  # noqa: ANN001
-        seen["query"], seen["vars"] = query, variables
-        node = {"id": "i1", "identifier": "ACG-1", "assignee": {"id": "me"}}
-        return {"mine": {"nodes": [node]}, "ready": {"nodes": []}}
+        calls.append({"query": query, "vars": variables})
+        if len(calls) == 1:
+            return {
+                "mine": {"nodes": [node("ACG-1")], "pageInfo": {"hasNextPage": True, "endCursor": "c1"}},
+                "ready": {"nodes": [node("ACG-9")], "pageInfo": {"hasNextPage": False}},
+            }
+        return {"mine": {"nodes": [node("ACG-2")], "pageInfo": {"hasNextPage": False}}}
 
     monkeypatch.setattr(LinearClient, "gql", fake_gql)
     issues = LinearClient("k").todo_issues("team", "todo", viewer_id="me", ready_label="agent-ready")
-    assert [i.key for i in issues] == ["ACG-1"]
-    assert "mine: issues(first: $first" in seen["query"] and "ready: issues" in seen["query"]
-    assert "description" not in seen["query"] and "comments" not in seen["query"]
-    assert seen["vars"]["first"] <= 25
-    assert seen["vars"]["mine"]["assignee"] == {"id": {"eq": "me"}}
-    assert seen["vars"]["ready"]["assignee"] == {"null": True}
+    assert [i.key for i in issues] == ["ACG-1", "ACG-9", "ACG-2"]  # page 2 of the assigned list
+    first, second = calls
+    assert "mine: issues(" in first["query"] and "ready: issues(" in first["query"]
+    assert "inverseRelations" not in first["query"]  # blockers only for what comes back
+    assert "description" not in first["query"] and "comments" not in first["query"]
+    assert first["vars"]["mine"]["assignee"] == {"id": {"eq": "me"}}
+    assert first["vars"]["ready"]["assignee"] == {"null": True}
+    assert "ready" not in second["vars"] and second["vars"]["mineAfter"] == "c1"
+
+    calls.clear()
+    LinearClient("k").todo_issues("team", "todo", viewer_id="me", ready_label=None)
+    assert "ready" not in calls[0]["query"]  # agent-ready rule off: no second list
 
 
 class _FakeLinear:
@@ -392,8 +405,13 @@ class _FakeLinear:
         self.calls.append("todo")
         return self.todo
 
-    def issues_brief(self, ids: list[str]) -> list[Issue]:
-        self.calls.append("brief")
+    def blocked_ids(self, ids: list[str]) -> set[str]:
+        self.calls.append("blocked")
+        return set()
+
+    def running_check(self, ids: list[str], *, since: str, owner_id: str | None) -> list[Issue]:
+        self.calls.append("check")
+        self.since = since
         return self.brief
 
 
@@ -413,7 +431,7 @@ def _ready_worker(conn: sqlite3.Connection) -> None:
     )
 
 
-def test_tick_polls_every_5_s_and_starts_in_the_same_pass(
+def test_tick_polls_and_starts_in_the_same_pass(
     conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from pidgin.devwork import runner as runner_mod
@@ -433,7 +451,8 @@ def test_tick_polls_every_5_s_and_starts_in_the_same_pass(
     assert run and run["ticket_key"] == "ACG-2" and run["ticket_seen_at"]
     assert run["ticket_touched_at"] == "t1"
 
-    r.tick(conn)  # under 5 s later: no new request
+    assert fake.calls.count("blocked") == 1  # blockers looked up for the one ticket
+    r.tick(conn)  # under 15 s later: no new request
     assert fake.calls.count("todo") == 1
     store.update_worker(conn, "dev1", {"last_poll_at": "2000-01-01T00:00:00.000Z"})
     r.tick(conn)
@@ -464,10 +483,140 @@ def test_running_tickets_checked_on_their_own_timer(
     assert worker is not None
     assert r._check_due(worker)
     r._check_running(conn, worker)
-    assert fake.calls == ["brief"]  # one request for every running ticket
+    assert fake.calls == ["check"]  # one request for every running ticket
     run = store.get_run(conn, run_id)
     assert run and run["stop_requested"] == 1 and run["stopped_by"] == "Linear"
-    assert not r._check_due(worker)  # next one in 60 s
+    assert not r._check_due(worker)  # next one in 15 s
+
+
+class _FakePopen:
+    def __init__(self) -> None:
+        self.stdin = io.BytesIO()
+        self.closed_stdin = False
+
+    def poll(self) -> None:
+        return None
+
+
+def test_owner_comments_forwarded_into_the_session(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pidgin.devwork import runner as runner_mod
+
+    _ready_worker(conn)
+    store.update_worker(conn, "dev1", {"owner_linear_id": "owner"})
+    run_id = store.create_run(
+        conn,
+        ai_employee_id="dev1",
+        ticket_id="id-ACG-3",
+        ticket_key="ACG-3",
+        ticket_title="t",
+        ticket_url="u",
+        trigger_class="assigned",
+    )
+    assert run_id is not None
+    store.update_run(conn, run_id, status="running", comment_cursor="2026-11-07T10:00:00.000Z")
+    issue = _issue("ACG-3", assignee="me")
+    issue.raw = {
+        "comments": {
+            "nodes": [
+                {"id": "c2", "body": "Second", "createdAt": "2026-11-07T10:05:00.000Z", "url": "L2",
+                 "user": {"id": "owner", "name": "Nitay"}},
+                {"id": "c0", "body": "Old", "createdAt": "2026-11-07T09:00:00.000Z", "url": "L0",
+                 "user": {"id": "owner", "name": "Nitay"}},
+                {"id": "c1", "body": "First", "createdAt": "2026-11-07T10:01:00.000Z", "url": "L1",
+                 "user": {"id": "owner", "name": "Nitay"}},
+            ]
+        }
+    }
+    fake = _FakeLinear([], brief=[issue])
+    monkeypatch.setattr(runner_mod, "linear_for_worker", lambda c, w: fake)
+    r = DevRunner(None)
+    popen = _FakePopen()
+    r._procs[run_id] = popen  # type: ignore[assignment]
+    worker = store.get_worker(conn, "dev1")
+    assert worker is not None
+    r._check_running(conn, worker)
+    assert fake.since == "2026-11-07T10:00:00.000Z"
+    lines = [json.loads(x) for x in popen.stdin.getvalue().decode().splitlines()]
+    texts = [x["message"]["content"] for x in lines]
+    assert [x["type"] for x in lines] == ["user", "user"]
+    assert texts[0].startswith("Nitay commented on ACG-3 (L1):") and texts[0].endswith("First")
+    assert texts[1].endswith("Second")  # oldest first; the old one isn't re-sent
+    run = store.get_run(conn, run_id)
+    assert run and run["comment_cursor"] == "2026-11-07T10:05:00.000Z"
+    kinds = [e["kind"] for e in store.run_events(conn, run_id)]
+    assert kinds.count("comment") == 2
+
+    # A run without a live input (re-attached after a restart) logs instead.
+    del r._procs[run_id]
+    issue.raw["comments"]["nodes"].append(
+        {"id": "c3", "body": "Third", "createdAt": "2026-11-07T10:09:00.000Z", "url": "L3",
+         "user": {"id": "owner", "name": "Nitay"}}
+    )
+    r._check_running(conn, worker)
+    assert [e["kind"] for e in store.run_events(conn, run_id)][-1] == "comment_skipped"
+
+
+def test_stdin_closes_when_the_turn_ends_with_nothing_waiting(tmp_path: Path) -> None:
+    r = DevRunner(None)
+
+    class P:
+        def __init__(self) -> None:
+            self.stdin = io.BytesIO()
+
+        def poll(self) -> None:
+            return None
+
+    popen = P()
+    r._procs["run"] = popen  # type: ignore[assignment]
+    r._sent["run"] = r._replayed["run"] = 0
+    assert r._write_user("run", "prompt") and r._write_user("run", "comment")
+    stream = tmp_path / "stream.jsonl"
+
+    def emit(*events: dict) -> None:
+        with open(stream, "a", encoding="utf-8") as fh:
+            for e in events:
+                fh.write(json.dumps(e) + "\n")
+
+    run = {"id": "run", "log_dir": str(tmp_path), "first_output_at": None}
+    user = {"type": "user", "message": {"role": "user", "content": "x"}}
+    tool_result = {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t"}]}}
+    emit(user, tool_result, {"type": "result", "subtype": "success"})
+    r._read_stream(_NoDb(), run)
+    assert not popen.stdin.closed  # the comment wasn't echoed yet: another turn is coming
+    emit(user, {"type": "result", "subtype": "success"})
+    r._read_stream(_NoDb(), run)
+    assert popen.stdin.closed
+
+
+class _NoDb:
+    def execute(self, *a, **k):  # noqa: ANN002, ANN003, ANN201
+        class _R:
+            def fetchone(self) -> None:
+                return None
+
+        return _R()
+
+    def commit(self) -> None:
+        pass
+
+
+def test_transcript_shows_forwarded_comments_not_the_prompt(tmp_path: Path) -> None:
+    from pidgin.devwork.transcript import transcript
+
+    (tmp_path / "prompt.md").write_text("# ACG-3: fix it", encoding="utf-8")
+    events = [
+        {"type": "system", "subtype": "init", "model": "m", "session_id": "s"},
+        {"type": "user", "message": {"role": "user", "content": "# ACG-3: fix it\n\nlong prompt"}},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "On it"}]}},
+        {"type": "user", "message": {"role": "user",
+                                     "content": "Nitay commented on ACG-3 (https://linear.app/x#comment-1):\n\nUse blue."}},
+    ]
+    (tmp_path / "stream.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+    t = transcript(str(tmp_path))
+    users = [e for e in t["entries"] if e["k"] == "user"]
+    assert users == [{"k": "user", "who": "Nitay", "url": "https://linear.app/x#comment-1", "text": "Use blue."}]
 
 
 def test_runs_take_a_clean_slot_and_switch_branch(tmp_path: Path) -> None:
