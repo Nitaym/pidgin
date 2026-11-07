@@ -257,3 +257,42 @@ def test_transcript_reads_like_a_terminal(tmp_path: Path) -> None:
         fh.write("}\n")
     last = transcript(str(tmp_path), wt)["entries"][-1]
     assert last["k"] == "end" and last["ok"] is True
+
+
+def test_dev_slots_take_create_and_lock(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    from pidgin.devwork import slots as dev_slots
+
+    def git(cwd: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+    origin = tmp_path / "origin.git"
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(origin))
+    repo = tmp_path / "repo"
+    git(tmp_path, "clone", "-q", str(origin), str(repo))
+    (repo / "a.txt").write_text("a", encoding="utf-8")
+    (repo / "research").mkdir()
+    (repo / "research" / "big.txt").write_text("x", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+    git(repo, "push", "-q", "origin", "main")
+
+    settings = {**dev_slots.DEFAULTS, "slots_dir": str(tmp_path / "slots")}
+    name, path = dev_slots.take_slot(settings, str(repo), [])
+    assert name == "slot-1" and (Path(path) / "a.txt").exists()
+    assert not (Path(path) / "research").exists()  # sparse: research left out
+
+    # A dev in slot-1 means the next dev gets a new slot-2.
+    devs = [{"name": "Dev 1", "slot": "slot-1"}]
+    assert dev_slots.take_slot(settings, str(repo), devs)[0] == "slot-2"
+
+    # A live lock (the runner's or another process's) keeps a slot taken.
+    dev_slots.write_lock(path, pid=os.getpid(), dev_name="x", branch=None)
+    states = {s["name"]: s["state"] for s in dev_slots.list_slots(settings, [])}
+    assert states == {"slot-1": "busy", "slot-2": "free"}
+    dev_slots.clear_lock(path, 999999)  # not ours: stays
+    assert dev_slots.read_lock(Path(path)) is not None
+    dev_slots.clear_lock(path, os.getpid())
+    assert dev_slots.read_lock(Path(path)) is None

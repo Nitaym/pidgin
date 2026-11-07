@@ -5,8 +5,22 @@ export type Dev = {
   name: string;
   cwd: string;
   session_id: string;
-  status: "idle" | "running" | "exited";
+  slot: string | null;
+  status: "idle" | "preparing" | "running" | "exited";
 };
+
+export type DevSlot = {
+  name: string;
+  dir: string;
+  branch: string;
+  dirty: number;
+  state: "free" | "dev" | "runner" | "busy";
+  who: string | null;
+};
+
+export type DevSettings = { work_in: "folder" | "slots"; slots_dir: string; slots_repo: string; max_slots: string };
+
+export type DevsList = { devs: Dev[]; default_cwd: string; settings: DevSettings; slots: DevSlot[] };
 
 async function call<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -30,10 +44,12 @@ async function call<T>(path: string, options: RequestInit = {}): Promise<T> {
 const base = (slug: string) => `/${slug}/api/devs`;
 
 export const devsApi = {
-  list: (slug: string) => call<{ devs: Dev[]; default_cwd: string }>(base(slug)),
-  add: (slug: string, body: { name?: string; cwd?: string }) =>
+  list: (slug: string) => call<DevsList>(base(slug)),
+  settings: (slug: string, body: Partial<Omit<DevSettings, "max_slots">> & { max_slots?: number }) =>
+    call<DevsList>(`${base(slug)}/settings`, { method: "PUT", body: JSON.stringify(body) }),
+  add: (slug: string, body: { name?: string; cwd?: string; slot?: string }) =>
     call<Dev>(base(slug), { method: "POST", body: JSON.stringify(body) }),
-  patch: (slug: string, id: string, body: { name?: string; cwd?: string }) =>
+  patch: (slug: string, id: string, body: { name?: string; cwd?: string; slot?: string }) =>
     call<Dev>(`${base(slug)}/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   remove: (slug: string, id: string) => call<{ status: string }>(`${base(slug)}/${id}`, { method: "DELETE" }),
   restart: (slug: string, id: string) => call<Dev>(`${base(slug)}/${id}/restart`, { method: "POST" }),

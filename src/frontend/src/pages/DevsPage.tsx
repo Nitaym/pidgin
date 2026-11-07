@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { devsApi, type Dev } from "../api/devs";
+import { devsApi, type Dev, type DevSettings, type DevSlot } from "../api/devs";
 import { DevTerminal } from "../components/DevTerminal";
 import { useApp } from "../context/AppContext";
 import "../styles/devs.css";
@@ -31,6 +31,10 @@ export function DevsPage() {
   const slug = workspace?.slug ?? "";
   const [devs, setDevs] = useState<Dev[] | null>(null);
   const [defaultCwd, setDefaultCwd] = useState("");
+  const [settings, setSettings] = useState<DevSettings | null>(null);
+  const [slotList, setSlotList] = useState<DevSlot[]>([]);
+  const [newSlot, setNewSlot] = useState("auto");
+  const [switching, setSwitching] = useState(false);
   const [slots, setSlots] = useState<string[]>(loadSlots);
   const [focus, setFocus] = useState(0);
   const [maxed, setMaxed] = useState(false);
@@ -45,6 +49,8 @@ export function DevsPage() {
       const data = await devsApi.list(slug);
       setDevs(data.devs);
       setDefaultCwd(data.default_cwd);
+      setSettings(data.settings);
+      setSlotList(data.slots);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -89,7 +95,11 @@ export function DevsPage() {
 
   const add = async () => {
     try {
-      const dev = await devsApi.add(slug, { name: newName || undefined, cwd: newCwd || undefined });
+      const inSlots = settings?.work_in === "slots";
+      const dev = await devsApi.add(slug, {
+        name: newName || undefined,
+        ...(inSlots ? { slot: newSlot } : { cwd: newCwd || undefined, slot: "" }),
+      });
       setAdding(false);
       setNewName("");
       setNewCwd("");
@@ -114,6 +124,39 @@ export function DevsPage() {
     }
   };
 
+  const setWorkIn = async (workIn: "folder" | "slots") => {
+    if (!settings || settings.work_in === workIn) return;
+    const what =
+      workIn === "slots"
+        ? `Move every dev into its own dev slot (${settings.slots_dir})? Each starts a fresh Claude session there, from the newest main.`
+        : "Move every dev back to the main folder? Each starts a fresh Claude session there.";
+    if (!window.confirm(what)) return;
+    setSwitching(true);
+    try {
+      await devsApi.settings(slug, { work_in: workIn });
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSwitching(false);
+    }
+  };
+
+  const setSlotsDir = async (input: HTMLInputElement) => {
+    const dir = input.value.trim();
+    if (!settings || !dir || dir === settings.slots_dir) {
+      if (settings) input.value = settings.slots_dir;
+      return;
+    }
+    try {
+      await devsApi.settings(slug, { slots_dir: dir });
+      await load();
+    } catch (e) {
+      input.value = settings.slots_dir;
+      setError((e as Error).message);
+    }
+  };
+
   if (!devs) {
     return <div className="stack">{error ? <div className="error">{error}</div> : <p className="muted">Starting devs…</p>}</div>;
   }
@@ -133,6 +176,51 @@ export function DevsPage() {
             </div>
           </div>
         </div>
+        {settings ? (
+          <div className="devs-where">
+            <span className="devs-where-k">Work in</span>
+            <div className="devs-seg">
+              <button
+                type="button"
+                className={settings.work_in === "slots" ? "on" : ""}
+                disabled={switching}
+                title={settings.slots_dir}
+                onClick={() => void setWorkIn("slots")}
+              >
+                Dev slots
+              </button>
+              <button
+                type="button"
+                className={settings.work_in === "folder" ? "on" : ""}
+                disabled={switching}
+                title={defaultCwd}
+                onClick={() => void setWorkIn("folder")}
+              >
+                Main folder
+              </button>
+            </div>
+            <label className="devs-where-k" htmlFor="devs-slots-dir">
+              Slots folder
+            </label>
+            <input
+              id="devs-slots-dir"
+              className="devs-dir"
+              key={settings.slots_dir}
+              defaultValue={settings.slots_dir}
+              disabled={switching}
+              title="Where slot-1, slot-2… live. Change it while devs are in the main folder."
+              onBlur={(e) => void setSlotsDir(e.target)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                if (e.key === "Escape") {
+                  (e.target as HTMLInputElement).value = settings.slots_dir;
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+            />
+          </div>
+        ) : null}
+        {switching ? <div className="devs-sub">Preparing slots…</div> : null}
         <ul className="devs-list">
           {devs.map((d) => {
             const slot = slots.indexOf(d.id);
@@ -161,7 +249,11 @@ export function DevsPage() {
                     </span>
                   )}
                   <span className="devs-cwd" title={d.cwd}>
-                    {d.cwd.split(/[\\/]/).filter(Boolean).pop()}
+                    {d.status === "preparing"
+                      ? "preparing a slot…"
+                      : d.slot
+                      ? `${d.slot} · ${slotList.find((x) => x.name === d.slot)?.branch ?? ""}`
+                      : d.cwd.split(/[\\/]/).filter(Boolean).pop()}
                   </span>
                 </div>
                 {slot >= 0 ? <span className="devs-slot">{slot + 1}</span> : null}
@@ -183,7 +275,21 @@ export function DevsPage() {
         {adding ? (
           <div className="devs-add-form">
             <input placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
-            <input placeholder={defaultCwd} value={newCwd} onChange={(e) => setNewCwd(e.target.value)} title="Folder it works in" />
+            {settings?.work_in === "slots" ? (
+              <select value={newSlot} onChange={(e) => setNewSlot(e.target.value)} title="Dev slot it works in">
+                <option value="auto">Next free slot (or a new one)</option>
+                {slotList
+                  .filter((x) => x.state === "free")
+                  .map((x) => (
+                    <option key={x.name} value={x.name}>
+                      {x.name} · {x.branch}
+                      {x.dirty ? ` · ${x.dirty} uncommitted` : ""}
+                    </option>
+                  ))}
+              </select>
+            ) : (
+              <input placeholder={defaultCwd} value={newCwd} onChange={(e) => setNewCwd(e.target.value)} title="Folder it works in" />
+            )}
             <div className="row" style={{ gap: 6 }}>
               <button type="button" onClick={() => void add()}>
                 Add
@@ -199,6 +305,21 @@ export function DevsPage() {
           </button>
         )}
         {error ? <div className="devs-err">{error}</div> : null}
+        {settings?.work_in === "slots" && slotList.length ? (
+          <div className="devs-slots">
+            <div className="devs-where-k">Slots</div>
+            {slotList.map((x) => (
+              <div key={x.name} className={`devs-slotrow ${x.state}`} title={x.dir}>
+                <span className="n">{x.name}</span>
+                <span className="b">{x.branch}</span>
+                <span className="w">
+                  {x.state === "free" ? "free" : x.state === "runner" ? `runner · ${x.who}` : x.who}
+                  {x.dirty ? ` · ${x.dirty}✎` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <p className="devs-hint">Click a dev to put it on screen. Double-click a name to rename it, or a terminal's bar to fill the screen.</p>
       </aside>
       <section className={`devs-grid n${visible.length}`}>

@@ -90,10 +90,17 @@ export function DevTerminal({
       }
     });
     ro.observe(host);
+    // Another window may have resized the shared PTY; taking focus claims it back.
+    const claim = () => send({ t: "resize", cols: term.cols, rows: term.rows });
+    const textarea = term.textarea;
+    textarea?.addEventListener("focus", claim);
+    window.addEventListener("focus", claim);
 
     return () => {
       closed = true;
       window.clearTimeout(retry);
+      textarea?.removeEventListener("focus", claim);
+      window.removeEventListener("focus", claim);
       ro.disconnect();
       input.dispose();
       ws?.close();

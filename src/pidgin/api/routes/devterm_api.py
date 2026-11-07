@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import uuid
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -17,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisco
 from pydantic import BaseModel
 
 from pidgin.api.deps import require_workspace_session
+from pidgin.devwork import slots as dev_slots
 from pidgin.devwork import terminals as dt
 
 router = APIRouter(prefix="/{workspace_slug}/api/devs", tags=["devterm"])
@@ -25,11 +27,51 @@ router = APIRouter(prefix="/{workspace_slug}/api/devs", tags=["devterm"])
 class NewDevBody(BaseModel):
     name: str | None = None
     cwd: str | None = None
+    slot: str | None = None  # "auto" or "slot-N"; default follows the work_in setting
 
 
 class DevPatchBody(BaseModel):
     name: str | None = None
     cwd: str | None = None
+    slot: str | None = None  # "auto", "slot-N", or "" to leave the slot
+
+
+class SettingsBody(BaseModel):
+    work_in: str | None = None
+    slots_dir: str | None = None
+    slots_repo: str | None = None
+    max_slots: int | None = None
+
+
+def _repo(conn: Any, settings: dict[str, str]) -> str:
+    return settings.get("slots_repo") or _default_cwd(conn)
+
+
+def _check_wanted(conn: Any, settings: dict[str, str], wanted: str | None) -> None:
+    """Fail fast on a named slot that isn't free (cheap: no git fetch or checkout)."""
+    if not wanted:
+        return
+    slot = next((s for s in dev_slots.list_slots(settings, dt.list_devs(conn)) if s["name"] == wanted), None)
+    if slot is None:
+        raise HTTPException(status_code=400, detail=f"No slot named {wanted}")
+    if slot["state"] != "free":
+        raise HTTPException(status_code=400, detail=f"{wanted} is in use ({slot['state']}: {slot['who']})")
+
+
+def _into_slot(conn: Any, dev: dict[str, Any], wanted: str | None) -> None:
+    """Point a dev at a slot (a new Claude session: sessions belong to a folder).
+
+    Returns at once; the slot is made in the background while the terminal says so.
+    """
+    settings = dev_slots.get_settings(conn)
+    _check_wanted(conn, settings, wanted)
+    dt.manager().stop(dev["id"])
+    dt.prepare_slot(conn, dev, settings, _repo(conn, settings), wanted)
+
+
+def _out_of_slot(conn: Any, dev: dict[str, Any], cwd: str) -> None:
+    dt.manager().stop(dev["id"])
+    dt.update_dev(conn, dev["id"], slot=None, cwd=cwd, session_id=str(uuid.uuid4()))
 
 
 def _default_cwd(conn: Any) -> str:
@@ -45,6 +87,7 @@ def _view(dev: dict[str, Any]) -> dict[str, Any]:
         "name": dev["name"],
         "cwd": dev["cwd"],
         "session_id": dev["session_id"],
+        "slot": dev.get("slot"),
         "status": dt.manager().status(dev["id"]),
     }
 
@@ -52,18 +95,67 @@ def _view(dev: dict[str, Any]) -> dict[str, Any]:
 @router.get("")
 def api_devs(workspace_slug: str, request: Request) -> dict[str, Any]:
     session = require_workspace_session(request, workspace_slug)
-    cwd = _default_cwd(session.conn)
-    devs = dt.ensure_default_devs(session.conn, cwd)
-    return {"devs": [_view(d) for d in devs], "default_cwd": cwd}
+    conn = session.conn
+    cwd = _default_cwd(conn)
+    devs = dt.ensure_default_devs(conn, cwd)
+    settings = dev_slots.get_settings(conn)
+    return {
+        "devs": [_view(d) for d in devs],
+        "default_cwd": cwd,
+        "settings": {**settings, "slots_repo": _repo(conn, settings)},
+        "slots": dev_slots.list_slots(settings, devs),
+    }
+
+
+@router.put("/settings")
+def api_dev_settings(workspace_slug: str, body: SettingsBody, request: Request) -> dict[str, Any]:
+    """Where devs work. Switching to slots gives every dev its own slot; back moves them home."""
+    session = require_workspace_session(request, workspace_slug)
+    conn = session.conn
+    updates = body.model_dump(exclude_none=True)
+    if "work_in" in updates and updates["work_in"] not in ("folder", "slots"):
+        raise HTTPException(status_code=400, detail="work_in must be folder or slots")
+    if "max_slots" in updates:
+        updates["max_slots"] = max(1, min(int(updates["max_slots"]), 16))
+    before = dev_slots.get_settings(conn)
+    if "slots_dir" in updates:
+        updates["slots_dir"] = str(updates["slots_dir"]).strip().strip('"')
+        if not updates["slots_dir"]:
+            raise HTTPException(status_code=400, detail="Slots folder can't be empty")
+        if updates["slots_dir"] != before["slots_dir"] and any(d.get("slot") for d in dt.list_devs(conn)):
+            raise HTTPException(
+                status_code=400, detail="Devs are working in slots: switch to Main folder first, then change the folder"
+            )
+    settings = dev_slots.set_settings(conn, updates)
+    if settings["work_in"] == "slots" and before["work_in"] != "slots":
+        for dev in dt.list_devs(conn):
+            if not dev.get("slot"):
+                _into_slot(conn, dev, None)
+    elif settings["work_in"] == "folder" and before["work_in"] != "folder":
+        home = _default_cwd(conn)
+        for dev in dt.list_devs(conn):
+            if dev.get("slot"):
+                _out_of_slot(conn, dev, home)
+    return api_devs(workspace_slug, request)
 
 
 @router.post("")
 def api_add_dev(workspace_slug: str, body: NewDevBody, request: Request) -> dict[str, Any]:
     session = require_workspace_session(request, workspace_slug)
-    cwd = (body.cwd or "").strip() or _default_cwd(session.conn)
+    conn = session.conn
+    settings = dev_slots.get_settings(conn)
+    want_slot = body.slot if body.slot is not None else ("auto" if settings["work_in"] == "slots" and not body.cwd else "")
+    name = (body.name or "").strip() or None
+    if want_slot:
+        wanted = None if want_slot == "auto" else want_slot
+        _check_wanted(conn, settings, wanted)
+        dev = dt.create_dev(conn, cwd=_default_cwd(conn), name=name)
+        dt.prepare_slot(conn, dev, settings, _repo(conn, settings), wanted)
+        return _view(dev)
+    cwd = (body.cwd or "").strip() or _default_cwd(conn)
     if not Path(cwd).is_dir():
         raise HTTPException(status_code=400, detail=f"Folder not found: {cwd}")
-    return _view(dt.create_dev(session.conn, cwd=cwd, name=(body.name or "").strip() or None))
+    return _view(dt.create_dev(conn, cwd=cwd, name=name))
 
 
 @router.patch("/{dev_id}")
@@ -74,15 +166,20 @@ def api_patch_dev(
     dev = dt.get_dev(session.conn, dev_id)
     if dev is None:
         raise HTTPException(status_code=404, detail="Unknown dev")
+    if body.slot is not None:
+        if body.slot:
+            _into_slot(session.conn, dev, None if body.slot == "auto" else body.slot)
+        elif dev.get("slot"):
+            _out_of_slot(session.conn, dev, (body.cwd or "").strip() or _default_cwd(session.conn))
+        dev = dt.get_dev(session.conn, dev_id)
+        assert dev is not None
     updates: dict[str, Any] = {}
     if body.name and body.name.strip():
         updates["name"] = body.name.strip()[:40]
-    if body.cwd and body.cwd.strip() != dev["cwd"]:
+    if body.slot is None and body.cwd and body.cwd.strip() != dev["cwd"]:
         if not Path(body.cwd.strip()).is_dir():
             raise HTTPException(status_code=400, detail=f"Folder not found: {body.cwd}")
         # A Claude session belongs to its folder; a new folder means a new session.
-        import uuid
-
         updates.update(cwd=body.cwd.strip(), session_id=str(uuid.uuid4()))
     dt.update_dev(session.conn, dev_id, **updates)
     if "cwd" in updates:
@@ -147,6 +244,7 @@ async def ws_dev_terminal(websocket: WebSocket, workspace_slug: str, dev_id: str
     rows = int(websocket.query_params.get("rows") or 32)
     term = dt.manager().get(dev, start=False)
     term.resize(cols, rows)
+    cols, rows = term.cols, term.rows  # clamped
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[str | None] = asyncio.Queue()
     sub = (loop, queue)
@@ -180,10 +278,16 @@ async def ws_dev_terminal(websocket: WebSocket, workspace_slug: str, dev_id: str
                 msg = json.loads(raw)
             except ValueError:
                 continue
+            # Several windows can show one terminal; the PTY takes the size of
+            # the one being used (typed in, focused or resized) most recently.
             if msg.get("t") == "in":
+                if (term.cols, term.rows) != (cols, rows):
+                    term.resize(cols, rows)
                 await asyncio.to_thread(term.write, str(msg.get("d") or ""))
             elif msg.get("t") == "resize":
-                term.resize(int(msg.get("cols") or 120), int(msg.get("rows") or 32))
+                cols, rows = int(msg.get("cols") or 120), int(msg.get("rows") or 32)
+                term.resize(cols, rows)
+                cols, rows = term.cols, term.rows
     except WebSocketDisconnect:
         pass
     finally:

@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from pidgin.devwork import slots as dev_slots
 from pidgin.util.ids import new_ulid, utc_now_iso
 
 log = logging.getLogger(__name__)
@@ -60,7 +61,9 @@ def get_dev(conn: sqlite3.Connection, dev_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def create_dev(conn: sqlite3.Connection, *, cwd: str, name: str | None = None) -> dict[str, Any]:
+def create_dev(
+    conn: sqlite3.Connection, *, cwd: str, name: str | None = None, slot: str | None = None
+) -> dict[str, Any]:
     used = {d["name"] for d in list_devs(conn)}
     if not name:
         n = 1
@@ -72,8 +75,8 @@ def create_dev(conn: sqlite3.Connection, *, cwd: str, name: str | None = None) -
     ).fetchone()[0]
     dev_id = new_ulid()
     conn.execute(
-        "INSERT INTO dev_terminals (id, name, cwd, session_id, position, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (dev_id, name, cwd, str(uuid.uuid4()), pos, utc_now_iso()),
+        "INSERT INTO dev_terminals (id, name, cwd, session_id, position, created_at, slot) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (dev_id, name, cwd, str(uuid.uuid4()), pos, utc_now_iso(), slot),
     )
     conn.commit()
     dev = get_dev(conn, dev_id)
@@ -92,7 +95,7 @@ def ensure_default_devs(conn: sqlite3.Connection, cwd: str) -> list[dict[str, An
 
 
 def update_dev(conn: sqlite3.Connection, dev_id: str, **fields: Any) -> None:
-    allowed = {k: v for k, v in fields.items() if k in ("name", "cwd", "session_id", "position")}
+    allowed = {k: v for k, v in fields.items() if k in ("name", "cwd", "session_id", "position", "slot")}
     if not allowed:
         return
     conn.execute(
@@ -115,18 +118,23 @@ class DevTerminal:
         self.id: str = dev["id"]
         self.cwd: str = dev["cwd"]
         self.session_id: str = dev["session_id"]
+        self.name: str = dev["name"]
+        self.slot: str | None = dev.get("slot")
         self.proc: Any = None
         self.buffer = bytearray()
         self.subs: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue[str | None]]] = set()
         self.lock = threading.Lock()
         self.cols, self.rows = 120, 32
         self.exit_note: str | None = None
+        self.preparing = False  # its slot is being made; Claude starts when it's ready
 
     @property
     def alive(self) -> bool:
         return self.proc is not None and self.proc.isalive()
 
     def start(self) -> None:
+        if self.preparing:
+            return
         from winpty import PtyProcess  # Windows ConPTY; only needed when a terminal opens
 
         exe = shutil.which("claude")
@@ -143,6 +151,16 @@ class DevTerminal:
         env["COLORTERM"] = "truecolor"
         self.exit_note = None
         self.proc = PtyProcess.spawn(argv, cwd=self.cwd, env=env, dimensions=(self.rows, self.cols))
+        if self.slot:
+            # Mark the slot taken, the same way the repo's ticket runner does.
+            branch = None
+            try:
+                branch = dev_slots._git(self.cwd, "branch", "--show-current", check=False).strip() or None
+            except Exception:  # noqa: BLE001
+                pass
+            # The lock names the Pidgin server, not this Claude process: the slot stays
+            # the dev's while Pidgin runs, even between Claude Code restarts.
+            dev_slots.write_lock(self.cwd, pid=os.getpid(), dev_name=self.name, branch=branch)
         threading.Thread(target=self._read_loop, name=f"devterm-{self.id[-6:]}", daemon=True).start()
         log.info("[devterm] started %s in %s (%s)", self.id, self.cwd, "resume" if resume else "new")
 
@@ -185,6 +203,8 @@ class DevTerminal:
             return self.buffer.decode("utf-8", errors="replace")
 
     def write(self, data: str) -> None:
+        if self.preparing:
+            return
         if not self.alive:
             if "\r" in data or "\n" in data:
                 self.start()
@@ -201,6 +221,8 @@ class DevTerminal:
 
     def stop(self) -> None:
         proc, self.proc = self.proc, None
+        if self.slot:
+            dev_slots.clear_lock(self.cwd, os.getpid())
         if proc is not None and proc.isalive():
             try:
                 proc.terminate(force=True)
@@ -225,6 +247,8 @@ class TerminalManager:
 
     def status(self, dev_id: str) -> str:
         term = self._terms.get(dev_id)
+        if term is not None and term.preparing:
+            return "preparing"
         if term is None or (term.proc is None and term.exit_note is None):
             return "idle"
         return "running" if term.alive else "exited"
@@ -251,6 +275,55 @@ class TerminalManager:
 
 
 _manager = TerminalManager()
+_slot_lock = threading.Lock()  # one slot chosen at a time, so two devs never get the same one
+
+
+def _db_path(conn: sqlite3.Connection) -> str:
+    return str(conn.execute("PRAGMA database_list").fetchone()[2])
+
+
+def prepare_slot(
+    conn: sqlite3.Connection, dev: dict[str, Any], settings: dict[str, str], repo: str, wanted: str | None
+) -> None:
+    """Put a dev in a slot without making the caller wait.
+
+    The terminal exists at once and says it is preparing; making or updating
+    the slot (git worktree, checkout, fetch) runs on a thread, then Claude Code
+    starts in the same terminal, so open browser tabs just see it come up.
+    """
+    from pidgin.db.connection import connect
+
+    term = _manager.get(dev, start=False)
+    term.preparing = True
+    term.exit_note = None
+    term._emit(f"\x1b[90m── Preparing {wanted or 'a dev slot'}… ──\x1b[0m\r\n")
+    db_path = Path(_db_path(conn))
+
+    def work() -> None:
+        db = connect(db_path)
+        try:
+            with _slot_lock:
+                others = [d for d in list_devs(db) if d["id"] != dev["id"]]
+                name, path = dev_slots.take_slot(settings, repo, others, wanted)
+                update_dev(db, dev["id"], slot=name, cwd=path, session_id=str(uuid.uuid4()))
+                fresh = get_dev(db, dev["id"])
+            if fresh is None:  # removed while its slot was being made
+                term.preparing = False
+                return
+            term.cwd, term.slot, term.session_id = fresh["cwd"], fresh["slot"], fresh["session_id"]
+            term.preparing = False
+            term._emit(f"\x1b[90m── {name} ready: {path} ──\x1b[0m\r\n")
+            term.start()
+        except Exception as exc:  # noqa: BLE001 — shown in the terminal instead
+            log.warning("[devterm] slot for %s failed: %r", dev["id"], exc)
+            term.preparing = False
+            term.exit_note = "slot failed"
+            term.cwd = "(no slot)"
+            term._emit(f"\r\n\x1b[31mCouldn't prepare a slot: {exc}\x1b[0m\r\n")
+        finally:
+            db.close()
+
+    threading.Thread(target=work, name=f"devslot-{dev['id'][-6:]}", daemon=True).start()
 
 
 def manager() -> TerminalManager:

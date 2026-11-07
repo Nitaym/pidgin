@@ -17,6 +17,7 @@ MIGRATION_VERSIONS = (
     "008_token_usage_index",
     "009_devwork",
     "010_dev_terminals",
+    "011_dev_slots",
 )
 SYSTEM_EMPLOYEE_ID = "000000000000000000000000"
 
