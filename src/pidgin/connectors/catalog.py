@@ -105,6 +105,20 @@ INTEGRATION_CATALOG: list[dict[str, Any]] = [
             {"key": "client_secret", "label": "Client secret", "secret": True},
         ],
     },
+    {
+        "connector_type": "linear",
+        "name": "Linear",
+        "description": (
+            "Let a developer pick up tickets and report back on them. Connect with the "
+            "API key of the developer's own Linear member, not yours."
+        ),
+        "auth_modes": ["manual"],
+        "builtin": False,
+        "capabilities": ["read", "post", "execute", "poll"],
+        "manual_fields": [
+            {"key": "api_key", "label": "Personal API key of the developer's Linear member", "secret": True},
+        ],
+    },
 ]
 
 

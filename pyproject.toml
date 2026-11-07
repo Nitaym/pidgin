@@ -22,6 +22,7 @@ dependencies = [
     "anthropic>=0.40.0",
     "openai>=1.55.0",
     "websockets>=13.0",
+    "pywinpty>=2.0.14; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

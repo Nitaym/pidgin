@@ -1,0 +1,59 @@
+/* Devs page: dev menu on the left, four live terminals. Terminals are always dark. */
+.main:has(> .devs) { padding: 0; }
+.devs { display: grid; grid-template-columns: 220px minmax(0, 1fr); height: 100vh; min-height: 0; }
+
+.devs-menu { border-right: 1px solid var(--border); background: var(--bg-elevated); display: flex; flex-direction: column; min-height: 0; padding: 14px 10px; gap: 10px; }
+.devs-menu-head { padding: 0 6px; }
+.devs-title { font-weight: 600; font-size: 15px; color: var(--text-primary); }
+.devs-sub { font-size: 12px; color: var(--text-secondary); }
+.devs-list { list-style: none; margin: 0; padding: 0; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.devs-list li { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+.devs-list li:hover { background: var(--bg-hover); }
+.devs-list li.on { background: var(--bg-hover); }
+.devs-list li.focus { border-color: var(--accent, #5e6ad2); }
+.devs-item { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.devs-item input { font-size: 13px; padding: 1px 4px; width: 100%; }
+.devs-name { font-size: 13px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.devs-cwd { font-size: 11.5px; color: var(--text-tertiary, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.devs-dot { width: 8px; height: 8px; border-radius: 50%; background: #55555c; flex: none; }
+.devs-dot.running { background: #4ade80; }
+.devs-dot.exited { background: #d9a23b; }
+.devs-slot { font: 11px ui-monospace, Consolas, monospace; color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
+.devs-x { opacity: 0; background: none; border: none; color: var(--text-secondary); font-size: 16px; line-height: 1; padding: 0 2px; cursor: pointer; }
+.devs-list li:hover .devs-x { opacity: 1; }
+.devs-x:hover { color: var(--danger); }
+.devs-add { width: 100%; }
+.devs-add-form { display: flex; flex-direction: column; gap: 6px; }
+.devs-add-form input { font-size: 12.5px; }
+.devs-err { color: var(--danger); font-size: 12px; }
+.devs-hint { margin-top: auto; font-size: 11.5px; color: var(--text-tertiary, #777); line-height: 1.4; padding: 0 4px; }
+
+.devs-grid { display: grid; gap: 6px; padding: 6px; background: #050506; min-height: 0; min-width: 0; }
+.devs-grid.n1 { grid-template: minmax(0, 1fr) / minmax(0, 1fr); }
+.devs-grid.n2 { grid-template: minmax(0, 1fr) / repeat(2, minmax(0, 1fr)); }
+.devs-grid.n3, .devs-grid.n4 { grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr)); }
+.devs-empty { color: #777; display: grid; place-items: center; }
+
+.dt { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: #0c0c0e; border: 1px solid #26262c; border-radius: 6px; overflow: hidden; }
+.dt.focused { border-color: #5e6ad2; box-shadow: 0 0 0 1px #5e6ad2 inset; }
+.dt-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; background: #16161a; border-bottom: 1px solid #26262c; font-size: 12px; user-select: none; }
+.dt-light { width: 8px; height: 8px; border-radius: 50%; background: #55555c; flex: none; }
+.dt-light.live { background: #4ade80; }
+.dt-light.exited { background: #d9a23b; }
+.dt-light.connecting { background: #9aa5ff; }
+.dt-light.offline { background: #f87171; }
+.dt-name { color: #ececec; font-weight: 600; }
+.dt-cwd { color: #8a8a93; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-spacer { flex: 1; }
+.dt-conn { color: #9aa5ff; font-size: 11.5px; }
+.dt-btn { background: transparent; border: 1px solid transparent; color: #9a9aa3; font-size: 13px; line-height: 1; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.dt-btn:hover { border-color: #33333a; color: #ececec; }
+.dt-host { flex: 1; min-height: 0; padding: 4px 0 0 6px; }
+.dt-host .xterm { height: 100%; }
+.dt-host .xterm-viewport { background: #0c0c0e !important; }
+
+@media (max-width: 900px) {
+  .devs { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .devs-menu { border-right: none; border-bottom: 1px solid var(--border); max-height: 34vh; }
+  .devs-grid.n2, .devs-grid.n3, .devs-grid.n4 { grid-template: repeat(4, minmax(240px, 1fr)) / minmax(0, 1fr); overflow: auto; }
+}

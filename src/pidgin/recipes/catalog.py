@@ -19,6 +19,7 @@ BUNDLED_RECIPE_FILES: dict[str, str] = {
     "hr-onboarding": "hr-onboarding-v0.1.json",
     "enablement": "enablement-v0.1.json",
     "operating-partner": "operating-partner-v0.1.json",
+    "developer": "developer-v0.1.json",
 }
 
 

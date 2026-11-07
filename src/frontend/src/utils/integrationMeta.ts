@@ -32,6 +32,11 @@ const META: Record<string, IntegrationMeta> = {
     accent: "#2d8cff",
     monogram: "Z",
   },
+  linear: {
+    tagline: "Tickets a developer picks up and reports on",
+    accent: "#5e6ad2",
+    monogram: "L",
+  },
 };
 
 export function integrationMeta(entry: IntegrationCatalogEntry): IntegrationMeta {
@@ -97,6 +102,21 @@ const SETUP_GUIDES: Record<string, SetupGuide> = {
       label: "Google: service accounts & delegation",
       href: "https://developers.google.com/identity/protocols/oauth2/service-account",
     },
+  },
+  linear: {
+    title: "Connect as the developer's own Linear member",
+    intro:
+      "The developer acts in Linear as its own member, so its claims, comments and hand-offs never show as you.",
+    steps: [
+      { text: "Invite a member for the developer to your Linear workspace (e.g. Claude, with its own email), and add it to the team it will work in." },
+      {
+        text: "Sign in to Linear as that member, then create a personal API key: Settings → Security & access → Personal API keys.",
+        links: [{ label: "Linear API settings", href: "https://linear.app/settings/account/security" }],
+      },
+      { text: "Paste the key below. The health check shows who the key belongs to; it should be the developer, not you." },
+      { text: "Then open the developer's Work page to pick the team, your Linear account and the repo." },
+    ],
+    docs: { label: "Linear: API and webhooks", href: "https://linear.app/developers" },
   },
 };
 

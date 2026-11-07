@@ -10,6 +10,7 @@ import {
   type LlmInvocation,
 } from "../api/client";
 import { useApp } from "../context/AppContext";
+import { DevWorkLink } from "./DevWorkPage";
 
 function statusLabel(status: string): string {
   if (status === "draft") return "Agent Deactivated";
@@ -380,6 +381,7 @@ function AgentDetail({ slug, handle }: { slug: string; handle: string }) {
             </p>
           </div>
           <div className="row" style={{ gap: "0.5rem" }}>
+            <DevWorkLink slug={slug} handle={agent.handle} />
             <Link to={`/${slug}/dashboard/${agent.handle}/console`} className="btn secondary">
               Console
             </Link>

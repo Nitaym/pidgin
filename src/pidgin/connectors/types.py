@@ -12,6 +12,7 @@ ConnectorType = Literal[
     "google_drive",
     "google_meet",
     "zoom",
+    "linear",
 ]
 
 AuthMode = Literal["oauth2", "manual", "none"]

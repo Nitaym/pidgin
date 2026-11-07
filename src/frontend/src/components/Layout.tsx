@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { NavLink, Outlet, useParams } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useParams } from "react-router-dom";
 import { ChatModal } from "./ChatModal";
 import { HrChatLauncher } from "./HrChatLauncher";
 import { PidginLogo } from "./PidginLogo";
@@ -21,6 +21,7 @@ export type LayoutOutletContext = {
 export function Layout({ showNav = true }: LayoutProps) {
   const { workspace, user } = useApp();
   const { workspaceSlug = workspace?.slug ?? "" } = useParams();
+  const onDevs = useLocation().pathname.endsWith("/devs");
   const base = workspaceSlug ? `/${workspaceSlug}` : "";
   const [chatModal, setChatModal] = useState<{ handle?: string } | null>(null);
 
@@ -53,6 +54,7 @@ export function Layout({ showNav = true }: LayoutProps) {
             </div>
             <div className="sidebar-section">
               <p className="sidebar-section-label">Workforce</p>
+              <NavLink to={`${base}/devs`}>Devs</NavLink>
               <NavLink to={`${base}/hire`}>Hire a role</NavLink>
             </div>
             <SidebarChat slug={workspace.slug} base={base} onOpen={() => openChat()} />
@@ -75,7 +77,7 @@ export function Layout({ showNav = true }: LayoutProps) {
       <main className="main">
         <Outlet context={{ openChat } satisfies LayoutOutletContext} />
       </main>
-      {workspace && !chatModal ? <HrChatLauncher /> : null}
+      {workspace && !chatModal && !onDevs ? <HrChatLauncher /> : null}
       {workspace && chatModal ? (
         <ChatModal initialHandle={chatModal.handle} onClose={closeChat} />
       ) : null}

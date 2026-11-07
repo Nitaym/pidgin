@@ -7,6 +7,9 @@ import { AgentChatPage } from "./pages/AgentChatPage";
 import { ApprovalsPage } from "./pages/ApprovalsPage";
 import { CandidateProfilePage } from "./pages/CandidateProfilePage";
 import { DebugPage } from "./pages/DebugPage";
+import { DevRunPage } from "./pages/DevRunPage";
+import { DevWorkPage } from "./pages/DevWorkPage";
+import { DevsPage } from "./pages/DevsPage";
 import { HireEntryPage } from "./pages/HireEntryPage";
 import { HireWizardPage } from "./pages/HireWizardPage";
 import { IntegrationDetailPage } from "./pages/IntegrationDetailPage";
@@ -66,6 +69,9 @@ function WorkspaceApp() {
         <Route path="dashboard" element={<AgentDashboardPage />} />
         <Route path="dashboard/:handle" element={<AgentDashboardPage />} />
         <Route path="dashboard/:handle/console" element={<AgentDashboardPage view="console" />} />
+        <Route path="dashboard/:handle/work" element={<DevWorkPage />} />
+        <Route path="dev/runs/:runId" element={<DevRunPage />} />
+        <Route path="devs" element={<DevsPage />} />
         <Route path="hire" element={<HireEntryPage />} />
         <Route path="hire/marketplace" element={<HireWizardPage />} />
         <Route path="hire/marketplace/candidates/:templateId" element={<CandidateProfilePage />} />

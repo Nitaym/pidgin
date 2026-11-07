@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 import pidgin.connectors  # noqa: F401 — register connector factories
-from pidgin.api.routes import auth, hooks, workspace_api, workspaces
+from pidgin.api.routes import auth, devterm_api, devwork_api, hooks, workspace_api, workspaces
 from pidgin.runtime.worker import BackgroundWorker
 from pidgin.services.workspace import reconcile_workspace_agents
 from pidgin.voice import routes as voice_routes
@@ -69,9 +69,20 @@ def create_app(
         worker = BackgroundWorker(home)
         app.state.worker = worker
         worker.start()
+        # Developer worker: Linear watcher + Claude Code executor (DEVELOPER_WORKER_SPEC).
+        from pidgin.devwork.runner import DevRunner, set_runner
+
+        dev_runner = DevRunner(home)
+        set_runner(dev_runner)
+        dev_runner.start()
         try:
             yield
         finally:
+            dev_runner.stop()
+            set_runner(None)
+            from pidgin.devwork.terminals import manager as terminal_manager
+
+            terminal_manager().shutdown()
             worker.stop()
 
     app = FastAPI(
@@ -98,6 +109,8 @@ def create_app(
     app.include_router(auth.router, prefix="/api")
     app.include_router(workspaces.router)
     app.include_router(workspace_api.router)
+    app.include_router(devwork_api.router)
+    app.include_router(devterm_api.router)
     app.include_router(hooks.router)
     app.include_router(voice_routes.router)
 

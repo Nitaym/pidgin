@@ -15,6 +15,8 @@ MIGRATION_VERSIONS = (
     "006_execution_grants",
     "007_change_gated_wakeup",
     "008_token_usage_index",
+    "009_devwork",
+    "010_dev_terminals",
 )
 SYSTEM_EMPLOYEE_ID = "000000000000000000000000"
 

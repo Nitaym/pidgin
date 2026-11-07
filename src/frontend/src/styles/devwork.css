@@ -1,0 +1,89 @@
+/* Developer Worker pages. Uses the tokens in index.css (UI_DESIGN_GUIDE §2). */
+.dw-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3, 12px); }
+.dw-tile { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.dw-tile .v { font-size: 18px; font-weight: 600; }
+.dw-tile .k { font-size: 12px; color: var(--text-secondary); }
+.dw-chip { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 11.5px; font-weight: 500; background: var(--bg-hover); color: var(--text-secondary); white-space: nowrap; }
+.dw-chip.ok { background: var(--success-bg); color: var(--success); }
+.dw-chip.bad { background: var(--danger-bg); color: var(--danger); }
+.dw-chip.warn { background: rgba(217, 162, 59, 0.12); color: #d9a23b; }
+.dw-chip.acc { background: var(--accent-muted); color: #a9b0f0; }
+.dw-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dw-table th { text-align: left; font-size: 12px; font-weight: 500; color: var(--text-secondary); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.dw-table td { padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.dw-table tr:last-child td { border-bottom: none; }
+.dw-table tr:hover td { background: var(--bg-hover); }
+.dw-key { font-family: ui-monospace, Consolas, monospace; color: var(--text-secondary); font-size: 12px; margin-right: 6px; }
+.dw-nowrap { white-space: nowrap; }
+.dw-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--space-4, 16px); }
+.dw-grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 var(--space-3, 12px); }
+.dw-check { font-size: 12.5px; margin: 2px 0; }
+.dw-check .ok { color: var(--success); }
+.dw-check .warn { color: #d9a23b; }
+.dw-check .error { color: var(--danger); }
+.dw-toggle-row { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.dw-toggle-row:last-child { border-bottom: none; }
+.dw-toggle-row input { margin-top: 3px; }
+.dw-split { display: grid; grid-template-columns: minmax(0, 64fr) minmax(0, 36fr); gap: var(--space-4, 16px); align-items: start; }
+.dw-log { background: #070707; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; font: 12px/1.55 ui-monospace, Consolas, monospace; color: #c9c9c9; max-height: 560px; overflow: auto; }
+.dw-log div { white-space: pre-wrap; word-break: break-word; }
+.dw-log .tool { color: var(--text-secondary); }
+.dw-log .tool::before { content: "▸ "; }
+.dw-log .text { color: var(--text-primary); margin: 4px 0; }
+.dw-log .error { color: var(--danger); }
+.dw-log .result, .dw-log .system { color: #a9b0f0; }
+.dw-tl { list-style: none; margin: 0; padding: 0; font-size: 12.5px; }
+.dw-tl li { position: relative; padding: 0 0 9px 16px; }
+.dw-tl li::before { content: ""; position: absolute; left: 0; top: 6px; width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.dw-tl li.failed::before, .dw-tl li.error::before { background: var(--danger); }
+.dw-tl li.stop::before, .dw-tl li.cancelled::before, .dw-tl li.denied::before { background: #d9a23b; }
+.dw-tl .t { color: var(--text-tertiary); font-size: 11.5px; margin-right: 6px; font-family: ui-monospace, Consolas, monospace; }
+.dw-banner { border-radius: 6px; padding: 8px 12px; font-size: 13px; }
+.dw-banner.warn { background: rgba(217, 162, 59, 0.12); color: #e7b65a; }
+.dw-banner.error { background: var(--danger-bg); color: var(--danger); }
+@media (max-width: 768px) {
+  .dw-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dw-split, .dw-grid2, .dw-grid4 { grid-template-columns: 1fr; }
+}
+
+/* Claude Code terminals (components/ClaudeTerminal.tsx). Always dark, like a terminal. */
+.ct-grid { display: grid; gap: var(--space-3, 12px); }
+.ct-grid.n2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ct-grid.n3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ct { background: #0c0c0e; border: 1px solid #2a2a30; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.ct-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #17171b; border-bottom: 1px solid #2a2a30; font-size: 12px; min-width: 0; }
+.ct-light { width: 8px; height: 8px; border-radius: 50%; background: #55555c; flex: none; }
+.ct-light.live { background: #4ade80; box-shadow: 0 0 6px #4ade80; animation: ct-pulse 1.6s ease-in-out infinite; }
+.ct-light.ok { background: #4ade80; }
+.ct-light.warn { background: #d9a23b; }
+.ct-light.bad { background: #f87171; }
+@keyframes ct-pulse { 50% { opacity: 0.45; } }
+.ct-title { color: #e6e6e6; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; text-decoration: none; }
+.ct-title:hover { text-decoration: underline; }
+.ct-key { font-family: ui-monospace, Consolas, monospace; color: #9a9aa3; }
+.ct-meta { color: #8a8a93; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.ct-stop { font-size: 11.5px; padding: 2px 10px; background: transparent; color: #f87171; border: 1px solid #5b2a2a; border-radius: 5px; cursor: pointer; }
+.ct-stop:hover:not(:disabled) { background: #2a1414; }
+.ct-body { font: 12.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #d4d4d4; padding: 10px 12px; height: 380px; overflow: auto; }
+.ct.tall .ct-body { height: min(70vh, 760px); }
+.ct-body > div { margin: 0 0 8px; white-space: pre-wrap; word-break: break-word; }
+.ct-dim { color: #75757e; }
+.ct-prompt { color: #9aa5ff; }
+.ct-say { display: flex; gap: 8px; color: #ececec; }
+.ct-dot { color: #d4d4d4; flex: none; margin-right: 6px; }
+.ct-say .ct-dot { margin-right: 0; }
+.ct-dot.ok { color: #4ade80; }
+.ct-dot.error { color: #f87171; }
+.ct-dot.pending { color: #d9a23b; animation: ct-pulse 1.2s ease-in-out infinite; }
+.ct-tool b { color: #ececec; font-weight: 600; }
+.ct-arg { color: #a8a8b0; }
+.ct-out { color: #8f8f98; padding-left: 14px; }
+.ct-out > div { white-space: pre-wrap; word-break: break-word; }
+.ct-err { color: #f87171; }
+.ct-todo.completed { color: #6b6b73; text-decoration: line-through; }
+.ct-todo.in_progress { color: #ececec; }
+.ct-end.ok { color: #4ade80; }
+.ct-end.bad { color: #f87171; }
+.ct-cursor { color: #d97757; animation: ct-pulse 1.6s ease-in-out infinite; }
+@media (max-width: 1100px) { .ct-grid.n3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 768px) { .ct-grid.n2, .ct-grid.n3 { grid-template-columns: 1fr; } .ct-body { height: 300px; } }
