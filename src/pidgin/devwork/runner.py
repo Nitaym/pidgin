@@ -260,6 +260,7 @@ class DevRunner:
         self._sent: dict[str, int] = {}
         self._replayed: dict[str, int] = {}
         self._results: dict[str, dict[str, Any]] = {}
+        self._stdin_lock = threading.Lock()
         self._lock = threading.Lock()
         self._recovered = False
 
@@ -640,22 +641,30 @@ class DevRunner:
         if popen is None or popen.stdin is None or popen.stdin.closed or popen.poll() is not None:
             return False
         line = json.dumps({"type": "user", "message": {"role": "user", "content": text}}) + "\n"
-        try:
-            popen.stdin.write(line.encode("utf-8"))
-            popen.stdin.flush()
-        except OSError:
-            return False
-        self._sent[run_id] = self._sent.get(run_id, 0) + 1
+        with self._stdin_lock:
+            if popen.stdin.closed:
+                return False
+            try:
+                popen.stdin.write(line.encode("utf-8"))
+                popen.stdin.flush()
+            except (OSError, ValueError):
+                return False
+            self._sent[run_id] = self._sent.get(run_id, 0) + 1
         return True
+
+    def send_message(self, run_id: str, text: str) -> bool:
+        """A message from the owner in Pidgin, into the run's live session."""
+        return self._write_user(run_id, text)
 
     def _close_stdin(self, run_id: str) -> None:
         """End the session's input: Claude finishes its turn and exits."""
         popen = self._procs.get(run_id)
         if popen is not None and popen.stdin is not None and not popen.stdin.closed:
-            try:
-                popen.stdin.close()
-            except OSError:
-                pass
+            with self._stdin_lock:
+                try:
+                    popen.stdin.close()
+                except OSError:
+                    pass
 
     # -- admission -------------------------------------------------------------------
     def _admit(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> None:

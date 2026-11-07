@@ -616,7 +616,9 @@ def test_transcript_shows_forwarded_comments_not_the_prompt(tmp_path: Path) -> N
     (tmp_path / "stream.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
     t = transcript(str(tmp_path))
     users = [e for e in t["entries"] if e["k"] == "user"]
-    assert users == [{"k": "user", "who": "Nitay", "url": "https://linear.app/x#comment-1", "text": "Use blue."}]
+    assert users == [
+        {"k": "user", "via": "linear", "who": "Nitay", "url": "https://linear.app/x#comment-1", "text": "Use blue."}
+    ]
 
 
 def test_runs_take_a_clean_slot_and_switch_branch(tmp_path: Path) -> None:
@@ -662,3 +664,35 @@ def test_runs_take_a_clean_slot_and_switch_branch(tmp_path: Path) -> None:
     git(Path(path), "switch", "-q", "--detach", "main")
     dev_slots.switch_to_branch(path, "claude/acg-9-x", "main")
     assert git(Path(path), "branch", "--show-current").strip() == "claude/acg-9-x"
+
+
+def test_transcript_marks_messages_typed_in_pidgin(tmp_path: Path) -> None:
+    from pidgin.devwork.transcript import transcript
+
+    events = [
+        {"type": "user", "message": {"role": "user", "content": "# ACG-4: prompt"}},
+        {"type": "user", "message": {"role": "user", "content": "Nitay wrote in Pidgin:\n\nTry the other file."}},
+    ]
+    (tmp_path / "stream.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+    users = [e for e in transcript(str(tmp_path))["entries"] if e["k"] == "user"]
+    assert users == [{"k": "user", "via": "pidgin", "who": "Nitay", "url": None, "text": "Try the other file."}]
+
+
+def test_send_message_writes_to_the_live_session() -> None:
+    r = DevRunner(None)
+
+    class P:
+        def __init__(self) -> None:
+            self.stdin = io.BytesIO()
+
+        def poll(self) -> None:
+            return None
+
+    popen = P()
+    r._procs["run"] = popen  # type: ignore[assignment]
+    assert r.send_message("run", "Nitay wrote in Pidgin:\n\nhello")
+    line = json.loads(popen.stdin.getvalue().decode().splitlines()[0])
+    assert line["message"]["content"].endswith("hello")
+    popen.stdin.close()
+    assert not r.send_message("run", "again")  # input closed: refused, not raised
+    assert not r.send_message("other", "x")  # no live process

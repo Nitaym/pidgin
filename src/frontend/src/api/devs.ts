@@ -1,4 +1,7 @@
 // Devs page API: interactive Claude Code terminals (src/pidgin/api/routes/devterm_api.py).
+import type { CodeRun, Transcript } from "./devwork";
+
+export type RunTileData = { run: CodeRun & { accepts_messages: boolean; dismissed_at: string | null }; transcript: Transcript };
 
 export type Dev = {
   id: string;
@@ -53,6 +56,14 @@ export const devsApi = {
     call<Dev>(`${base(slug)}/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   remove: (slug: string, id: string) => call<{ status: string }>(`${base(slug)}/${id}`, { method: "DELETE" }),
   restart: (slug: string, id: string) => call<Dev>(`${base(slug)}/${id}/restart`, { method: "POST" }),
+  runs: (slug: string) => call<{ runs: RunTileData[] }>(`${base(slug)}/runs`),
+  message: (slug: string, runId: string, text: string) =>
+    call<{ status: string; posted_to_ticket: boolean }>(`${base(slug)}/runs/${runId}/message`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  dismiss: (slug: string, runId: string) => call<{ status: string }>(`${base(slug)}/runs/${runId}/dismiss`, { method: "POST" }),
+  continueRun: (slug: string, runId: string) => call<Dev>(`${base(slug)}/runs/${runId}/continue`, { method: "POST" }),
   wsUrl: (slug: string, id: string, cols: number, rows: number) => {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     return `${proto}://${window.location.host}${base(slug)}/${id}/ws?cols=${cols}&rows=${rows}`;

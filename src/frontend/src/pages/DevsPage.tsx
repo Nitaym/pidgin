@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { devsApi, type Dev, type DevSettings, type DevSlot } from "../api/devs";
+import { devsApi, type Dev, type DevSettings, type DevSlot, type RunTileData } from "../api/devs";
+import { duration, RUN_STATUS_LABEL, runTone } from "../api/devwork";
 import { DevTerminal } from "../components/DevTerminal";
+import { RunTile } from "../components/RunTile";
 import { useApp } from "../context/AppContext";
 import "../styles/devs.css";
 
-// Devs: live Claude Code terminals you type into, four on screen at once.
+// Devs: live Claude Code terminals you type into, four on screen at once, plus
+// the ticket runs the Developer worker is doing (headless; shown as transcripts).
+// Screen slots hold dev ids, or "run:<id>" for a ticket run.
 
 const SLOTS = 4;
 const SLOT_KEY = "pidgin.devs.slots";
@@ -43,6 +47,7 @@ export function DevsPage() {
   const [newCwd, setNewCwd] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [runs, setRuns] = useState<RunTileData[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -64,10 +69,25 @@ export function DevsPage() {
     return () => window.clearInterval(t);
   }, [load, slug]);
 
-  // Keep the four slots filled with live devs, in menu order.
+  const loadRuns = useCallback(async () => {
+    try {
+      setRuns((await devsApi.runs(slug)).runs);
+    } catch {
+      /* the dev list shows errors */
+    }
+  }, [slug]);
+
+  useEffect(() => {
+    if (!slug) return;
+    void loadRuns();
+    const t = window.setInterval(() => void loadRuns(), 2000);
+    return () => window.clearInterval(t);
+  }, [loadRuns, slug]);
+
+  // Keep the four slots filled with live devs, in menu order (runs stay where you put them).
   useEffect(() => {
     if (!devs) return;
-    const ids = new Set(devs.map((d) => d.id));
+    const ids = new Set([...devs.map((d) => d.id), ...runs.map((r) => `run:${r.run.id}`)]);
     const kept = slots.filter((id) => ids.has(id)).slice(0, SLOTS);
     for (const d of devs) {
       if (kept.length >= SLOTS) break;
@@ -77,7 +97,7 @@ export function DevsPage() {
       setSlots(kept);
       saveSlots(kept);
     }
-  }, [devs, slots]);
+  }, [devs, runs, slots]);
 
   const show = (id: string) => {
     const at = slots.indexOf(id);
@@ -160,10 +180,15 @@ export function DevsPage() {
   if (!devs) {
     return <div className="stack">{error ? <div className="error">{error}</div> : <p className="muted">Starting devs…</p>}</div>;
   }
-  const byId = new Map(devs.map((d) => [d.id, d]));
-  const shown = slots.map((id) => byId.get(id)).filter((d): d is Dev => Boolean(d));
+  type Tile = { key: string; dev?: Dev; run?: RunTileData };
+  const byId = new Map<string, Tile>([
+    ...devs.map((d) => [d.id, { key: d.id, dev: d }] as [string, Tile]),
+    ...runs.map((r) => [`run:${r.run.id}`, { key: `run:${r.run.id}`, run: r }] as [string, Tile]),
+  ]);
+  const shown = slots.map((id) => byId.get(id)).filter((t): t is Tile => Boolean(t));
   const visible = maxed ? shown.filter((_, i) => i === focus) : shown;
   const running = devs.filter((d) => d.status === "running").length;
+  const activeRuns = runs.filter((r) => ["queued", "claiming", "preparing", "running"].includes(r.run.status)).length;
 
   return (
     <div className="devs">
@@ -272,6 +297,39 @@ export function DevsPage() {
             );
           })}
         </ul>
+        {runs.length ? (
+          <>
+            <div className="devs-group">
+              Ticket runs · {activeRuns} working
+            </div>
+            <ul className="devs-list devs-runs">
+              {runs.map(({ run }) => {
+                const key = `run:${run.id}`;
+                const slot = slots.indexOf(key);
+                const live = ["queued", "claiming", "preparing", "running"].includes(run.status);
+                return (
+                  <li
+                    key={key}
+                    className={`${slot >= 0 ? "on" : ""} ${slot === focus && slot >= 0 ? "focus" : ""}`}
+                    onClick={() => show(key)}
+                    title={run.ticket_title ?? ""}
+                  >
+                    <span className={`devs-dot ${live ? "run-live" : `run-${runTone(run.status) || "warn"}`}`} />
+                    <div className="devs-item">
+                      <span className="devs-name">
+                        {run.ticket_key} · {run.ticket_title}
+                      </span>
+                      <span className="devs-cwd">
+                        {RUN_STATUS_LABEL[run.status] ?? run.status} · {duration(run.started_at ?? run.created_at, run.ended_at)}
+                      </span>
+                    </div>
+                    {slot >= 0 ? <span className="devs-slot">{slot + 1}</span> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        ) : null}
         {adding ? (
           <div className="devs-add-form">
             <input placeholder="Name (optional)" value={newName} onChange={(e) => setNewName(e.target.value)} />
@@ -323,8 +381,37 @@ export function DevsPage() {
         <p className="devs-hint">Click a dev to put it on screen. Double-click a name to rename it, or a terminal's bar to fill the screen.</p>
       </aside>
       <section className={`devs-grid n${visible.length}`}>
-        {visible.map((d) => {
-          const i = shown.indexOf(d);
+        {visible.map((t) => {
+          const i = shown.indexOf(t);
+          if (t.run)
+            return (
+              <RunTile
+                key={t.key}
+                slug={slug}
+                data={t.run}
+                focused={i === focus}
+                maximized={maxed}
+                onFocus={() => setFocus(i)}
+                onToggleMax={() => {
+                  setFocus(i);
+                  setMaxed((m) => !m);
+                }}
+                onChanged={() => void loadRuns()}
+                onContinued={async (devId) => {
+                  // Load the new dev first, so the tile it replaces isn't refilled meanwhile.
+                  await load();
+                  setSlots((cur) => {
+                    const next = [...cur];
+                    next[i] = devId;
+                    saveSlots(next);
+                    return next;
+                  });
+                  setFocus(i);
+                  void loadRuns();
+                }}
+              />
+            );
+          const d = t.dev as Dev;
           return (
             <DevTerminal
               key={d.id}

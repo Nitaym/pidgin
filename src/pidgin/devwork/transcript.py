@@ -17,6 +17,7 @@ from typing import Any
 
 MAX_OUT_LINES = 4
 # How the runner words a forwarded Linear comment (runner._forward_comments).
+_PIDGIN_RE = re.compile(r"^(?P<who>.+?) wrote in Pidgin:\s*(?P<body>.*)$", re.S)
 _COMMENT_RE = re.compile(r"^(?P<who>.+?) commented on (?P<key>[A-Z][A-Z0-9]*-\d+) \((?P<url>[^)]*)\):\s*(?P<body>.*)$", re.S)
 _cache: dict[str, dict[str, Any]] = {}
 _lock = threading.Lock()
@@ -149,12 +150,14 @@ def _feed(state: dict[str, Any], evt: dict[str, Any]) -> None:
             state["user_seen"] = state.get("user_seen", 0) + 1
             if state["user_seen"] > 1:
                 m = _COMMENT_RE.match(text.strip())
+                p = None if m else _PIDGIN_RE.match(text.strip())
                 entries.append(
                     {
                         "k": "user",
-                        "who": m.group("who") if m else None,
+                        "via": "linear" if m else "pidgin" if p else None,
+                        "who": m.group("who") if m else p.group("who") if p else None,
                         "url": m.group("url") if m else None,
-                        "text": (m.group("body") if m else text).strip(),
+                        "text": (m.group("body") if m else p.group("body") if p else text).strip(),
                     }
                 )
             return

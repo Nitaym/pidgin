@@ -6,7 +6,7 @@ import { duration, RUN_STATUS_LABEL, runTone, type CodeRun, type Transcript, typ
 
 const ACTIVE = ["queued", "claiming", "preparing", "running"];
 
-function Entry({ e, live }: { e: TranscriptEntry; live: boolean }) {
+export function Entry({ e, live }: { e: TranscriptEntry; live: boolean }) {
   if (e.k === "init") return <div className="ct-dim">{e.text}</div>;
   if (e.k === "say")
     return (
@@ -23,7 +23,7 @@ function Entry({ e, live }: { e: TranscriptEntry; live: boolean }) {
           <span>{e.text}</span>
         </div>
         <div className="ct-dim ct-from">
-          from {e.who ? `${e.who}'s ` : "a "}Linear comment
+          {e.via === "pidgin" ? `from Pidgin${e.who ? ` · ${e.who}` : ""}` : `from ${e.who ? `${e.who}'s ` : "a "}Linear comment`}
           {e.url ? (
             <>
               {" · "}

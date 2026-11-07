@@ -597,6 +597,16 @@ Done ◀──── merged ──── Approved ◀─────────
       their outcome. The Lead's dashboard has the same tab with its own lists: scoping, waiting on the owner, questions
       from the Dev, retries. Every row links to the ticket in Linear and to the run page.
     </p>
+    <p>
+      <strong>Devs page.</strong> Ticket runs also appear on the Devs page (<code>/{workspace}/devs</code>), in a
+      <em>Ticket runs</em> group under the owner's dev terminals: active runs, then finished ones from the last day until
+      dismissed, each with its key, title, status and time. A run can be put in the terminal grid like a dev; its tile is
+      the live transcript (refreshed every 2 s; the run stays headless, stream-json), with a message box that writes into
+      the run's open stdin (drawn as a <code>&gt;</code> line "from Pidgin", and copied to the ticket as a Claude comment
+      "Nitay (in Pidgin): …"), Stop, and links to the run page and the ticket. A finished run's tile offers
+      <strong>Continue in a terminal</strong>: an interactive dev terminal in the run's slot running
+      <code>claude --resume &lt;session&gt;</code>, so the owner can pick the conversation up by hand.
+    </p>
 
     <div class="mock">
       <div class="m-frame">

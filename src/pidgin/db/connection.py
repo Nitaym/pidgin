@@ -19,6 +19,7 @@ MIGRATION_VERSIONS = (
     "010_dev_terminals",
     "011_dev_slots",
     "012_fast_pickup",
+    "013_run_tiles",
 )
 SYSTEM_EMPLOYEE_ID = "000000000000000000000000"
 

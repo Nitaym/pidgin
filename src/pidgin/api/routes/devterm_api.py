@@ -17,9 +17,13 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from pidgin.api.deps import require_workspace_session
+from pidgin.api.deps import require_google_user, require_workspace_session
 from pidgin.devwork import slots as dev_slots
+from pidgin.devwork import store
 from pidgin.devwork import terminals as dt
+from pidgin.devwork.linear_api import LinearError
+from pidgin.devwork.transcript import transcript
+from pidgin.util.ids import utc_now_iso
 
 router = APIRouter(prefix="/{workspace_slug}/api/devs", tags=["devterm"])
 
@@ -34,6 +38,10 @@ class DevPatchBody(BaseModel):
     name: str | None = None
     cwd: str | None = None
     slot: str | None = None  # "auto", "slot-N", or "" to leave the slot
+
+
+class RunMessageBody(BaseModel):
+    text: str
 
 
 class SettingsBody(BaseModel):
@@ -156,6 +164,135 @@ def api_add_dev(workspace_slug: str, body: NewDevBody, request: Request) -> dict
     if not Path(cwd).is_dir():
         raise HTTPException(status_code=400, detail=f"Folder not found: {cwd}")
     return _view(dt.create_dev(conn, cwd=cwd, name=name))
+
+
+# -- ticket runs on the Devs page --------------------------------------------------
+# Ticket runs stay headless (stream-json); the Devs page shows their transcript,
+# takes messages into their live session, and can continue a finished one in a
+# PTY terminal with `claude --resume`.
+
+
+def _run_view(run: dict[str, Any]) -> dict[str, Any]:
+    out = {k: v for k, v in run.items() if k not in ("pid", "process_started_at")}
+    from pidgin.devwork.runner import get_runner
+
+    runner = get_runner()
+    popen = runner._procs.get(run["id"]) if runner else None
+    out["accepts_messages"] = bool(
+        popen is not None and popen.stdin is not None and not popen.stdin.closed and popen.poll() is None
+    )
+    return out
+
+
+@router.get("/runs")
+def api_dev_runs(workspace_slug: str, request: Request) -> dict[str, Any]:
+    """Active ticket runs, then finished ones from the last day not yet dismissed."""
+    session = require_workspace_session(request, workspace_slug)
+    conn = session.conn
+    placeholders = ",".join("?" for _ in store.ACTIVE_STATUSES)
+    rows = conn.execute(
+        f"""SELECT * FROM code_runs
+            WHERE status IN ({placeholders})
+               OR (status != 'dropped' AND dismissed_at IS NULL AND ended_at >= ?)
+            ORDER BY created_at DESC LIMIT 12""",
+        [*store.ACTIVE_STATUSES, _day_ago()],
+    ).fetchall()
+    runs = [dict(r) for r in rows]
+    runs.sort(key=lambda r: (r["status"] not in store.ACTIVE_STATUSES, r["created_at"]))
+    return {
+        "runs": [
+            {
+                "run": _run_view(r),
+                "transcript": transcript(r.get("log_dir"), r.get("worktree_path"), limit=200),
+            }
+            for r in runs
+        ]
+    }
+
+
+def _day_ago() -> str:
+    from datetime import UTC, datetime, timedelta
+
+    return (datetime.now(tz=UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _get_run(conn: Any, run_id: str) -> dict[str, Any]:
+    run = store.get_run(conn, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Unknown run")
+    return run
+
+
+@router.post("/runs/{run_id}/message")
+def api_dev_run_message(
+    workspace_slug: str, run_id: str, body: RunMessageBody, request: Request
+) -> dict[str, Any]:
+    """Type into a running ticket run: into its live session, and onto the ticket."""
+    from pidgin.devwork.runner import get_runner, linear_for_worker
+
+    session = require_workspace_session(request, workspace_slug)
+    user = require_google_user(request)
+    conn = session.conn
+    run = _get_run(conn, run_id)
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Type a message first")
+    who = (user.name or user.email or "The owner").split(" ")[0]
+    runner = get_runner()
+    if run["status"] != "running" or run.get("outcome") or runner is None:
+        raise HTTPException(status_code=409, detail="This run isn't working any more")
+    if not runner.send_message(run_id, f"{who} wrote in Pidgin:\n\n{text}"):
+        raise HTTPException(
+            status_code=409,
+            detail="This run isn't taking messages (it's finishing, or it started before Pidgin restarted)",
+        )
+    store.add_event(conn, run_id, "message", f"{who} wrote in Pidgin: {text.splitlines()[0][:200]}", {"who": who, "body": text[:4000]})
+    posted = True
+    worker = store.get_worker(conn, run["ai_employee_id"]) or {}
+    try:
+        linear_for_worker(conn, worker).comment(run["ticket_id"], f"**{who} (in Pidgin):** {text}")
+    except LinearError as exc:
+        posted = False
+        store.add_event(conn, run_id, "error", f"Could not copy the message to the ticket: {exc}")
+    return {"status": "sent", "posted_to_ticket": posted}
+
+
+@router.post("/runs/{run_id}/dismiss")
+def api_dev_run_dismiss(workspace_slug: str, run_id: str, request: Request) -> dict[str, str]:
+    session = require_workspace_session(request, workspace_slug)
+    run = _get_run(session.conn, run_id)
+    if run["status"] in store.ACTIVE_STATUSES:
+        raise HTTPException(status_code=400, detail="Stop the run first")
+    store.update_run(session.conn, run_id, dismissed_at=utc_now_iso())
+    return {"status": "ok"}
+
+
+@router.post("/runs/{run_id}/continue")
+def api_dev_run_continue(workspace_slug: str, run_id: str, request: Request) -> dict[str, Any]:
+    """Pick a finished run up by hand: a dev terminal in its folder, resuming its session."""
+    session = require_workspace_session(request, workspace_slug)
+    conn = session.conn
+    run = _get_run(conn, run_id)
+    if run["status"] in store.ACTIVE_STATUSES:
+        raise HTTPException(status_code=400, detail="The run is still working; stop it first")
+    cwd = run.get("worktree_path") or ""
+    if not cwd or not Path(cwd).is_dir():
+        raise HTTPException(status_code=400, detail="The run's folder is gone")
+    if not run.get("session_id"):
+        raise HTTPException(status_code=400, detail="The run has no Claude session to continue")
+    settings = dev_slots.get_settings(conn)
+    slot = None
+    if str(Path(cwd).parent).lower() == str(Path(settings["slots_dir"])).lower():
+        slot = Path(cwd).name
+        state = next((s for s in dev_slots.list_slots(settings, dt.list_devs(conn)) if s["name"] == slot), None)
+        if state and state["state"] != "free":
+            raise HTTPException(status_code=409, detail=f"{slot} is in use ({state['state']}: {state['who']})")
+    dev = dt.create_dev(conn, cwd=cwd, name=f"{run['ticket_key']} (continued)"[:40], slot=slot)
+    dt.update_dev(conn, dev["id"], session_id=run["session_id"])
+    store.update_run(conn, run_id, dismissed_at=utc_now_iso())
+    fresh = dt.get_dev(conn, dev["id"])
+    assert fresh is not None
+    return _view(fresh)
 
 
 @router.patch("/{dev_id}")

@@ -72,3 +72,26 @@
 .devs-slotrow .w { grid-column: 2; color: var(--text-tertiary, #777); }
 .devs-slotrow.free .w { color: var(--success); }
 .devs-slotrow.runner .w { color: #d9a23b; }
+
+/* Ticket runs on the Devs page (headless runs, drawn as transcripts). */
+.devs-group { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-tertiary, #777); padding: 6px 8px 2px; }
+.devs-dot.run-live { background: #4ade80; box-shadow: 0 0 5px #4ade80; }
+.devs-dot.run-ok { background: #4ade80; }
+.devs-dot.run-warn { background: #d9a23b; }
+.devs-dot.run-bad { background: #f87171; }
+.dt-run .dt-runtitle { color: #e6e6e6; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dt-run .dt-runtitle:hover { text-decoration: underline; }
+.dt-key { font-family: ui-monospace, Consolas, monospace; color: #9a9aa3; }
+.dt-run .dt-cwd { flex: none; }
+.dt-light.done { background: #4ade80; }
+.dt-link { text-decoration: none; white-space: nowrap; }
+.devs-list { flex: 0 1 auto; min-height: 72px; }
+.devs-runs { flex: none; max-height: 32vh; }
+.dt-stop { color: #f87171; }
+.dt-runbody { flex: 1; height: auto !important; min-height: 0; }
+.dt-runfoot { border-top: 1px solid #26262c; background: #111115; padding: 6px 8px; }
+.dt-msg { display: flex; gap: 6px; align-items: center; }
+.dt-msg input { flex: 1; min-width: 0; background: #0c0c0e; color: #d4d4d4; border: 1px solid #2a2a30; border-radius: 5px; padding: 5px 8px; font-size: 12.5px; }
+.dt-msg button { font-size: 12px; padding: 4px 10px; }
+.dt-ended { flex: 1; min-width: 0; color: #9a9aa3; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-note { color: #d9a23b; font-size: 11.5px; margin-top: 4px; }

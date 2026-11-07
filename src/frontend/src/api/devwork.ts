@@ -167,7 +167,7 @@ export type TranscriptEntry =
   | { k: "say"; text: string }
   | { k: "todos"; items: { text: string; status: "pending" | "in_progress" | "completed" }[] }
   | { k: "tool"; name: string; arg: string; status: "pending" | "ok" | "error"; out: string[]; more: number }
-  | { k: "user"; who: string | null; url: string | null; text: string }
+  | { k: "user"; via: "linear" | "pidgin" | null; who: string | null; url: string | null; text: string }
   | { k: "end"; ok: boolean; text: string };
 
 export type Transcript = { prompt: string; entries: TranscriptEntry[]; total: number };
