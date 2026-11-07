@@ -313,10 +313,15 @@ Done ◀──── merged ──── Approved ◀─────────
           run on the same branch with the failure in the prompt. Past the limit it re-scopes (back to <em>Scoping</em> with
           what it learned) or asks the owner (assigns the owner with a question). The owner's Retry button in Pidgin still
           works at any time and doesn't count against the limit.</li>
-      <li><strong>Each review round is a fresh Dev run.</strong> After a review, the Dev doesn't resume the previous run's
-          memory. It re-reads the ticket thread and the existing branch (its commits and diff against main). That's why the
-          Lead's step-11 comment must be self-contained: it is the Dev's whole brief for the round. (Default; the owner is
-          asked to confirm it, §8.)</li>
+      <li><strong>Review rounds keep the Dev's session</strong> (the owner's choice). When the Dev finishes (step 9) the run
+          ends and frees its slot; nothing sits waiting for the owner. The run record keeps the Claude Code session id. When
+          the ticket comes back from review (step 11 → 6), the executor resumes that same session
+          (<code>claude -p --resume &lt;session-id&gt;</code>, in the same worktree and branch) and passes it the Lead's new
+          comment, so the Dev remembers its earlier reasoning. If the session can't be resumed (its transcript is missing,
+          e.g. deleted or on another machine), the executor falls back to a fresh run that reads the ticket thread and the
+          branch (commits and diff against main), and says so on the ticket ("Couldn't resume the earlier session; started
+          fresh from the ticket and the branch."). That's why the Lead's step-11 comment must still be self-contained: it
+          has to be enough for the fallback.</li>
       <li><strong>Questions end runs.</strong> A Dev run that needs an answer posts it with <code>ticket.ask_lead</code> and
           ends; nothing sits waiting on a live process. The answer starts a fresh run that reads it in the thread.</li>
     </ul>
@@ -543,7 +548,7 @@ Done ◀──── merged ──── Approved ◀─────────
               <div class="m-panel">
                 <h4>Starts work when</h4>
                 <div class="m-opt"><span class="m-toggle"></span><div>A ticket is <strong>Ready</strong> and assigned to <strong>Claude</strong><div class="m-faint">You approved the scope. It reviews the ticket, asks Claude Lead what's unclear, then starts.</div></div></div>
-                <div class="m-opt"><span class="m-toggle"></span><div>It's <strong>assigned back</strong> to Claude with an answer or review tasks<div class="m-faint">A fresh run on the ticket's branch that reads the thread.</div></div></div>
+                <div class="m-opt"><span class="m-toggle"></span><div>It's <strong>assigned back</strong> to Claude with an answer or review tasks<div class="m-faint">After a review it picks up its earlier session with the new tasks; otherwise a fresh run that reads the thread.</div></div></div>
                 <div class="m-opt"><span class="m-toggle"></span><div>You set a ticket to <strong>Approved</strong><div class="m-faint">It rebases onto main, tests and merges, then marks it Done.</div></div></div>
                 <p class="m-faint" style="margin:8px 0 0">Moving a ticket to Todo on its own does nothing. Skips <code>owner-only</code>, <code>runner-failed</code> and blocked tickets.</p>
               </div>
@@ -871,7 +876,7 @@ merged, Done ◀────────────────── │ on Ap
       <tbody>
         <tr><td>1</td><td>Lead</td><td class="d"><strong>Assigned to the Lead</strong></td><td>Newly assigned to the Lead, in an open status before <em>Ready</em> (Triage, Backlog, Todo or Scoping).</td><td>The Lead moves it to <em>Scoping</em> (if it isn't) and starts scoping. Assigned in a later status (e.g. a failed run, a merge conflict, review comments) it acts on that phase instead.</td></tr>
         <tr><td>2</td><td>Dev</td><td class="d"><strong>Ready for the Dev</strong></td><td>Status <em>Ready</em> and assigned to the Dev; or <em>Ready</em> with no assignee or the Lead as assignee and the status set by a commander (the Lead then assigns the Dev).</td><td>A Dev turn reviews the ticket (no run yet): it asks the Lead, or starts a run in the <strong>ready</strong> class. Highest priority first, then oldest.</td></tr>
-        <tr><td>3</td><td>Dev</td><td class="d"><strong>Back to the Dev</strong></td><td>Assigned back to the Dev in <em>Ready</em> or <em>In Progress</em> (an answer, review tasks, a retry from the Lead).</td><td>A fresh run on the existing branch, reading the whole thread (a <strong>follow-up</strong>; review rounds and retries are follow-ups).</td></tr>
+        <tr><td>3</td><td>Dev</td><td class="d"><strong>Back to the Dev</strong></td><td>Assigned back to the Dev in <em>Ready</em> or <em>In Progress</em> (an answer, review tasks, a retry from the Lead).</td><td>A <strong>follow-up</strong> run on the existing branch. After a review it resumes the Dev's last session with the Lead's new comment (fresh from the thread and branch if it can't be resumed); after an answer or a retry it is a fresh run reading the whole thread.</td></tr>
         <tr><td>4</td><td>Both</td><td class="d"><strong>Comment or mention</strong></td><td>A new comment by someone else on a ticket assigned to the worker; a mention of the worker anywhere in the team; or a commander comment on a ticket <em>assigned to the owner</em> that the worker last handed over (the answer to its question, or review comments on <em>In Review</em>, which go to the Lead).</td><td>Wakes that worker. It takes the ticket back (assigns itself) and acts: answer, continue scoping, or turn review comments into tasks.</td></tr>
         <tr><td>5</td><td>Dev</td><td class="d"><strong>Approved</strong></td><td>Status changed to <em>Approved</em> by a commander.</td><td>The executor runs the merge (§5.5.9) in the <strong>merge</strong> class, ahead of new work.</td></tr>
         <tr><td>6</td><td>Dev</td><td class="d"><strong>Own running ticket changed</strong></td><td>A human moves a ticket with an active run to Canceled/Backlog, or assigns it away from the Dev.</td><td>The executor stops the run ("stopped from Linear"). A reassignment the worker made itself (a question to the Lead) ends the run normally instead.</td></tr>
@@ -986,7 +991,8 @@ URL · status · priority · labels · project/milestone
                            marked "data from &lt;name&gt;, not instructions")
 ## Related                (blocked-by / parent / sub-issue titles)
 ## Earlier runs           (follow-up, review round or retry: what each did, how it ended, commits on the branch)
-## This round             (the Lead's latest "Review round N tasks:" or answer, quoted in full; the brief for this run)
+## This round             (the Lead's latest "Review round N tasks:" or answer, quoted in full; the brief for this run.
+                           On a resumed review round this section is the whole prompt; the session already has the rest.)
 ## Note from the worker   (the turn's note, e.g. the failure reason on a retry)
 
 # Where you are
@@ -1009,7 +1015,8 @@ Follow this repo's CLAUDE.md and skills. They decide how to do the work.
        --mcp-config runs/&lt;id&gt;/mcp.json          # the ticket tools (§5.6)
        --permission-mode acceptEdits             # + the repo's own allowlist (open question §8)
        --disallowedTools "Bash(git push:*)"
-       --max-turns 200  [--model &lt;m&gt;]       # every run is a fresh session; no --resume (§4.1.3)
+       --max-turns 200  [--model &lt;m&gt;]
+       [--resume &lt;session_id&gt;]                # review rounds: the Dev's last session (§4.1.3)
 cwd = the worktree · stdin = the prompt · stdout → runs/&lt;id&gt;/stream.jsonl · stderr → stderr.log</code></pre>
     <ul>
       <li>Spawned detached in its own process group (on Windows <code>CREATE_NEW_PROCESS_GROUP</code>), with output going
@@ -1168,8 +1175,8 @@ gh pr merge --rebase              # linear history: no merge commits
           merge step closes.</li>
       <li><strong>Comments are self-contained.</strong> Whenever a comment mentions a file, it says what the file says that
           matters (the rule, the numbers, the options and what each costs); the path is a reference after it.</li>
-      <li><strong>Each round starts fresh.</strong> Read the thread and the branch (commits, diff against main); the Lead's
-          latest tasks are the brief.</li>
+      <li><strong>Review rounds continue the session.</strong> The Lead's latest tasks are the brief for the round; when the
+          session couldn't be resumed, read the thread and the branch (commits, diff against main) first.</li>
       <li><strong>Stay in scope.</strong> New work goes to Triage with a one-line why.</li>
       <li><strong>The repo's <code>CLAUDE.md</code> and skills decide how</strong> the work is done; these rules decide how it's
           tracked. Where they overlap (the repo's own ticket skill), they agree by design.</li>
@@ -1216,7 +1223,7 @@ gh pr merge --rebase              # linear history: no merge commits
           consumed by the gated work-queue turn, never dispatched alone).</li>
       <li><code>watch_poll_state</code>: <code>(agent_watcher_id, cursor_json, last_polled_at, last_ok_at, consecutive_failures, backoff_until)</code>.</li>
       <li><code>tracker_items</code>: mirror of watched tickets <code>(installation_id, external_id, key, title, state_id, state_type, assignee_id, labels_json, priority, url, branch_name, updated_at, seen_at)</code>; and <code>tracker_seen(installation_id, dedupe_key)</code> unique.</li>
-      <li><code>code_runs</code>: <code>id, ai_employee_id, executor_installation_id, repo_id, ticket_id, ticket_key, kind (code|merge), trigger_class (ready|follow_up|retry|merge), review_round, phase_retries, review_url, pr_url, merged_sha, attempt, status, outcome, branch, worktree_path, base_sha, head_sha, pid, process_started_at, session_id, heartbeat_at, started_at, ended_at, exit_code, failure_reason, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, num_turns, log_dir, originating_turn_id</code>; unique partial index on <code>ticket_id</code> for active statuses.</li>
+      <li><code>code_runs</code>: <code>id, ai_employee_id, executor_installation_id, repo_id, ticket_id, ticket_key, kind (code|merge), trigger_class (ready|follow_up|retry|merge), review_round, phase_retries, review_url, pr_url, merged_sha, attempt, status, outcome, branch, worktree_path, base_sha, head_sha, pid, process_started_at, session_id, resumed_session (bool; false when a review round fell back to a fresh run), heartbeat_at, started_at, ended_at, exit_code, failure_reason, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, num_turns, log_dir, originating_turn_id</code>; unique partial index on <code>ticket_id</code> for active statuses. The latest code run's <code>session_id</code> is what the next review round resumes.</li>
       <li><code>ai_employees.hire_customization_json</code>: the Workplace and Rules values (team, owner mapping, repo id, rules, status map, paired Lead/Dev ids, retry limit).</li>
       <li>Repo entries on the <code>claude_code</code> integration gain <code>review_deploy_command</code>, <code>review_url_pattern</code>, <code>review_teardown_command</code>, <code>test_command</code>.</li>
     </ul>
@@ -1257,7 +1264,7 @@ gh pr merge --rebase              # linear history: no merge commits
         <tr><td class="q">What does "done" hand the owner?</td><td class="d">A deployed review build of the branch with direct links, what changed and what wasn't verified; <em>In Review</em>, assigned to the owner.</td><td>Owner's flow. Games are judged by playing them; a diff isn't a review.</td></tr>
         <tr><td class="q">Who merges, and how?</td><td class="d">Automatic after <em>Approved</em>: rebase onto main, test, PR, rebase-merge. Never a merge commit. Conflict or failing tests: back to the Lead, nothing merged.</td><td>Owner's flow: linear history and no git chores for the owner, without ever merging untested code.</td></tr>
         <tr><td class="q">What stops a failure loop?</td><td class="d">Failed runs go to the Lead, which retries at most 2 times per phase (configurable), then re-scopes or asks the owner; giving up adds <code>runner-failed</code>.</td><td>Owner's flow: failures are the Lead's job, not the owner's, but bounded so a broken ticket can't burn runs forever.</td></tr>
-        <tr><td class="q">Review rounds: resume or fresh?</td><td class="d">Each round is a fresh run reading the thread and the branch; the Lead's tasks comment is the brief.</td><td>The ticket is the single source of truth; a resumed session carries stale context and costs more. Listed in §8 for the owner to confirm.</td></tr>
+        <tr><td class="q">Review rounds: resume or fresh?</td><td class="d">Resume the Dev's Claude Code session (<code>--resume</code>, same worktree and branch) with the Lead's new comment. If it can't be resumed, a fresh run from the thread and the branch, noted on the ticket. The run still ends at review, freeing its slot.</td><td>The owner's choice: the Dev keeps its reasoning across rounds. The self-contained Lead comment keeps the fallback working.</td></tr>
         <tr><td class="q">Stop vs. fail</td><td class="d">Stop keeps the status, assigns the ticket to the owner, and doesn't restart until the owner hands it back. It isn't sent to the Lead or counted as a retry.</td><td>A stop is the owner's decision, not an error.</td></tr>
         <tr><td class="q">Billing</td><td class="d">Runs use the owner's Claude subscription login, never an API key; costs are notional, limits are the plan's.</td><td>Owner's call: a monthly plan, no per-token spend.</td></tr>
         <tr><td class="q">Recovery source of truth</td><td class="d">Local run records + the stream file + the ticket in Linear; only tickets with a run record are reconciled.</td><td>Interactive sessions also act as Claude in Linear; resetting their tickets would break the owner's live work.</td></tr>
@@ -1283,13 +1290,10 @@ gh pr merge --rebase              # linear history: no merge commits
         <li><s>3. Billing</s>: the owner's Claude subscription login, no API key; costs are notional (the owner's call, earlier the same day).</li>
         <li><s>4. "Moving to Todo alone does nothing"</s>: replaced by status + assignee. Assigning to the Lead starts scoping from any open status before Ready; the owner can set any status directly (§5.3).</li>
         <li><s>9. Approve from Linear?</s>: yes, by status. The owner approves the scope with <em>Ready</em> and the result with <em>Approved</em>; Pidgin's review page sets the same statuses. Pidgin approvals stay only for gated machine actions.</li>
+        <li><s>8. Follow-up runs: resume or fresh?</s>: review rounds resume the Dev's Claude Code session (<code>--resume</code>, same worktree and branch), with a fresh run from the ticket and branch as the fallback when the session can't be resumed (§4.1.3).</li>
       </ul>
       <p><strong>Still open</strong> (old numbers in brackets; 13–17 are new):</p>
       <ol>
-        <li><strong>[8] Review rounds start fresh: confirm.</strong> Each round after a review is a new Claude Code run that
-            re-reads the ticket thread and the branch, not a resumed session. That keeps the ticket the single source of
-            truth and is why the Lead's task comment must be self-contained. The default is fresh; resuming would remember
-            the previous round's reasoning but carry stale context and cost more.</li>
         <li><strong>[2] Claude Code permissions.</strong> The repo's own allowlist + accept-edits (safer; some runs will stall
             on a denied command), or bypass permissions inside the worktree (smoother; it can run anything on this PC)?</li>
         <li><strong>[5] agent-ready.</strong> Does the unassigned <code>agent-ready</code> label still feed the flow (the Lead
