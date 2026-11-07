@@ -6,6 +6,8 @@ sent as the ``Authorization`` header. See specs/DEVELOPER_WORKER_SPEC.html §5.2
 
 from __future__ import annotations
 
+import hashlib
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,6 +26,66 @@ class LinearAuthError(LinearError):
 
 class LinearRateLimited(LinearError):
     pass
+
+
+@dataclass
+class RateInfo:
+    """Linear's rate-limit headers from the latest response for one API key.
+
+    Linear allows 2,500 requests/hour per user (shared by every key acting as
+    that user) and a complexity budget; resets are epoch seconds.
+    """
+
+    requests_limit: int | None = None
+    requests_remaining: int | None = None
+    requests_reset: float | None = None
+    complexity_limit: int | None = None
+    complexity_remaining: int | None = None
+    complexity_reset: float | None = None
+    last_complexity: int | None = None
+    seen_at: float = 0.0
+
+
+_RATES: dict[str, RateInfo] = {}
+
+
+def _key_id(api_key: str) -> str:
+    return hashlib.sha256(api_key.strip().encode()).hexdigest()[:16]
+
+
+def rate_for(api_key: str) -> RateInfo | None:
+    return _RATES.get(_key_id(api_key))
+
+
+def _int(value: str | None) -> int | None:
+    try:
+        return int(float(value)) if value not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def _epoch(value: str | None) -> float | None:
+    n = _int(value)
+    if n is None:
+        return None
+    return n / 1000 if n > 10_000_000_000 else float(n)  # Linear sends milliseconds
+
+
+def parse_rate_headers(headers: Any) -> RateInfo | None:
+    if headers.get("x-ratelimit-requests-remaining") is None and headers.get(
+        "x-ratelimit-complexity-remaining"
+    ) is None:
+        return None
+    return RateInfo(
+        requests_limit=_int(headers.get("x-ratelimit-requests-limit")),
+        requests_remaining=_int(headers.get("x-ratelimit-requests-remaining")),
+        requests_reset=_epoch(headers.get("x-ratelimit-requests-reset")),
+        complexity_limit=_int(headers.get("x-ratelimit-complexity-limit")),
+        complexity_remaining=_int(headers.get("x-ratelimit-complexity-remaining")),
+        complexity_reset=_epoch(headers.get("x-ratelimit-complexity-reset")),
+        last_complexity=_int(headers.get("x-complexity")),
+        seen_at=time.time(),
+    )
 
 
 _ISSUE_FIELDS = """
@@ -115,6 +177,9 @@ class LinearClient:
             )
         except httpx.HTTPError as exc:
             raise LinearError(f"Linear unreachable: {exc}") from exc
+        rate = parse_rate_headers(resp.headers)
+        if rate is not None:
+            _RATES[_key_id(self._key)] = rate
         if resp.status_code == 401:
             raise LinearAuthError("Linear rejected the API key (401)")
         if resp.status_code == 429:
@@ -133,6 +198,10 @@ class LinearClient:
                 raise LinearAuthError(msg)
             raise LinearError(msg)
         return body.get("data") or {}
+
+    @property
+    def rate(self) -> RateInfo | None:
+        return _RATES.get(_key_id(self._key))
 
     # -- identity / metadata ----------------------------------------------
     def viewer(self) -> dict[str, Any]:
@@ -193,16 +262,65 @@ class LinearClient:
         return data["issueLabelCreate"]["issueLabel"]["id"]
 
     # -- issues ------------------------------------------------------------
-    def todo_issues(self, team_id: str, todo_state_id: str) -> list[Issue]:
+    def todo_issues(
+        self,
+        team_id: str,
+        todo_state_id: str,
+        *,
+        viewer_id: str | None = None,
+        ready_label: str | None = None,
+        first: int = 25,
+    ) -> list[Issue]:
+        """The trigger check, run every few seconds: only what rules 1-2 need.
+
+        One request with two small pages filtered server-side: tickets in Todo
+        assigned to the worker, and unassigned ones with the agent-ready label.
+        Separate pages so a long agent-ready list never hides an assigned ticket.
+        """
+        base: dict[str, Any] = {
+            "team": {"id": {"eq": team_id}},
+            "state": {"id": {"eq": todo_state_id}},
+        }
+        fields = """nodes { id identifier title url priority createdAt updatedAt
+                   assignee { id } labels(first: 8) { nodes { id name } }
+                   inverseRelations(first: 4) { nodes { type issue { state { type } } } } }"""
+        parts: list[str] = []
+        params: list[str] = ["$first: Int!"]
+        variables: dict[str, Any] = {"first": first}
+        if viewer_id:
+            params.append("$mine: IssueFilter!")
+            parts.append(f"mine: issues(first: $first, filter: $mine) {{ {fields} }}")
+            variables["mine"] = {**base, "assignee": {"id": {"eq": viewer_id}}}
+        if ready_label:
+            params.append("$ready: IssueFilter!")
+            parts.append(f"ready: issues(first: $first, filter: $ready) {{ {fields} }}")
+            variables["ready"] = {
+                **base,
+                "assignee": {"null": True},
+                "labels": {"some": {"name": {"eqIgnoreCase": ready_label}}},
+            }
+        if not parts:
+            return []
+        data = self.gql(f"query({', '.join(params)}) {{ {' '.join(parts)} }}", variables)
+        out: list[Issue] = []
+        for alias in ("mine", "ready"):
+            out += [_to_issue(n) for n in (data.get(alias) or {}).get("nodes", [])]
+        return out
+
+    def issues_brief(self, issue_ids: list[str]) -> list[Issue]:
+        """Status and assignee of several tickets in one request (running-run checks)."""
+        if not issue_ids:
+            return []
         data = self.gql(
-            """query($team: ID!, $state: ID!) { issues(first: 100, filter: {
-                   team: { id: { eq: $team } }, state: { id: { eq: $state } } }) {
-                 nodes { """
-            + _ISSUE_FIELDS
-            + """ inverseRelations(first: 20) { nodes { type issue { state { type } } } } } } }""",
-            {"team": team_id, "state": todo_state_id},
+            """query($ids: [ID!]!, $first: Int!) { issues(first: $first, filter: { id: { in: $ids } }) {
+                 nodes { id identifier title updatedAt state { id name type } assignee { id name } } } }""",
+            {"ids": issue_ids, "first": len(issue_ids)},
         )
         return [_to_issue(n) for n in (data.get("issues") or {}).get("nodes", [])]
+
+    @staticmethod
+    def as_issue(node: dict[str, Any]) -> Issue:
+        return _to_issue(node)
 
     def issue(self, issue_id: str) -> Issue:
         data = self.gql(

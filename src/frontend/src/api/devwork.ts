@@ -101,6 +101,23 @@ export type CodeRun = {
   created_at: string;
   started_at: string | null;
   ended_at: string | null;
+  ticket_touched_at: string | null;
+  ticket_seen_at: string | null;
+  first_output_at: string | null;
+};
+
+export type Polling = {
+  every: number;
+  base: number;
+  running_check_every: number;
+  slowed?: string | null;
+  poll_ms?: number;
+  poll_complexity?: number | null;
+  requests_remaining?: number | null;
+  requests_limit?: number | null;
+  requests_reset?: number | null;
+  complexity_remaining?: number | null;
+  complexity_limit?: number | null;
 };
 
 export type DevSummary = {
@@ -119,6 +136,7 @@ export type DevSummary = {
     tokens_24h: number;
   };
   runner_alive: boolean;
+  polling: Polling;
 };
 
 export type LinearTeams = {
@@ -229,4 +247,30 @@ export function ago(iso: string | null): string {
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+function secs(from: string | null, to: string | null): number | null {
+  if (!from || !to) return null;
+  return (new Date(to).getTime() - new Date(from).getTime()) / 1000;
+}
+
+function fmtSecs(s: number): string {
+  if (s < 60) return `${Math.max(0, s).toFixed(s < 10 ? 1 : 0)} s`;
+  return `${Math.floor(s / 60)} m ${Math.round(s % 60)} s`;
+}
+
+/** How fast a run started: from the ticket's last change in Linear (its assignment,
+ * usually) to Claude's first output, with the steps in a tooltip. */
+export function startLatency(run: CodeRun): { text: string; detail: string } | null {
+  const total = secs(run.ticket_touched_at, run.first_output_at);
+  if (total === null) return null;
+  const seen = secs(run.ticket_touched_at, run.ticket_seen_at);
+  const started = secs(run.ticket_seen_at, run.started_at);
+  const first = secs(run.started_at, run.first_output_at);
+  const parts = [
+    seen !== null ? `seen ${fmtSecs(seen)} after the ticket changed` : null,
+    started !== null ? `Claude Code started ${fmtSecs(started)} later` : null,
+    first !== null ? `first output ${fmtSecs(first)} after that` : null,
+  ].filter(Boolean);
+  return { text: `started in ${fmtSecs(total)}`, detail: parts.join("; ") };
 }

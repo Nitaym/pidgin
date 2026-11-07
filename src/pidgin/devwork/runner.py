@@ -1,14 +1,19 @@
 """The developer runner: Linear watcher + Claude Code executor (spec §5.3–5.5).
 
 One background thread (``DevRunner``) inside the Pidgin server:
-  * polls Linear for each enabled developer (outbound only, every 60–120 s),
+  * checks Linear for new tickets for each enabled developer (outbound polling
+    only, every 5 s by default), slowing down on its own when Linear's
+    rate-limit headers say requests are running low,
+  * checks the tickets of running runs (stopped, moved, reassigned) on their
+    own 60 s timer, in one request for all of them,
   * applies the trigger rules and keeps the queue,
-  * starts runs within the concurrency cap (claim, worktree, Claude Code),
+  * claims and starts a qualifying ticket in the same pass it is seen: a dev
+    slot is put on the ticket's branch and Claude Code starts,
   * monitors running runs (limits, stop requests, exit) and finalizes them,
   * on startup, reconciles runs left over from a previous process.
 
-Each run's preparation (claim, worktree, setup command, spawn) happens on its
-own short-lived thread so a slow ``npm ci`` never blocks monitoring.
+Each run's preparation (claim, slot or worktree, spawn) happens on its own
+short-lived thread so it never blocks polling or monitoring.
 
 v1 note: rules 1–2 and 5 are applied deterministically here; mentions and
 comments (rules 3–4) are not wired yet. To continue a handed-off ticket, the
@@ -31,14 +36,30 @@ from pathlib import Path
 from typing import Any
 
 from pidgin.devwork import proc, store
-from pidgin.devwork.linear_api import Issue, LinearClient, LinearError, LinearRateLimited
+from pidgin.devwork import slots as dev_slots
+from pidgin.devwork.linear_api import (
+    Issue,
+    LinearClient,
+    LinearError,
+    LinearRateLimited,
+    RateInfo,
+)
 from pidgin.devwork.prompt import build_resume_prompt, build_rules, build_ticket_prompt
 from pidgin.util.ids import utc_now_iso
 
 log = logging.getLogger(__name__)
 
-TICK_SECONDS = 3.0
+TICK_SECONDS = 0.5
 META_TTL_SECONDS = 600
+RUNNING_CHECK_SECONDS = 60  # stopped / moved / reassigned checks for running tickets
+HEARTBEAT_SECONDS = 5
+SLOTS_CACHE_SECONDS = 60
+# Linear allows 2,500 requests/hour per user, shared by every key acting as it.
+# Below LOW_FRACTION of a budget the new-ticket check slows so that what's left
+# lasts until the reset, keeping RESERVE_FRACTION for claims, comments, hand-offs
+# and running checks.
+LOW_FRACTION = 0.25
+RESERVE_FRACTION = 0.1
 
 
 def _now() -> datetime:
@@ -67,6 +88,41 @@ def _git(repo: Path, *args: str, check: bool = True, timeout: int = 120) -> str:
             f"git {' '.join(args)}: {result.stderr.strip() or result.stdout.strip()}"
         )
     return result.stdout.strip()
+
+
+def poll_plan(
+    base: float, rate: RateInfo | None, now: float, poll_cost: int | None = None
+) -> tuple[float, str | None]:
+    """Seconds until the next new-ticket check, and why it is slower than ``base``.
+
+    Uses the latest rate-limit headers: while more than a quarter of a budget is
+    left, poll at ``base``; below that, spread what's left (minus a reserve) over
+    the time until the reset.
+    """
+    if rate is None:
+        return base, None
+    interval, note = base, None
+    budgets = (
+        ("requests", rate.requests_remaining, rate.requests_limit, rate.requests_reset, 1),
+        (
+            "complexity points",
+            rate.complexity_remaining,
+            rate.complexity_limit,
+            rate.complexity_reset,
+            max(1, poll_cost or rate.last_complexity or 1),
+        ),
+    )
+    for name, remaining, limit, reset, cost in budgets:
+        if remaining is None or not limit or remaining > limit * LOW_FRACTION:
+            continue
+        to_reset = max(1.0, (reset or now + 3600) - now)
+        spare = remaining - limit * RESERVE_FRACTION
+        need = to_reset if spare <= 0 else to_reset * cost / spare
+        if need > interval:
+            interval = need
+            until = datetime.fromtimestamp(now + to_reset).strftime("%H:%M")
+            note = f"{remaining:,} of {limit:,} Linear {name} left until {until}"
+    return min(interval, 3600.0), note
 
 
 def linear_for_worker(conn: sqlite3.Connection, worker: dict[str, Any]) -> LinearClient:
@@ -182,6 +238,11 @@ class DevRunner:
         self._preparing: set[str] = set()
         self._meta: dict[str, tuple[float, dict[str, Any]]] = {}
         self._backoff_until: dict[str, float] = {}
+        self._last_check: dict[str, float] = {}
+        self._last_heartbeat: dict[str, float] = {}
+        self._first_output_seen: set[str] = set()
+        self._slots_cache: dict[str, tuple[float, bool]] = {}
+        self._poll_state: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
         self._recovered = False
 
@@ -248,24 +309,78 @@ class DevRunner:
                 and worker.get("repo_path")
             ):
                 continue
+            polled = False
             if self._poll_due(worker):
-                self._poll(conn, worker)
+                polled = self._poll(conn, worker)
                 worker = store.get_worker(conn, worker["ai_employee_id"]) or worker
-            self._admit(conn, worker)
+            if polled:
+                # Same pass: a ticket that qualifies is claimed and started now.
+                self._admit(conn, worker)
+            if self._check_due(worker):
+                self._check_running(conn, worker)
         for run in store.active_runs(conn):
             if run["status"] == "running":
                 self._monitor(conn, run)
 
     def _poll_due(self, worker: dict[str, Any]) -> bool:
-        if time.monotonic() < self._backoff_until.get(worker["ai_employee_id"], 0):
+        wid = worker["ai_employee_id"]
+        if time.monotonic() < self._backoff_until.get(wid, 0):
             return False
         last = _parse(worker.get("last_poll_at"))
-        interval = max(30, min(int(worker.get("poll_seconds") or 60), 600))
-        return last is None or (_now() - last).total_seconds() >= interval
+        if last is None:
+            return True
+        interval = self._poll_state.get(wid, {}).get("every") or self._base_interval(worker)
+        return (_now() - last).total_seconds() >= interval
+
+    @staticmethod
+    def _base_interval(worker: dict[str, Any]) -> float:
+        seconds = int(worker.get("poll_seconds") or store.DEFAULT_POLL_SECONDS)
+        return float(max(store.MIN_POLL_SECONDS, min(seconds, store.MAX_POLL_SECONDS)))
+
+    def _check_due(self, worker: dict[str, Any]) -> bool:
+        wid = worker["ai_employee_id"]
+        if time.monotonic() < self._backoff_until.get(wid, 0):
+            return False
+        return time.monotonic() - self._last_check.get(wid, 0) >= RUNNING_CHECK_SECONDS
 
     def poll_now(self, conn: sqlite3.Connection, ai_employee_id: str) -> None:
         self._backoff_until.pop(ai_employee_id, None)
         store.update_worker(conn, ai_employee_id, {"last_poll_at": None})
+
+    def poll_state(self, ai_employee_id: str) -> dict[str, Any] | None:
+        """Polling and Linear rate status for the Work page."""
+        return self._poll_state.get(ai_employee_id)
+
+    def _note_rate(
+        self, worker: dict[str, Any], client: LinearClient, poll_ms: int | None, poll_cost: int | None
+    ) -> None:
+        wid = worker["ai_employee_id"]
+        base = self._base_interval(worker)
+        rate = client.rate
+        every, note = poll_plan(base, rate, time.time(), poll_cost)
+        before = self._poll_state.get(wid, {}).get("slowed")
+        if note != before:
+            if note:
+                log.warning("[devrunner] %s: slowing new-ticket checks to every %.0f s (%s)", wid, every, note)
+            elif before:
+                log.info("[devrunner] %s: Linear budget recovered; checking every %.0f s", wid, every)
+        state = self._poll_state.setdefault(wid, {})
+        state.update({"every": every, "base": base, "slowed": note})
+        if poll_ms is not None:
+            state["poll_ms"] = poll_ms
+        if poll_cost is not None:
+            state["poll_complexity"] = poll_cost
+        if rate is not None:
+            state.update(
+                {
+                    "requests_remaining": rate.requests_remaining,
+                    "requests_limit": rate.requests_limit,
+                    "requests_reset": rate.requests_reset,
+                    "complexity_remaining": rate.complexity_remaining,
+                    "complexity_limit": rate.complexity_limit,
+                    "rate_seen_at": rate.seen_at,
+                }
+            )
 
     # -- watcher -------------------------------------------------------------------
     def _team_meta(self, client: LinearClient, worker: dict[str, Any]) -> dict[str, Any]:
@@ -281,9 +396,11 @@ class DevRunner:
     def _state_id(self, meta: dict[str, Any], worker: dict[str, Any], role: str) -> str | None:
         return meta["state_ids"].get(str(worker["status_map"].get(role, "")).lower())
 
-    def _poll(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> None:
+    def _poll(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> bool:
+        """The new-ticket check. True when it got a fresh queue."""
         wid = worker["ai_employee_id"]
         store.update_worker(conn, wid, {"last_poll_at": utc_now_iso()})
+        client: LinearClient | None = None
         try:
             client = linear_for_worker(conn, worker)
             if not worker.get("viewer_id"):
@@ -303,21 +420,43 @@ class DevRunner:
                 raise LinearError(
                     f"No '{worker['status_map']['todo']}' status in team {worker.get('team_key')}"
                 )
-            issues = client.todo_issues(worker["team_id"], todo_id)
+            rules = worker["rules"]
+            t0 = time.monotonic()
+            issues = client.todo_issues(
+                worker["team_id"],
+                todo_id,
+                viewer_id=worker.get("viewer_id") if rules.get("assigned", True) else None,
+                ready_label=(
+                    str(rules.get("agent_ready_label") or "agent-ready")
+                    if rules.get("agent_ready", True)
+                    else None
+                ),
+            )
+            poll_ms = int((time.monotonic() - t0) * 1000)
+            rate = client.rate
+            self._note_rate(worker, client, poll_ms, rate.last_complexity if rate else None)
             queue = self._queue_from(conn, worker, issues)
             store.update_worker(
                 conn,
                 wid,
                 {"queue": queue, "last_poll_ok_at": utc_now_iso(), "last_poll_error": None},
             )
-            self._check_running_tickets(conn, client, worker, meta)
+            return True
         except LinearRateLimited as exc:
-            self._backoff_until[wid] = time.monotonic() + 600
-            store.update_worker(conn, wid, {"last_poll_error": f"{exc} — backing off 10 min"})
+            rate = client.rate if client is not None else None
+            wait = 60.0
+            if rate and rate.requests_reset:
+                wait = max(30.0, min(rate.requests_reset - time.time(), 3600.0))
+            self._backoff_until[wid] = time.monotonic() + wait
+            log.warning("[devrunner] Linear rate limit for %s; waiting %.0f s", wid, wait)
+            store.update_worker(
+                conn, wid, {"last_poll_error": f"{exc}: waiting {int(wait)} s for the reset"}
+            )
         except Exception as exc:  # noqa: BLE001
-            self._backoff_until[wid] = time.monotonic() + 120
+            self._backoff_until[wid] = time.monotonic() + 60
             store.update_worker(conn, wid, {"last_poll_error": str(exc)[:500]})
             log.warning("[devrunner] poll failed for %s: %s", wid, exc)
+        return False
 
     def _queue_from(
         self, conn: sqlite3.Connection, worker: dict[str, Any], issues: list[Issue]
@@ -364,6 +503,7 @@ class DevRunner:
                     "priority": issue.priority,
                     "created_at": issue.created_at,
                     "updated_at": issue.updated_at,
+                    "seen_at": utc_now_iso(),
                     "follow_up": last is not None,
                     "last_status": last["status"] if last else None,
                     "reason": reason,
@@ -385,20 +525,24 @@ class DevRunner:
                 )
         return out
 
-    def _check_running_tickets(
-        self,
-        conn: sqlite3.Connection,
-        client: LinearClient,
-        worker: dict[str, Any],
-        meta: dict[str, Any],
-    ) -> None:
-        """Rule 5: the owner can stop a run from Linear (cancel / backlog / unassign)."""
-        for run in store.active_runs(conn, worker["ai_employee_id"]):
-            if run["status"] != "running":
-                continue
-            try:
-                issue = client.issue(run["ticket_id"])
-            except LinearError:
+    def _check_running(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> None:
+        """Rule 5, on its own 60 s timer: the owner can stop a run from Linear
+        (cancel / backlog / unassign). One request covers every running ticket."""
+        wid = worker["ai_employee_id"]
+        self._last_check[wid] = time.monotonic()
+        running = [r for r in store.active_runs(conn, wid) if r["status"] == "running"]
+        if not running:
+            return
+        try:
+            client = linear_for_worker(conn, worker)
+            issues = {i.id: i for i in client.issues_brief([r["ticket_id"] for r in running])}
+            self._note_rate(worker, client, None, None)
+        except LinearError as exc:
+            log.warning("[devrunner] running-ticket check failed for %s: %s", wid, exc)
+            return
+        for run in running:
+            issue = issues.get(run["ticket_id"])
+            if issue is None:
                 continue
             if issue.assignee_id != worker.get("viewer_id") or issue.state_type in (
                 "canceled",
@@ -419,6 +563,20 @@ class DevRunner:
         slots = int(worker.get("max_concurrent") or 1) - len(active)
         if slots <= 0:
             return
+        if not any(
+            q["reason"] in ("Waiting for a free slot", "Waits until no assigned ticket is waiting")
+            for q in worker["queue"]
+        ):
+            return
+        if self._uses_slots(conn, worker):
+            from pidgin.devwork import terminals as dt
+
+            settings = dev_slots.get_settings(conn)
+            # Runs not yet holding their slot's lock count against the free ones.
+            unlocked = len([r for r in store.active_runs(conn) if r["status"] in ("queued", "claiming")])
+            slots = min(slots, dev_slots.free_run_slots(settings, dt.list_devs(conn)) - unlocked)
+            if slots <= 0:
+                return
         queue = [
             q
             for q in worker["queue"]
@@ -446,6 +604,8 @@ class DevRunner:
                 ticket_title=item["title"],
                 ticket_url=item["url"],
                 trigger_class=klass,
+                ticket_touched_at=item.get("updated_at"),
+                ticket_seen_at=item.get("seen_at"),
             )
             if run_id is None:
                 continue
@@ -454,6 +614,20 @@ class DevRunner:
             )
             self._start_prepare(run_id, recovering=False)
         store.update_worker(conn, worker["ai_employee_id"], {"queue": remaining})
+
+    def _uses_slots(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> bool:
+        """Runs work in the dev slots when the slots folder holds this repo's worktrees;
+        otherwise each ticket gets its own worktree under the worktree folder."""
+        repo = str(worker.get("repo_path") or "")
+        cached = self._slots_cache.get(repo)
+        if cached and time.monotonic() - cached[0] < SLOTS_CACHE_SECONDS:
+            return cached[1]
+        try:
+            ok = dev_slots.belongs_to(dev_slots.get_settings(conn), repo)
+        except Exception:  # noqa: BLE001
+            ok = False
+        self._slots_cache[repo] = (time.monotonic(), ok)
+        return ok
 
     def _start_prepare(self, run_id: str, *, recovering: bool) -> None:
         with self._lock:
@@ -497,8 +671,10 @@ class DevRunner:
         in_progress = self._state_id(meta, worker, "in_progress")
 
         # 1. Claim, with a live re-check (never start a ticket someone else took).
+        # One fetch serves both the re-check and the prompt.
         store.update_run(conn, run_id, status="claiming")
-        issue = client.issue(run["ticket_id"])
+        full = client.issue_full(run["ticket_id"])
+        issue = LinearClient.as_issue(full)
         already_ours = issue.state_id == in_progress and issue.assignee_id == viewer
         eligible = issue.state_id == self._state_id(meta, worker, "todo") and (
             issue.assignee_id == viewer
@@ -518,11 +694,6 @@ class DevRunner:
             return
         if not already_ours:
             client.update_issue(issue.id, state_id=in_progress, assignee_id=viewer)
-            client.comment(
-                issue.id,
-                f"**Started:** picking this up (attempt {run['attempt']}). "
-                "I'll comment as I go and finish with a hand-off or Done.",
-            )
             store.add_event(
                 conn,
                 run_id,
@@ -530,24 +701,12 @@ class DevRunner:
                 f"Claimed: {worker['status_map']['in_progress']}, assigned to {worker.get('viewer_name') or 'the developer'}",
             )
 
-        # 2. Worktree on a branch per ticket.
-        store.update_run(conn, run_id, status="preparing")
+        # 2. A dev slot switched to the ticket's branch (or a worktree per ticket).
         repo = Path(worker["repo_path"])
         base = worker.get("base_branch") or "main"
         branch = branch_for(worker, issue.key, issue.branch_name, issue.title)
-        root = Path(worker.get("worktree_root") or store.default_worktree_root("developer"))
-        root.mkdir(parents=True, exist_ok=True)
-        path = root / issue.key
-        created = False
-        existing = self._worktree_for_branch(repo, branch)
-        if existing:
-            path = existing
-        elif not (path / ".git").exists():
-            if _git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False):
-                _git(repo, "worktree", "add", str(path), branch)
-            else:
-                _git(repo, "worktree", "add", "-b", branch, str(path), base)
-            created = True
+        path, created, where = self._place(conn, worker, run, repo, branch, base)
+        store.update_run(conn, run_id, status="preparing", worktree_path=str(path))
         base_sha = _git(repo, "rev-parse", base)
         log_dir = self._db_path.parent / "runs" / run_id if self._db_path else path / ".pidgin-run"
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -563,7 +722,7 @@ class DevRunner:
             conn,
             run_id,
             "worktree",
-            f"Worktree {'created' if created else 'reused'}: {path} on {branch}",
+            f"{where}: {path} on {branch}",
         )
 
         setup = (worker.get("setup_command") or "").strip()
@@ -588,7 +747,6 @@ class DevRunner:
             )
 
         # 3. Prompt, rules, ticket tools, then Claude Code.
-        full = client.issue_full(issue.id)
         earlier = [r for r in store.runs_for_ticket(conn, issue.id) if r["id"] != run_id]
         resume_from = resumable_session(earlier, str(path))
         if resume_from:
@@ -702,7 +860,96 @@ class DevRunner:
             heartbeat_at=now,
             last_output_at=now,
         )
+        slots_dir = dev_slots.get_settings(conn)["slots_dir"]
+        if os.path.normcase(str(Path(path).parent)) == os.path.normcase(str(Path(slots_dir))):
+            # The slot stays taken for as long as this Claude Code process lives,
+            # even across a Pidgin restart.
+            dev_slots.write_lock(
+                str(path),
+                pid=process.pid,
+                dev_name=issue.key,
+                branch=branch,
+                ticket=issue.key,
+                mode="pidgin-run",
+            )
         store.add_event(conn, run_id, "started", "Claude Code started")
+        if not already_ours:
+            try:
+                client.comment(
+                    issue.id,
+                    f"**Started:** picking this up (attempt {run['attempt']}). "
+                    "I'll comment as I go and finish with a hand-off or Done.",
+                )
+            except LinearError as exc:
+                store.add_event(conn, run_id, "error", f"Could not post the start comment: {exc}")
+
+    def _place(
+        self,
+        conn: sqlite3.Connection,
+        worker: dict[str, Any],
+        run: dict[str, Any],
+        repo: Path,
+        branch: str,
+        base: str,
+    ) -> tuple[Path, bool, str]:
+        """Where the run works: (folder, newly made, timeline label)."""
+        existing = self._worktree_for_branch(repo, branch)
+        if self._uses_slots(conn, worker):
+            from pidgin.devwork import terminals as dt
+
+            settings = dev_slots.get_settings(conn)
+            slots_dir = os.path.normcase(str(Path(settings["slots_dir"])))
+            in_slot = existing is not None and os.path.normcase(str(existing.parent)) == slots_dir
+            if existing is None or in_slot:
+                prefer = existing.name if existing is not None else None
+                if prefer is None:
+                    earlier = store.runs_for_ticket(conn, run["ticket_id"])
+                    last_path = next(
+                        (r["worktree_path"] for r in reversed(earlier) if r.get("worktree_path")), None
+                    )
+                    if last_path and os.path.normcase(str(Path(last_path).parent)) == slots_dir:
+                        prefer = Path(last_path).name
+                with dt._slot_lock:
+                    name, slot_dir, created = dev_slots.take_run_slot(
+                        settings,
+                        str(repo),
+                        dt.list_devs(conn),
+                        ticket=run["ticket_key"],
+                        branch=branch,
+                        prefer=prefer,
+                    )
+                if in_slot and name != prefer:
+                    dev_slots.clear_lock(slot_dir, None)
+                    raise RuntimeError(
+                        f"{branch} is checked out in {prefer}, which is in use or has uncommitted changes"
+                    )
+                try:
+                    dev_slots.switch_to_branch(slot_dir, branch, base)
+                except Exception:
+                    dev_slots.clear_lock(slot_dir, None)
+                    raise
+                return Path(slot_dir), created, f"Dev slot {name}"
+        if existing is not None:
+            return existing, False, "Worktree reused"
+        root = Path(worker.get("worktree_root") or store.default_worktree_root("developer"))
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / run["ticket_key"]
+        if (path / ".git").exists():
+            return path, False, "Worktree reused"
+        if _git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False):
+            _git(repo, "worktree", "add", str(path), branch)
+        else:
+            _git(repo, "worktree", "add", "-b", branch, str(path), base)
+        return path, True, "Worktree created"
+
+    def _release_slot(self, conn: sqlite3.Connection, run: dict[str, Any]) -> None:
+        """Free the run's dev slot (only if the lock is still this run's)."""
+        path = run.get("worktree_path")
+        if not path:
+            return
+        lock = dev_slots.read_lock(Path(path))
+        if lock and lock.get("mode") == "pidgin-run" and lock.get("ticket") == run.get("ticket_key"):
+            dev_slots.clear_lock(path, None)
 
     def _worktree_for_branch(self, repo: Path, branch: str) -> Path | None:
         out = _git(repo, "worktree", "list", "--porcelain", check=False)
@@ -747,6 +994,10 @@ class DevRunner:
                 and evt.get("session_id")
             ):
                 store.update_run(conn, run["id"], session_id=evt["session_id"])
+            elif evt.get("type") == "assistant" and run["id"] not in self._first_output_seen:
+                self._first_output_seen.add(run["id"])
+                if not run.get("first_output_at"):
+                    store.update_run(conn, run["id"], first_output_at=utc_now_iso())
             elif evt.get("type") == "result":
                 result = evt
         return result
@@ -788,7 +1039,9 @@ class DevRunner:
             if popen is not None
             else proc.is_alive(run.get("pid"), run.get("process_started_at"))
         )
-        store.update_run(conn, run["id"], heartbeat_at=utc_now_iso())
+        if time.monotonic() - self._last_heartbeat.get(run["id"], 0) >= HEARTBEAT_SECONDS:
+            self._last_heartbeat[run["id"]] = time.monotonic()
+            store.update_run(conn, run["id"], heartbeat_at=utc_now_iso())
         fresh = store.get_run(conn, run["id"]) or run
 
         if fresh["stop_requested"]:
@@ -825,6 +1078,7 @@ class DevRunner:
         self, conn: sqlite3.Connection, run: dict[str, Any], how: str, result: dict[str, Any] | None
     ) -> None:
         self._procs.pop(run["id"], None)
+        self._last_heartbeat.pop(run["id"], None)
         worker = store.get_worker(conn, run["ai_employee_id"]) or {}
         head = ""
         commits: list[str] = []
@@ -839,6 +1093,7 @@ class DevRunner:
                     check=False,
                 ).splitlines()
         store.update_run(conn, run["id"], head_sha=head or None, ended_at=utc_now_iso())
+        self._release_slot(conn, run)
         if commits:
             store.add_event(
                 conn,
@@ -944,6 +1199,7 @@ class DevRunner:
             conn, run["id"], status=status, failure_reason=reason[:500], ended_at=utc_now_iso()
         )
         store.add_event(conn, run["id"], "failed", reason[:300])
+        self._release_slot(conn, store.get_run(conn, run["id"]) or run)
         if not claimed:
             return
         worker = store.get_worker(conn, run["ai_employee_id"]) or {}

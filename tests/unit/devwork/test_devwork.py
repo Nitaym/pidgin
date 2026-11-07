@@ -296,3 +296,220 @@ def test_dev_slots_take_create_and_lock(tmp_path: Path) -> None:
     assert dev_slots.read_lock(Path(path)) is not None
     dev_slots.clear_lock(path, os.getpid())
     assert dev_slots.read_lock(Path(path)) is None
+
+
+# -- fast pickup: 5 s new-ticket checks, 60 s running checks, rate budget ---------
+
+
+def test_new_worker_polls_every_5_seconds(conn: sqlite3.Connection) -> None:
+    worker = store.ensure_worker(conn, "dev1", "claude")
+    assert worker["poll_seconds"] == 5
+    assert DevRunner._base_interval({"poll_seconds": 1}) == 5  # minimum 5 s
+
+
+def test_rate_headers_parsed() -> None:
+    from pidgin.devwork.linear_api import parse_rate_headers
+
+    rate = parse_rate_headers(
+        {
+            "x-ratelimit-requests-limit": "2500",
+            "x-ratelimit-requests-remaining": "2400",
+            "x-ratelimit-requests-reset": "1794060000000",
+            "x-ratelimit-complexity-limit": "3000000",
+            "x-ratelimit-complexity-remaining": "2999000",
+            "x-complexity": "36",
+        }
+    )
+    assert rate is not None
+    assert (rate.requests_remaining, rate.requests_limit, rate.last_complexity) == (2400, 2500, 36)
+    assert rate.requests_reset == 1794060000.0  # milliseconds -> seconds
+    assert parse_rate_headers({}) is None
+
+
+def test_poll_plan_backs_off_when_requests_run_low() -> None:
+    from pidgin.devwork.linear_api import RateInfo
+    from pidgin.devwork.runner import poll_plan
+
+    now = 1_000_000.0
+    plenty = RateInfo(requests_limit=2500, requests_remaining=2000, requests_reset=now + 1800)
+    assert poll_plan(5, plenty, now) == (5, None)
+    assert poll_plan(5, None, now) == (5, None)
+
+    # 500 left (20%), 250 kept in reserve: 250 polls over 30 min = one every 7.2 s.
+    low = RateInfo(requests_limit=2500, requests_remaining=500, requests_reset=now + 1800)
+    every, note = poll_plan(5, low, now)
+    assert every == pytest.approx(7.2)
+    assert note and "500 of 2,500 Linear requests" in note
+
+    # Inside the reserve: wait for the reset.
+    empty = RateInfo(requests_limit=2500, requests_remaining=100, requests_reset=now + 900)
+    assert poll_plan(5, empty, now)[0] == pytest.approx(900)
+
+    # Complexity runs low too, measured in polls of this cost.
+    cx = RateInfo(
+        requests_limit=2500,
+        requests_remaining=2400,
+        complexity_limit=3_000_000,
+        complexity_remaining=400_000,
+        complexity_reset=now + 3600,
+    )
+    every, note = poll_plan(5, cx, now, poll_cost=20_000)
+    assert every == pytest.approx(3600 * 20_000 / 100_000)
+    assert note and "complexity" in note
+
+
+def test_todo_query_is_two_small_filtered_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.devwork.linear_api import LinearClient
+
+    seen: dict = {}
+
+    def fake_gql(self, query, variables=None):  # noqa: ANN001
+        seen["query"], seen["vars"] = query, variables
+        node = {"id": "i1", "identifier": "ACG-1", "assignee": {"id": "me"}}
+        return {"mine": {"nodes": [node]}, "ready": {"nodes": []}}
+
+    monkeypatch.setattr(LinearClient, "gql", fake_gql)
+    issues = LinearClient("k").todo_issues("team", "todo", viewer_id="me", ready_label="agent-ready")
+    assert [i.key for i in issues] == ["ACG-1"]
+    assert "mine: issues(first: $first" in seen["query"] and "ready: issues" in seen["query"]
+    assert "description" not in seen["query"] and "comments" not in seen["query"]
+    assert seen["vars"]["first"] <= 25
+    assert seen["vars"]["mine"]["assignee"] == {"id": {"eq": "me"}}
+    assert seen["vars"]["ready"]["assignee"] == {"null": True}
+
+
+class _FakeLinear:
+    def __init__(self, todo: list[Issue], brief: list[Issue] | None = None) -> None:
+        self.todo, self.brief = todo, brief or []
+        self.calls: list[str] = []
+        self.rate = None
+
+    def team_meta(self, team_id: str) -> dict:
+        self.calls.append("team_meta")
+        return {"states": [{"id": "todo", "name": "Todo"}, {"id": "prog", "name": "In Progress"}]}
+
+    def todo_issues(self, *a, **k) -> list[Issue]:  # noqa: ANN002, ANN003
+        self.calls.append("todo")
+        return self.todo
+
+    def issues_brief(self, ids: list[str]) -> list[Issue]:
+        self.calls.append("brief")
+        return self.brief
+
+
+def _ready_worker(conn: sqlite3.Connection) -> None:
+    store.ensure_worker(conn, "dev1", "claude")
+    store.update_worker(
+        conn,
+        "dev1",
+        {
+            "enabled": 1,
+            "linear_installation_id": "li",
+            "team_id": "team",
+            "repo_path": "C:/nowhere",
+            "viewer_id": "me",
+            "max_concurrent": 2,
+        },
+    )
+
+
+def test_tick_polls_every_5_s_and_starts_in_the_same_pass(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pidgin.devwork import runner as runner_mod
+
+    _ready_worker(conn)
+    fake = _FakeLinear([_issue("ACG-2", assignee="me")])
+    monkeypatch.setattr(runner_mod, "linear_for_worker", lambda c, w: fake)
+    r = DevRunner(None)
+    monkeypatch.setattr(r, "_uses_slots", lambda c, w: False)
+    started: list[str] = []
+    monkeypatch.setattr(r, "_start_prepare", lambda run_id, recovering: started.append(run_id))
+
+    r.tick(conn)
+    assert fake.calls.count("todo") == 1
+    assert len(started) == 1  # claimed and started in the pass that saw it
+    run = store.get_run(conn, started[0])
+    assert run and run["ticket_key"] == "ACG-2" and run["ticket_seen_at"]
+    assert run["ticket_touched_at"] == "t1"
+
+    r.tick(conn)  # under 5 s later: no new request
+    assert fake.calls.count("todo") == 1
+    store.update_worker(conn, "dev1", {"last_poll_at": "2000-01-01T00:00:00.000Z"})
+    r.tick(conn)
+    assert fake.calls.count("todo") == 2
+
+
+def test_running_tickets_checked_on_their_own_timer(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pidgin.devwork import runner as runner_mod
+
+    _ready_worker(conn)
+    run_id = store.create_run(
+        conn,
+        ai_employee_id="dev1",
+        ticket_id="id-ACG-3",
+        ticket_key="ACG-3",
+        ticket_title="t",
+        ticket_url="u",
+        trigger_class="assigned",
+    )
+    assert run_id is not None
+    store.update_run(conn, run_id, status="running")
+    fake = _FakeLinear([], brief=[_issue("ACG-3", assignee="someone-else")])
+    monkeypatch.setattr(runner_mod, "linear_for_worker", lambda c, w: fake)
+    r = DevRunner(None)
+    worker = store.get_worker(conn, "dev1")
+    assert worker is not None
+    assert r._check_due(worker)
+    r._check_running(conn, worker)
+    assert fake.calls == ["brief"]  # one request for every running ticket
+    run = store.get_run(conn, run_id)
+    assert run and run["stop_requested"] == 1 and run["stopped_by"] == "Linear"
+    assert not r._check_due(worker)  # next one in 60 s
+
+
+def test_runs_take_a_clean_slot_and_switch_branch(tmp_path: Path) -> None:
+    import os
+    import subprocess
+
+    from pidgin.devwork import slots as dev_slots
+
+    def git(cwd: Path, *args: str) -> str:
+        done = subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
+        return done.stdout
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "main")
+    (repo / "a.txt").write_text("a", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+
+    settings = {**dev_slots.DEFAULTS, "slots_dir": str(tmp_path / "slots"), "slots_repo": str(repo)}
+    assert dev_slots.belongs_to(settings, str(repo))  # no slots yet, configured repo
+    name, path, created = dev_slots.take_run_slot(
+        settings, str(repo), [], ticket="ACG-9", branch="claude/acg-9-x"
+    )
+    assert (name, created) == ("slot-1", True)
+    assert dev_slots.belongs_to(settings, str(repo))
+    lock = dev_slots.read_lock(Path(path))
+    assert lock and lock["mode"] == "pidgin-run" and lock["ticket"] == "ACG-9"
+    assert lock["pid"] == os.getpid()
+    dev_slots.switch_to_branch(path, "claude/acg-9-x", "main")
+    assert git(Path(path), "branch", "--show-current").strip() == "claude/acg-9-x"
+
+    one = {**settings, "max_slots": "1"}
+    assert dev_slots.free_run_slots(one, []) == 0  # taken
+    dev_slots.clear_lock(path, None)
+    (Path(path) / "a.txt").write_text("changed", encoding="utf-8")
+    assert dev_slots.free_run_slots(one, []) == 0  # free but has uncommitted work
+    with pytest.raises(dev_slots.NoFreeSlot):
+        dev_slots.take_run_slot(one, str(repo), [], ticket="ACG-10", branch="b")
+    git(Path(path), "checkout", "--", "a.txt")
+    assert dev_slots.free_run_slots(one, []) == 1
+    # The branch already exists: a later round checks it out as it is.
+    git(Path(path), "switch", "-q", "--detach", "main")
+    dev_slots.switch_to_branch(path, "claude/acg-9-x", "main")
+    assert git(Path(path), "branch", "--show-current").strip() == "claude/acg-9-x"

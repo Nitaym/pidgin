@@ -17,7 +17,12 @@ from pidgin.api.deps import require_google_user, require_workspace_session
 from pidgin.db.employees import get_agent_by_handle
 from pidgin.devwork import store
 from pidgin.devwork.linear_api import LinearClient, LinearError
-from pidgin.devwork.runner import check_repo, get_runner, linear_for_worker
+from pidgin.devwork.runner import (
+    RUNNING_CHECK_SECONDS,
+    check_repo,
+    get_runner,
+    linear_for_worker,
+)
 from pidgin.devwork.transcript import transcript
 
 router = APIRouter(prefix="/{workspace_slug}/api/dev", tags=["devwork"])
@@ -143,6 +148,23 @@ def api_dev_summary(workspace_slug: str, handle: str, request: Request) -> dict[
             "tokens_24h": int(day["tokens"] or 0),
         },
         "runner_alive": get_runner() is not None,
+        "polling": _polling(agent["id"], worker),
+    }
+
+
+def _polling(ai_employee_id: str, worker: dict[str, Any]) -> dict[str, Any]:
+    """How often the runner checks Linear and what Linear's rate headers last said."""
+    base = max(
+        store.MIN_POLL_SECONDS,
+        min(int(worker.get("poll_seconds") or store.DEFAULT_POLL_SECONDS), store.MAX_POLL_SECONDS),
+    )
+    runner = get_runner()
+    state = (runner.poll_state(ai_employee_id) if runner else None) or {}
+    return {
+        "every": state.get("every", base),
+        "base": base,
+        "running_check_every": RUNNING_CHECK_SECONDS,
+        **{k: v for k, v in state.items() if k not in ("every", "base")},
     }
 
 
@@ -185,7 +207,9 @@ def api_dev_config(
     if "max_concurrent" in updates:
         updates["max_concurrent"] = max(1, min(int(updates["max_concurrent"]), 8))
     if "poll_seconds" in updates:
-        updates["poll_seconds"] = max(60, min(int(updates["poll_seconds"]), 600))
+        updates["poll_seconds"] = max(
+            store.MIN_POLL_SECONDS, min(int(updates["poll_seconds"]), store.MAX_POLL_SECONDS)
+        )
     if "linear_installation_id" in updates:
         updates["viewer_id"] = None  # re-resolve who the key belongs to on the next poll
         try:

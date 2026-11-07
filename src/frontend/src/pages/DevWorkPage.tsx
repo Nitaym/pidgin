@@ -7,6 +7,7 @@ import {
   duration,
   RUN_STATUS_LABEL,
   runTone,
+  startLatency,
   type CodeRun,
   type DevSummary,
   type DevWorker,
@@ -320,8 +321,8 @@ function SetupPanel({
           <input type="number" value={v("max_turns")} onChange={(e) => set({ max_turns: Number(e.target.value) })} />
         </div>
         <div className="field">
-          <label>Poll Linear every (s)</label>
-          <input type="number" min={60} value={v("poll_seconds")} onChange={(e) => set({ poll_seconds: Number(e.target.value) })} />
+          <label>Check for new tickets every (s)</label>
+          <input type="number" min={5} value={v("poll_seconds")} onChange={(e) => set({ poll_seconds: Number(e.target.value) })} />
         </div>
       </div>
 
@@ -491,7 +492,11 @@ export function DevWorkPage() {
             ) : (
               <span className="dw-chip">Paused</span>
             )}{" "}
-            Linear polled {ago(w.last_poll_ok_at)}
+            Linear checked {ago(w.last_poll_ok_at)}
+            {enabled ? ` · every ${Math.round(data.polling.every)} s` : ""}
+            {data.polling.requests_remaining != null && data.polling.requests_limit
+              ? ` · ${data.polling.requests_remaining.toLocaleString()} of ${data.polling.requests_limit.toLocaleString()} Linear requests left this hour`
+              : ""}
             {w.team_key ? ` · team ${w.team_key}` : ""}
             {w.viewer_name ? ` · acts as ${w.viewer_name}` : ""}
           </p>
@@ -518,6 +523,12 @@ export function DevWorkPage() {
       </div>
       {error ? <div className="error">{error}</div> : null}
       {w.last_poll_error ? <div className="dw-banner error">Linear: {w.last_poll_error}</div> : null}
+      {enabled && data.polling.slowed ? (
+        <div className="dw-banner warn">
+          New-ticket checks slowed to every {Math.round(data.polling.every)} s (normally {data.polling.base} s):{" "}
+          {data.polling.slowed}.
+        </div>
+      ) : null}
       {!configured ? (
         <div className="dw-banner warn">Finish the setup below (Linear, team, your Linear account, repo), then start.</div>
       ) : null}
@@ -579,7 +590,15 @@ export function DevWorkPage() {
                     </span>{" "}
                     <Link to={`/${slug}/dev/runs/${r.id}`}>open run</Link>
                   </td>
-                  <td className="dw-nowrap">{duration(r.started_at ?? r.created_at, null)}</td>
+                  <td className="dw-nowrap">
+                    {duration(r.started_at ?? r.created_at, null)}
+                    {startLatency(r) ? (
+                      <span className="muted" title={startLatency(r)?.detail}>
+                        {" "}
+                        · {startLatency(r)?.text}
+                      </span>
+                    ) : null}
+                  </td>
                   <td style={{ textAlign: "right" }}>
                     <button
                       type="button"
@@ -644,6 +663,7 @@ export function DevWorkPage() {
                   </td>
                   <td className="muted dw-nowrap">
                     {ago(r.ended_at)} · {duration(r.started_at, r.ended_at)} {cost(r) ? `· ${cost(r)}` : ""}
+                    {startLatency(r) ? <span title={startLatency(r)?.detail}> · {startLatency(r)?.text}</span> : null}
                   </td>
                   <td className="dw-nowrap" style={{ textAlign: "right" }}>
                     <Link to={`/${slug}/dev/runs/${r.id}`} className="btn secondary">

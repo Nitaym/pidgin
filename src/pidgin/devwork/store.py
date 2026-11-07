@@ -82,6 +82,11 @@ CONFIG_FIELDS = (
 )
 
 
+DEFAULT_POLL_SECONDS = 5  # the new-ticket check; running tickets are checked every 60 s
+MIN_POLL_SECONDS = 5
+MAX_POLL_SECONDS = 600
+
+
 def default_worktree_root(handle: str) -> str:
     return str(Path.home() / ".pidgin" / "worktrees" / handle)
 
@@ -107,9 +112,17 @@ def ensure_worker(conn: sqlite3.Connection, ai_employee_id: str, handle: str) ->
         return existing
     now = utc_now_iso()
     conn.execute(
-        """INSERT INTO dev_workers (ai_employee_id, worktree_root, allowed_tools, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?)""",
-        (ai_employee_id, default_worktree_root(handle), DEFAULT_ALLOWED_TOOLS, now, now),
+        """INSERT INTO dev_workers (ai_employee_id, worktree_root, allowed_tools, poll_seconds,
+             created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            ai_employee_id,
+            default_worktree_root(handle),
+            DEFAULT_ALLOWED_TOOLS,
+            DEFAULT_POLL_SECONDS,
+            now,
+            now,
+        ),
     )
     conn.commit()
     worker = get_worker(conn, ai_employee_id)
@@ -174,6 +187,8 @@ def create_run(
     ticket_title: str,
     ticket_url: str,
     trigger_class: str,
+    ticket_touched_at: str | None = None,
+    ticket_seen_at: str | None = None,
 ) -> str | None:
     """Insert a queued run. Returns None if the ticket already has an active run."""
     attempt_row = conn.execute(
@@ -184,8 +199,9 @@ def create_run(
     try:
         conn.execute(
             """INSERT INTO code_runs (id, ai_employee_id, ticket_id, ticket_key, ticket_title,
-                 ticket_url, trigger_class, attempt, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)""",
+                 ticket_url, trigger_class, attempt, status, created_at,
+                 ticket_touched_at, ticket_seen_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)""",
             (
                 run_id,
                 ai_employee_id,
@@ -196,6 +212,8 @@ def create_run(
                 trigger_class,
                 int(attempt_row["n"]) + 1,
                 utc_now_iso(),
+                ticket_touched_at,
+                ticket_seen_at,
             ),
         )
         conn.commit()

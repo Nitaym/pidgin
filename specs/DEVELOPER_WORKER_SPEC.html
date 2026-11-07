@@ -190,9 +190,9 @@
           <li><strong>Review builds</strong>: a deployed build of the ticket's branch the owner can play live, linked from the ticket with what changed and what wasn't verified.</li>
           <li><strong>Automatic merge after the owner's approval</strong>: rebase onto main, test, fast-forward or rebase-merge (never a merge commit); hand back to the Lead on conflict or failing tests.</li>
           <li>A <code>linear</code> connector: reads (tickets, inbox, comments, team states/labels/members), writes (comment, status, assignee, labels, new Triage ticket), API-key auth, health check.</li>
-          <li>A <strong>Linear watcher</strong>: outbound-only polling every 60–120 s that writes change rows for the change-gated wakeup. This fills the "connector-side watcher" gap the change-gated wakeup and autonomy specs left out of scope.</li>
+          <li>A <strong>Linear watcher</strong>: outbound-only polling (a new-ticket check every 5 s, running tickets every 60 s, slowing itself when Linear's rate headers run low) that starts assigned work at once and writes change rows for the change-gated wakeup. This fills the "connector-side watcher" gap the change-gated wakeup and autonomy specs left out of scope.</li>
           <li><strong>Trigger rules</strong> per worker, on status + assignee (assigned to the Lead; Ready or handed back to the Dev; Approved; comments and mentions).</li>
-          <li>A <code>claude_code</code> executor: worktree + branch per ticket, prompt from the ticket, concurrency cap, never the same ticket twice, crash recovery by reconciling with Linear, failure handling with a <code>runner-failed</code> label, logs, token usage.</li>
+          <li>A <code>claude_code</code> executor: a dev slot switched to the ticket's branch (a worktree per ticket when there are no slots), prompt from the ticket, concurrency cap, never the same ticket twice, crash recovery by reconciling with Linear, failure handling with a <code>runner-failed</code> label, logs, token usage.</li>
           <li><strong>Ticket tools</strong> handed to each run (a small MCP server scoped to that one ticket), so Claude Code talks to Linear through Pidgin's gate without holding the key.</li>
           <li>A <code>developer</code> recipe: review the ticket and ask the Lead, claim, comment progress, ticket id in commits, hand off <em>In review</em> with a review build, self-contained comments, the target repo's own <code>CLAUDE.md</code> and skills.</li>
           <li>Generic seams: tracker connectors and coding executors as registries.</li>
@@ -532,7 +532,7 @@ Done ◀──── merged ──── Approved ◀─────────
         <tr><td class="q">When approved</td><td class="d">Rebase onto main, test, push, PR, rebase-merge</td><td>Automatic after the owner sets <em>Approved</em>; no merge commits; hands back to the Lead on conflict or failing tests (§4.1.5).</td></tr>
         <tr><td class="q">Claude Code</td><td class="d">Model: repo/CLI default · permissions: repo allowlist + accept edits · no <code>git push</code> inside a run</td><td>Pushing happens only in the merge step, by the executor. Open question §8 on permission mode.</td></tr>
         <tr><td class="q">Usage</td><td class="d">Warn when a run passes 2 M tokens; pause new runs past the plan's limit</td><td>Runs use the owner's Claude subscription login (no API key), so cost figures are notional; usage limits come from the plan.</td></tr>
-        <tr><td class="q">Poll every</td><td class="d">60 s</td><td>60–120 s; backs off automatically on rate limits.</td></tr>
+        <tr><td class="q">Check for new tickets every</td><td class="d">5 s</td><td>Minimum 5 s. Running tickets are checked every 60 s on their own timer. Slows down by itself when Linear's rate headers run low (§5.2).</td></tr>
       </tbody>
     </table>
 
@@ -613,7 +613,7 @@ Done ◀──── merged ──── Approved ◀─────────
         <div class="m-main">
           <div class="m-head">
             <div><div class="m-crumb">Team › Claude</div><div class="m-title">Claude · Developer</div></div>
-            <div class="m-row"><span class="m-chip ok">● Active</span><span class="m-muted">Linear polled 12 s ago · ActualGameplay</span><span class="m-btn sec">Pause</span></div>
+            <div class="m-row"><span class="m-chip ok">● Active</span><span class="m-muted">Linear checked 3 s ago · every 5 s · 2,470 of 2,500 requests left · ActualGameplay</span><span class="m-btn sec">Pause</span></div>
           </div>
           <div class="m-tabs"><span class="m-tab">Overview</span><span class="m-tab on">Work</span><span class="m-tab">Turns</span><span class="m-tab">Settings</span></div>
           <div class="m-tiles">
@@ -765,9 +765,12 @@ Done ◀──── merged ──── Approved ◀─────────
     <h3>5.1 The pieces in one picture</h3>
 <pre><code>Linear (cloud)                 This PC (behind NAT · outbound calls only)
 ──────────────                 ──────────────────────────────────────────────────────────
-                poll 60–120 s
+    new tickets every 5 s,
+    running tickets every 60 s
 issues, inbox ◀─────────────── Linear watcher (pidgind component, no LLM)
-                                 │ diff vs. mirror → inbound_events
+                                 │ fast path: a ticket assigned to the Dev that qualifies → executor
+                                 │   now (same pass); assigned to the Lead → its turn dispatched now
+                                 │ diff vs. mirror → inbound_events (everything else)
                                  │   trigger = watcher, processing_status = recorded
                                  ▼
                                "Work queue" recurring timer (every 2 min, change-gated)
@@ -781,8 +784,8 @@ issues, inbox ◀─────────────── Linear watcher (p
                                Claude Code executor (pidgind component)
                                  │ queue · cap · one run per ticket
 claim  ◀──────────────────────── │ claim: In Progress + assign self + "Started:" comment
-                                 │ git worktree add -b claude/acg-131-… (from local main)
-                                 │ setup command (npm ci)
+                                 │ dev slot: git switch claude/acg-131-… (new branch from main)
+                                 │ setup command (npm ci) only in a newly made slot
                                  │ claude -p … --output-format stream-json
                                  │   stdout → runs/&lt;id&gt;/stream.jsonl (file, not a pipe)
 comments, in review ◀─────────── │   └ ticket tools (MCP, scoped to this ticket) → gate → linear connector
@@ -858,9 +861,24 @@ merged, Done ◀────────────────── │ on Ap
       (claude@gravitize.co.il) in gravitize-apps", the wrong-account warning (§4.3), and rate-limit headroom. Status goes
       <code>errored</code> after 5 consecutive failed polls or any 401, with one <code>escalate</code> to the owner (not one
       per poll).</p>
-    <p><strong>Rate limits.</strong> At 60 s and at most three queries per poll, a worker uses ~180 requests/hour, well inside
-      Linear's per-key limits. On a rate-limit response the watcher backs off (doubling up to 10 min) and the dashboard shows
-      it.</p>
+    <p><strong>Rate limits.</strong> Linear allows 2,500 requests an hour per user, shared by every key acting as that user
+      (the Dev, the owner's interactive sessions acting as Claude, scripts), plus a complexity budget (3,000,000 points an
+      hour, measured). The budget per worker:</p>
+    <table>
+      <thead><tr><th>Check</th><th>Every</th><th>Requests/hour</th></tr></thead>
+      <tbody>
+        <tr><td class="q">New tickets: one request, two small pages (assigned to the worker in Todo; unassigned with <code>agent-ready</code>), only the trigger fields (id, key, title, priority, dates, assignee id, up to 8 labels, up to 4 blockers)</td><td class="d">5 s</td><td>720 (complexity 18–36 points each)</td></tr>
+        <tr><td class="q">Running tickets (stopped, moved, reassigned): one request for all of them</td><td class="d">60 s</td><td>60</td></tr>
+        <tr><td class="q">Per started run: claim fetch (re-check and prompt in one), claim, start comment, hand-off</td><td class="d">per run</td><td>~5 per run</td></tr>
+      </tbody>
+    </table>
+    <p>About 800 an hour with a few runs, a third of the limit, leaving room for other keys acting as Claude. Every response's
+      <code>X-RateLimit-Requests-Remaining</code> / <code>-Complexity-Remaining</code> and reset headers are kept; while
+      more than a quarter of a budget is left the check runs at its setting, below that it spreads what's left (minus a
+      10% reserve for claims, comments and hand-offs) over the time to the reset, and inside the reserve it waits for the
+      reset. A 429 or <code>RATELIMITED</code> waits until the reset time. The slow-down is logged and shown on the Work page
+      ("New-ticket checks slowed to every 40 s: 300 of 2,500 Linear requests left until 14:05"), with the requests left in
+      the header.</p>
 
     <h3>5.3 Trigger rules</h3>
     <p>
@@ -911,7 +929,7 @@ merged, Done ◀────────────────── │ on Ap
           read through its own Linear installation, so "me" is the Lead for the Lead and the Dev for the Dev.
           Using real watcher rows keeps change-gating's rule that only <em>explicitly watched</em> resources count
           (Change-Gated Wakeup §4.2, source 4).</li>
-      <li><strong>Per poll</strong> (≤3 GraphQL calls): the open tickets assigned to the worker, plus (for the Dev)
+      <li><strong>Per poll</strong> (one request, small aliased pages, every 5 s by default): the open tickets assigned to the worker, plus (for the Dev)
           <em>Ready</em> and <em>Approved</em> tickets in the team, with the last status change's actor; tickets with active
           runs (rule 6); notifications since the inbox cursor (rule 4).</li>
       <li><strong>Diff.</strong> Results are compared with a local mirror (<code>tracker_items</code>) and a seen-set keyed by
@@ -924,8 +942,14 @@ merged, Done ◀────────────────── │ on Ap
           (<code>interval</code>, default every 2 min). The existing change-gate probes it: source 4 counts the recorded
           rows since the timer last ran; zero means a free skip, non-zero means a real turn. That turn's context lists every
           recorded row since the last real run (a batch: ten ticket changes cost one turn, not ten); they are then marked
-          <code>done</code> with <code>resulting_turn_id</code>. Worst-case latency from assigning a ticket to the claim is
-          about one poll plus one timer interval (~2–4 min).</li>
+          <code>done</code> with <code>resulting_turn_id</code>.</li>
+      <li><strong>Fast path for assignments.</strong> Assignment is the one change that doesn't wait for the timer. A ticket
+          assigned to the Dev that qualifies under its rules is claimed and started by the executor in the same pass that saw
+          it (no turn, no next loop); one assigned to the Lead dispatches the Lead's turn at once. From assignment to Claude's
+          first output is about 10–15 s: up to one 5 s check, ~1.5 s of Linear calls (claim fetch, claim), under a second to
+          put a dev slot on the branch, and ~5–6 s for Claude Code to start and answer (measured 2026-11-07). Each run records
+          when the ticket was last touched, when it was seen and when Claude first answered, and the Work page shows "started
+          in 11 s" per run. Comments and mentions still batch on the timer.</li>
       <li><strong>Liveness.</strong> The last successful poll time is shown on the dashboard; errors back off and surface on the
           integration page (§5.2).</li>
     </ol>
@@ -969,13 +993,22 @@ merge runs:  queued ─▶ rebasing ─▶ testing ─▶ merging ─┬─▶ m
           logged, no comment.</li>
     </ul>
 
-    <h4>5.5.3 Worktree and branch</h4>
+    <h4>5.5.3 Dev slot and branch</h4>
     <ul>
       <li>Branch: the pattern from the repo entry, default <code>claude/{key}-{slug}</code> (slug from Linear's
           <code>branchName</code>, lower-case). One branch per ticket, reused by follow-ups and retries.</li>
-      <li>Worktree: <code>&lt;worktree_root&gt;/&lt;key&gt;</code>, created with
-          <code>git worktree add -b &lt;branch&gt; &lt;path&gt; &lt;base&gt;</code> from the <em>local</em> base branch;
-          reused if it exists. The setup command runs once per new worktree (its time and output go in the log).</li>
+      <li>Dev slot: runs work in the same reusable worktrees as the owner's dev terminals and the repo's own runner
+          (<code>&lt;slots_dir&gt;/slot-N</code>, sparse, outside Dropbox, each game's <code>node_modules</code> kept), so
+          switching branches is the only preparation. The executor takes a free slot <em>with no uncommitted changes</em>
+          (the ticket's last slot first, so a review round can resume its session), writes the shared
+          <code>.agent/lock.json</code> (mode <code>pidgin-run</code>, the ticket key, Claude's pid, so the slot stays taken
+          across a Pidgin restart), and runs <code>git switch &lt;branch&gt;</code>, or <code>git switch -c &lt;branch&gt;
+          &lt;base&gt;</code> from the newest of local and origin main the first time. The lock is removed when the run ends.
+          With no free slot the ticket waits in the queue; a new slot is made only below the slot limit, and the setup
+          command runs only in a newly made slot.</li>
+      <li>Without slots (the slots folder isn't this repo's): <code>&lt;worktree_root&gt;/&lt;key&gt;</code>, created with
+          <code>git worktree add -b &lt;branch&gt; &lt;path&gt; &lt;base&gt;</code> and reused; the setup command runs once
+          per new worktree.</li>
       <li>The run sees the repo's <strong>committed</strong> <code>CLAUDE.md</code>, <code>.claude/</code> skills and settings,
           because a worktree is a checkout. The hire-time check warns when the main checkout has uncommitted changes to them.</li>
       <li>Cleanup: worktrees are kept after a run (the owner may want to look). They're removed when the branch is merged into
@@ -1248,7 +1281,8 @@ gh pr merge --rebase              # linear history: no merge commits
       <thead><tr><th>Question / topic</th><th>Decision</th><th>Why</th></tr></thead>
       <tbody>
         <tr><td class="q">A separate app, or in Pidgin?</td><td class="d">In Pidgin, as a hired role plus a connector, a watcher and an executor.</td><td>Pidgin already has connectors, recipes, change-gated wakeups, approvals, autonomy and token tracking; a separate app would rebuild most of it.</td></tr>
-        <tr><td class="q">Push (webhooks) or poll?</td><td class="d">Poll every 60–120 s, outbound only.</td><td>The PC is behind NAT. Webhooks need a public endpoint or a relay (Cyrus's problem). A minute or two of latency is fine for coding work.</td></tr>
+        <tr><td class="q">Push (webhooks) or poll?</td><td class="d">Poll, outbound only: new tickets every 5 s, running tickets every 60 s.</td><td>The PC is behind NAT; webhooks need a public endpoint or a tunnel. The owner chose polling and wants work to start as fast as possible; a slim query keeps 5 s inside Linear's budget (§5.2).</td></tr>
+        <tr><td class="q">How fast does an assigned ticket start?</td><td class="d">In the same pass that sees it: claim, slot on the branch, Claude Code. About 10–15 s to Claude's first output.</td><td>Owner's call (2026-11-07). No pre-warmed Claude sessions; dev slots make preparation a branch switch.</td></tr>
         <tr><td class="q">Whose identity in Linear?</td><td class="d">A dedicated Linear member's personal API key; warn when the key is the owner's.</td><td>The owner set up "Claude" so agent work is never attributed to them. Linear's app-actor agents would need OAuth plus webhooks.</td></tr>
         <tr><td class="q">How do watcher changes wake the worker?</td><td class="d">As <code>recorded</code> watcher rows read by a change-gated recurring "work queue" timer, batched into one turn.</td><td>Reuses the existing gate (source 4) as asked; batching makes ten changes one turn; quiet minutes are free skips. Cost: up to one extra timer interval of latency.</td></tr>
         <tr><td class="q">Who decides to start: rules or the LLM?</td><td class="d">Both, in layers: the watcher filters by rule, the developer turn decides (and can pre-flight a vague ticket), the executor re-checks the rules and enforces the guarantees.</td><td>Keeps the worker an employee (it can ask instead of burning a run) while "never twice", caps and eligibility don't depend on model judgment.</td></tr>
@@ -1290,6 +1324,9 @@ gh pr merge --rebase              # linear history: no merge commits
         <li><s>3. Billing</s>: the owner's Claude subscription login, no API key; costs are notional (the owner's call, earlier the same day).</li>
         <li><s>4. "Moving to Todo alone does nothing"</s>: replaced by status + assignee. Assigning to the Lead starts scoping from any open status before Ready; the owner can set any status directly (§5.3).</li>
         <li><s>9. Approve from Linear?</s>: yes, by status. The owner approves the scope with <em>Ready</em> and the result with <em>Approved</em>; Pidgin's review page sets the same statuses. Pidgin approvals stay only for gated machine actions.</li>
+        <li><s>6. Latency</s>: as fast as possible, by polling. New tickets are checked every 5 s and a qualifying assignment
+            is claimed and started in the same pass (~10–15 s to Claude's first output); running tickets every 60 s; the
+            check slows itself on Linear's rate headers (§5.2, §5.4).</li>
         <li><s>8. Follow-up runs: resume or fresh?</s>: review rounds resume the Dev's Claude Code session (<code>--resume</code>, same worktree and branch), with a fresh run from the ticket and branch as the fallback when the session can't be resumed (§4.1.3).</li>
       </ul>
       <p><strong>Still open</strong> (old numbers in brackets; 13–17 are new):</p>
@@ -1298,8 +1335,6 @@ gh pr merge --rebase              # linear history: no merge commits
             on a denied command), or bypass permissions inside the worktree (smoother; it can run anything on this PC)?</li>
         <li><strong>[5] agent-ready.</strong> Does the unassigned <code>agent-ready</code> label still feed the flow (the Lead
             picks such tickets up into Scoping when idle), or is assignment the only way in?</li>
-        <li><strong>[6] Latency.</strong> Is ~2–4 min per hand-over fine? A ticket now changes hands several times (Lead, owner,
-            Dev), so this adds up; assignment rows could dispatch a turn immediately at the cost of one turn per change.</li>
         <li><strong>[7] Explicit action?</strong> Keep Claude Code as <code>execute</code> on an executor resource, or add a
             named 15th action (e.g. <code>run_code</code>) to the runtime's vocabulary?</li>
         <li><strong>[10] Your Claude Code memory.</strong> Claude Code keys project memory by folder, so runs in a worktree

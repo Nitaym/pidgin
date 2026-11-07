@@ -79,15 +79,26 @@ def lock_alive(lock: dict[str, Any] | None) -> bool:
     return procs.is_alive(int(lock["pid"]), None)
 
 
-def write_lock(slot_dir: str, *, pid: int, dev_name: str, branch: str | None) -> None:
+LOCK_MODES = ("pidgin-dev", "pidgin-run")
+
+
+def write_lock(
+    slot_dir: str,
+    *,
+    pid: int,
+    dev_name: str,
+    branch: str | None,
+    ticket: str | None = None,
+    mode: str = "pidgin-dev",
+) -> None:
     agent = Path(slot_dir) / ".agent"
     agent.mkdir(parents=True, exist_ok=True)
     (agent / "lock.json").write_text(
         json.dumps(
             {
-                "ticket": None,
+                "ticket": ticket,
                 "game": None,
-                "mode": "pidgin-dev",
+                "mode": mode,
                 "dev": dev_name,
                 "branch": branch,
                 "pid": pid,
@@ -103,7 +114,7 @@ def clear_lock(slot_dir: str, pid: int | None) -> None:
     """Remove the lock only if it is still ours."""
     lock_file = Path(slot_dir) / ".agent" / "lock.json"
     lock = read_lock(Path(slot_dir))
-    if lock and lock.get("mode") == "pidgin-dev" and (pid is None or lock.get("pid") == pid):
+    if lock and lock.get("mode") in LOCK_MODES and (pid is None or lock.get("pid") == pid):
         try:
             lock_file.unlink()
         except OSError:
@@ -203,3 +214,89 @@ def take_slot(
         _git(slot["dir"], "fetch", "-q", "origin", check=False)
         _git(slot["dir"], "switch", "--detach", _base(slot["dir"]), check=False)
     return slot["name"], slot["dir"]
+
+
+# -- slots for the ticket runner (Pidgin's Developer Worker) --------------------
+
+
+class NoFreeSlot(Exception):
+    pass
+
+
+def _common_dir(path: str | Path) -> str:
+    out = _git(path, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False).strip()
+    return os.path.normcase(os.path.realpath(out)) if out else ""
+
+
+def belongs_to(settings: dict[str, str], repo: str) -> bool:
+    """True when the slots folder holds worktrees of this repo (so runs can use them)."""
+    root = Path(settings["slots_dir"])
+    if not repo:
+        return False
+    if root.is_dir():
+        want = _common_dir(repo)
+        for child in root.iterdir():
+            if _SLOT_RE.match(child.name) and (child / ".git").exists():
+                return bool(want) and _common_dir(child) == want
+    configured = settings.get("slots_repo") or ""
+    return bool(configured) and os.path.normcase(os.path.realpath(configured)) == os.path.normcase(
+        os.path.realpath(repo)
+    )
+
+
+def free_run_slots(settings: dict[str, str], devs: list[dict[str, Any]]) -> int:
+    """How many runs could start now: free clean slots plus slots still to be made."""
+    slots = list_slots(settings, devs)
+    free = len([s for s in slots if s["state"] == "free" and s["dirty"] == 0])
+    return free + max(0, int(settings.get("max_slots") or 8) - len(slots))
+
+
+def take_run_slot(
+    settings: dict[str, str],
+    repo: str,
+    devs: list[dict[str, Any]],
+    *,
+    ticket: str,
+    branch: str,
+    prefer: str | None = None,
+) -> tuple[str, str, bool]:
+    """(slot name, dir, newly made) for a run, locked for it under this process.
+
+    Only clean free slots: a slot with uncommitted work is left for whoever made
+    it. ``prefer`` (the slot of the ticket's last run) wins when free, so a
+    review round can resume its Claude session, which is stored per folder.
+    The caller holds the slot lock shared with dev terminals and rewrites the
+    lock with Claude's pid once it is running.
+    """
+    slots = list_slots(settings, devs)
+    usable = [s for s in slots if s["state"] == "free" and s["dirty"] == 0]
+    slot = next((s for s in usable if s["name"] == prefer), None) or (usable[0] if usable else None)
+    created = False
+    if slot is None:
+        if len(slots) >= int(settings.get("max_slots") or 8):
+            raise NoFreeSlot(f"All {len(slots)} dev slots are in use (limit {settings.get('max_slots')})")
+        used = {s["name"] for s in slots}
+        n = 1
+        while f"slot-{n}" in used:
+            n += 1
+        name, path = f"slot-{n}", str(_create_slot(settings, repo, f"slot-{n}"))
+        created = True
+    else:
+        name, path = slot["name"], slot["dir"]
+    write_lock(path, pid=os.getpid(), dev_name=ticket, branch=branch, ticket=ticket, mode="pidgin-run")
+    return name, path, created
+
+
+def switch_to_branch(slot_dir: str, branch: str, base: str) -> None:
+    """Put the slot on the ticket's branch: the only preparation a run needs.
+
+    The branch is made from ``base`` (the newest of local and origin main when
+    base is main) the first time, and checked out as it is after that.
+    """
+    if base == "main":
+        base = _base(slot_dir)
+    exists = _git(slot_dir, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}", check=False).strip()
+    if exists:
+        _git(slot_dir, "switch", "--quiet", branch)
+    else:
+        _git(slot_dir, "switch", "--quiet", "-c", branch, base)
