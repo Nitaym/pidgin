@@ -101,25 +101,32 @@ def test_branch_names() -> None:
     assert branch_for(w, "ACG-7", "", "Pour Sort: level 12!") == "claude/acg-7-pour-sort-level-12"
 
 
+def _tag(issue: Issue, source: str) -> Issue:
+    issue.raw["_list"] = source
+    return issue
+
+
 def test_queue_rules(conn: sqlite3.Connection) -> None:
     worker = store.ensure_worker(conn, "dev1", "claude")
     worker["viewer_id"] = "me"
+    worker["owner_linear_id"] = "owner"
     issues = [
-        _issue("ACG-1", assignee=None, labels=("agent-ready",)),
-        _issue("ACG-2", assignee="me", priority=3),
-        _issue("ACG-3", assignee="me", priority=1),
-        _issue("ACG-4", assignee="someone-else"),  # Todo, not for us
-        _issue("ACG-5", assignee=None),  # Todo alone: never
-        _issue("ACG-6", assignee="me", labels=("runner-failed",)),
-        _issue("ACG-7", assignee="me", blocked=True),
-        _issue("ACG-8", assignee="me", labels=("owner-only",)),
+        _tag(_issue("ACG-1", assignee=None), "ready_free"),
+        _tag(_issue("ACG-2", assignee="me", priority=3), "ready_mine"),
+        _tag(_issue("ACG-3", assignee="me", priority=1), "ready_mine"),
+        _tag(_issue("ACG-4", assignee="owner"), "todo_free"),  # a question waits on the owner
+        _tag(_issue("ACG-5", assignee=None), "todo_free"),
+        _tag(_issue("ACG-6", assignee="me", labels=("runner-failed",)), "ready_mine"),
+        _tag(_issue("ACG-7", assignee="me", blocked=True), "ready_mine"),
+        _tag(_issue("ACG-8", assignee=None, labels=("owner-only",)), "todo_free"),
     ]
     queue = DevRunner(None)._queue_from(conn, worker, issues)
-    keys = [q["key"] for q in queue]
-    assert "ACG-4" not in keys and "ACG-5" not in keys
-    assert keys[:2] == ["ACG-3", "ACG-2"]  # assigned first, urgent before medium
     by_key = {q["key"]: q for q in queue}
-    assert by_key["ACG-1"]["reason"] == "Waits until no assigned ticket is waiting"
+    assert "ACG-4" not in by_key
+    keys = [q["key"] for q in queue if not q["reason"].startswith("Skipped")]
+    assert keys == ["ACG-3", "ACG-2", "ACG-1", "ACG-5"]  # code first (assigned, urgent first), then enrichment
+    assert by_key["ACG-1"]["kind"] == "code" and by_key["ACG-1"]["class"] == "agent_ready"
+    assert by_key["ACG-5"]["kind"] == "enrich" and by_key["ACG-5"]["reason"] == "Waiting for a free slot"
     assert by_key["ACG-6"]["reason"].startswith("Skipped")
     assert by_key["ACG-7"]["reason"].startswith("Skipped: blocked")
     assert by_key["ACG-8"]["reason"].startswith("Skipped")
@@ -142,6 +149,8 @@ def test_queue_skips_ticket_with_active_run(conn: sqlite3.Connection) -> None:
 
 
 class _FakeTools:
+    tools = ticket_mcp.TOOLS
+
     def call(self, name: str, args: dict) -> str:
         return f"called {name}"
 
@@ -174,9 +183,17 @@ def test_mcp_handshake(monkeypatch: pytest.MonkeyPatch) -> None:
     assert replies[0]["result"]["serverInfo"]["name"] == "pidgin-ticket"
     assert {t["name"] for t in replies[1]["result"]["tools"]} >= {
         "comment",
-        "done",
-        "needs_owner",
+        "in_review",
+        "hand_off",
         "blocked",
+    }
+    assert {t["name"] for t in ticket_mcp.ENRICH_TOOLS} == {
+        "read",
+        "comment",
+        "update_description",
+        "ask_owner",
+        "scoped",
+        "file_triage",
     }
     assert replies[2]["result"]["content"][0]["text"] == "called comment"
 
@@ -358,7 +375,7 @@ def test_poll_plan_backs_off_when_requests_run_low() -> None:
     assert note and "complexity" in note
 
 
-def test_todo_query_filters_in_linear_and_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_issue_lists_filter_in_linear_and_paginate(monkeypatch: pytest.MonkeyPatch) -> None:
     from pidgin.devwork.linear_api import LinearClient
 
     calls: list[dict] = []
@@ -370,40 +387,58 @@ def test_todo_query_filters_in_linear_and_paginates(monkeypatch: pytest.MonkeyPa
         calls.append({"query": query, "vars": variables})
         if len(calls) == 1:
             return {
-                "mine": {"nodes": [node("ACG-1")], "pageInfo": {"hasNextPage": True, "endCursor": "c1"}},
-                "ready": {"nodes": [node("ACG-9")], "pageInfo": {"hasNextPage": False}},
+                "ready_mine": {"nodes": [node("ACG-1")], "pageInfo": {"hasNextPage": True, "endCursor": "c1"}},
+                "todo_free": {"nodes": [node("ACG-9")], "pageInfo": {"hasNextPage": False}},
             }
-        return {"mine": {"nodes": [node("ACG-2")], "pageInfo": {"hasNextPage": False}}}
+        return {"ready_mine": {"nodes": [node("ACG-2")], "pageInfo": {"hasNextPage": False}}}
 
     monkeypatch.setattr(LinearClient, "gql", fake_gql)
-    issues = LinearClient("k").todo_issues("team", "todo", viewer_id="me", ready_label="agent-ready")
-    assert [i.key for i in issues] == ["ACG-1", "ACG-9", "ACG-2"]  # page 2 of the assigned list
+    found = LinearClient("k").issue_lists(
+        {"ready_mine": {"assignee": {"id": {"eq": "me"}}}, "todo_free": {"assignee": {"null": True}}}
+    )
+    assert [i.key for i in found["ready_mine"]] == ["ACG-1", "ACG-2"]  # page 2 followed
+    assert found["todo_free"][0].raw["_list"] == "todo_free"
     first, second = calls
-    assert "mine: issues(" in first["query"] and "ready: issues(" in first["query"]
     assert "inverseRelations" not in first["query"]  # blockers only for what comes back
     assert "description" not in first["query"] and "comments" not in first["query"]
-    assert first["vars"]["mine"]["assignee"] == {"id": {"eq": "me"}}
-    assert first["vars"]["ready"]["assignee"] == {"null": True}
-    assert "ready" not in second["vars"] and second["vars"]["mineAfter"] == "c1"
-
-    calls.clear()
-    LinearClient("k").todo_issues("team", "todo", viewer_id="me", ready_label=None)
-    assert "ready" not in calls[0]["query"]  # agent-ready rule off: no second list
+    assert "todo_free" not in second["vars"] and second["vars"]["ready_mineAfter"] == "c1"
 
 
 class _FakeLinear:
-    def __init__(self, todo: list[Issue], brief: list[Issue] | None = None) -> None:
+    def __init__(
+        self,
+        todo: list[Issue],
+        brief: list[Issue] | None = None,
+        entered: dict[str, str] | None = None,
+    ) -> None:
         self.todo, self.brief = todo, brief or []
+        self.entered = entered or {}
         self.calls: list[str] = []
+        self.lists: dict = {}
         self.rate = None
 
     def team_meta(self, team_id: str) -> dict:
         self.calls.append("team_meta")
-        return {"states": [{"id": "todo", "name": "Todo"}, {"id": "prog", "name": "In Progress"}]}
+        return {
+            "states": [
+                {"id": "todo", "name": "Todo"},
+                {"id": "ready", "name": "Ready for Dev"},
+                {"id": "prog", "name": "In Progress"},
+            ]
+        }
 
-    def todo_issues(self, *a, **k) -> list[Issue]:  # noqa: ANN002, ANN003
+    def issue_lists(self, lists: dict) -> dict[str, list[Issue]]:
         self.calls.append("todo")
-        return self.todo
+        self.lists = lists
+        out: dict[str, list[Issue]] = {name: [] for name in lists}
+        for issue in self.todo:
+            if issue.raw.get("_list") in out:
+                out[issue.raw["_list"]].append(issue)
+        return out
+
+    def entered_state_at(self, ids: list[str], state_id: str) -> dict[str, str]:
+        self.calls.append("entered")
+        return {i: self.entered.get(i, "2000-01-01T00:00:00.000Z") for i in ids}
 
     def blocked_ids(self, ids: list[str]) -> set[str]:
         self.calls.append("blocked")
@@ -437,7 +472,7 @@ def test_tick_polls_and_starts_in_the_same_pass(
     from pidgin.devwork import runner as runner_mod
 
     _ready_worker(conn)
-    fake = _FakeLinear([_issue("ACG-2", assignee="me")])
+    fake = _FakeLinear([_tag(_issue("ACG-2", assignee="me"), "ready_mine")])
     monkeypatch.setattr(runner_mod, "linear_for_worker", lambda c, w: fake)
     r = DevRunner(None)
     monkeypatch.setattr(r, "_uses_slots", lambda c, w: False)
@@ -696,3 +731,57 @@ def test_send_message_writes_to_the_live_session() -> None:
     popen.stdin.close()
     assert not r.send_message("run", "again")  # input closed: refused, not raised
     assert not r.send_message("other", "x")  # no live process
+
+
+def test_enrichment_only_takes_tickets_new_in_todo(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pidgin.devwork import runner as runner_mod
+
+    _ready_worker(conn)
+    since = "2026-11-08T00:00:00.000Z"
+    worker = store.get_worker(conn, "dev1")
+    assert worker is not None
+    store.update_worker(
+        conn,
+        "dev1",
+        {"owner_linear_id": "owner", "rules": {**worker["rules"], "enrich": True, "enrich_since": since,
+                                                "max_enrich": 1, "enrich_push": ["id-ACG-41"]}},
+    )
+    old = _tag(_issue("ACG-40", assignee=None), "todo_free")  # in Todo since before the switch-on
+    new = _tag(_issue("ACG-42", assignee=None), "todo_free")
+    new2 = _tag(_issue("ACG-43", assignee="me"), "todo_mine")
+    pushed = _tag(_issue("ACG-41", assignee=None), "todo_push")  # old, but pushed by the owner
+    fake = _FakeLinear(
+        [old, new, new2, pushed],
+        entered={"id-ACG-40": "2026-10-01T00:00:00.000Z", "id-ACG-42": "2026-11-08T09:00:00.000Z",
+                 "id-ACG-43": "2026-11-08T10:00:00.000Z"},
+    )
+    monkeypatch.setattr(runner_mod, "linear_for_worker", lambda c, w: fake)
+    r = DevRunner(None)
+    monkeypatch.setattr(r, "_uses_slots", lambda c, w: False)
+    started: list[str] = []
+    monkeypatch.setattr(r, "_start_prepare", lambda run_id, recovering: started.append(run_id))
+    r.tick(conn)
+    # Filters in Linear: Todo touched since the switch-on, never the owner's tickets.
+    assert fake.lists["todo_free"]["updatedAt"] == {"gt": since}
+    assert fake.lists["todo_push"]["id"] == {"in": ["id-ACG-41"]}
+    queued = store.get_worker(conn, "dev1")
+    assert queued is not None
+    keys = {q["key"] for q in queued["queue"]} | {store.get_run(conn, x)["ticket_key"] for x in started}
+    assert "ACG-40" not in keys and {"ACG-41", "ACG-42", "ACG-43"} <= keys
+    assert len(started) == 1  # capped at max_enrich
+    run = store.get_run(conn, started[0])
+    assert run and run["kind"] == "enrich"
+    if run["ticket_key"] == "ACG-41":
+        assert queued["rules"]["enrich_push"] == []  # a pushed ticket is taken off the list
+
+
+def test_enrichment_off_reads_no_todo(conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pidgin.devwork import runner as runner_mod
+
+    _ready_worker(conn)
+    fake = _FakeLinear([])
+    monkeypatch.setattr(runner_mod, "linear_for_worker", lambda c, w: fake)
+    DevRunner(None).tick(conn)
+    assert set(fake.lists) == {"ready_mine", "ready_free"}

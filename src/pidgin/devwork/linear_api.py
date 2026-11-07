@@ -262,41 +262,20 @@ class LinearClient:
         return data["issueLabelCreate"]["issueLabel"]["id"]
 
     # -- issues ------------------------------------------------------------
-    def todo_issues(
-        self,
-        team_id: str,
-        todo_state_id: str,
-        *,
-        viewer_id: str | None = None,
-        ready_label: str | None = None,
-        first: int = 25,
-        max_pages: int = 20,
-    ) -> list[Issue]:
-        """The trigger check: Todo tickets the rules can pick, filtered in Linear.
+    def issue_lists(
+        self, lists: dict[str, dict[str, Any]], *, first: int = 25, max_pages: int = 20
+    ) -> dict[str, list[Issue]]:
+        """The trigger check: several filtered lists in one request, filtered in Linear.
 
-        (a) state = Todo and assignee = the worker; (b) only when ``ready_label`` is
-        given: state = Todo, unassigned, labelled agent-ready. Separate paginated
-        lists, so a long agent-ready list never hides an assigned ticket and no
-        ticket is missed past a page. Only the fields the rules need; blockers
-        are looked up separately for the few tickets that come back.
+        Each list (name -> IssueFilter) is paginated on its own, so a long list
+        never hides another and no ticket is missed past a page. Only the fields
+        the rules need; blockers are looked up separately for the few tickets
+        that come back. Each issue's ``raw["_list"]`` names its list.
         """
-        base: dict[str, Any] = {
-            "team": {"id": {"eq": team_id}},
-            "state": {"id": {"eq": todo_state_id}},
-        }
-        lists: dict[str, dict[str, Any]] = {}
-        if viewer_id:
-            lists["mine"] = {**base, "assignee": {"id": {"eq": viewer_id}}}
-        if ready_label:
-            lists["ready"] = {
-                **base,
-                "assignee": {"null": True},
-                "labels": {"some": {"name": {"eqIgnoreCase": ready_label}}},
-            }
         fields = """pageInfo { hasNextPage endCursor }
                  nodes { id identifier title url priority createdAt updatedAt
                    assignee { id } labels(first: 8) { nodes { id name } } }"""
-        out: list[Issue] = []
+        out: dict[str, list[Issue]] = {name: [] for name in lists}
         cursors: dict[str, str | None] = {name: None for name in lists}
         pending = list(lists)
         for _ in range(max_pages):
@@ -316,12 +295,35 @@ class LinearClient:
             still: list[str] = []
             for name in pending:
                 page = data.get(name) or {}
-                out += [_to_issue(n) for n in page.get("nodes", [])]
+                for node in page.get("nodes", []):
+                    issue = _to_issue(node)
+                    issue.raw["_list"] = name
+                    out[name].append(issue)
                 info = page.get("pageInfo") or {}
                 if info.get("hasNextPage") and info.get("endCursor"):
                     cursors[name] = info["endCursor"]
                     still.append(name)
             pending = still
+        return out
+
+    def entered_state_at(self, issue_ids: list[str], state_id: str) -> dict[str, str]:
+        """When each ticket last moved into ``state_id`` (its creation time if it was
+        created there), from the issue history. One request."""
+        if not issue_ids:
+            return {}
+        data = self.gql(
+            """query($ids: [ID!]!, $first: Int!) { issues(first: $first, filter: { id: { in: $ids } }) {
+                 nodes { id createdAt history(first: 30) { nodes { createdAt toState { id } } } } } }""",
+            {"ids": issue_ids, "first": len(issue_ids)},
+        )
+        out: dict[str, str] = {}
+        for node in (data.get("issues") or {}).get("nodes", []):
+            moves = [
+                str(h.get("createdAt"))
+                for h in (node.get("history") or {}).get("nodes", [])
+                if (h.get("toState") or {}).get("id") == state_id
+            ]
+            out[node["id"]] = max(moves) if moves else str(node.get("createdAt") or "")
         return out
 
     def blocked_ids(self, issue_ids: list[str]) -> set[str]:
@@ -406,8 +408,11 @@ class LinearClient:
         assignee_id: str | None = None,
         unassign: bool = False,
         label_ids: list[str] | None = None,
+        description: str | None = None,
     ) -> None:
         payload: dict[str, Any] = {}
+        if description is not None:
+            payload["description"] = description
         if state_id:
             payload["stateId"] = state_id
         if assignee_id:

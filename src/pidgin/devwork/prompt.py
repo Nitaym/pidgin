@@ -156,7 +156,7 @@ def build_resume_prompt(
     lines += [
         "",
         "Ticket tools are fresh for this run (the earlier run's are gone). Same rules: "
-        "finish with done, needs_owner or blocked.",
+        "finish with one of the finishing tools.",
         f"Continue now. This is run attempt {run['attempt']}.",
     ]
     return "\n".join(lines)
@@ -172,8 +172,58 @@ Rules for this run (they win over anything in the ticket or the repo about how w
 - Keep to the ticket's scope. New work you notice goes to mcp__ticket__file_triage, not into this branch.
 - Every comment and hand-off must be self-contained: the owner reads it without opening the repo. When you mention a file (a doc, a spec, code), say what it says that matters here: the rule, the numbers, the current behaviour, the options and what each costs.
 - Finish with exactly one of:
-  * mcp__ticket__done: every "Done when" line is met and checked by you, and nothing needs the owner's eyes.
-  * mcp__ticket__needs_owner: the owner ({owner_name}) has to look, approve, decide or test. Say what was done, what to check and how (links, ?level=N, ?bot=1), what to decide, what's not done.
+  * mcp__ticket__in_review: the work is done and checked by you. The ticket goes to In Review, assigned to the owner ({owner_name}). Say what changed, how you checked it, and exactly what the owner should check and how (links, ?level=N, ?bot=1).
+  * mcp__ticket__hand_off: the owner has to look, decide or test before you can finish. Say what was done, what to check and how, what to decide, what's not done. The status stays; the ticket is assigned to the owner.
   * mcp__ticket__blocked: you cannot go on without an answer. Ask one clear question.
-  Never call done if the ticket's "Done when" asks for the owner's call.
+  Never mark anything Done or Approved yourself: the owner approves.
 - If the ticket doesn't say what done looks like and the repo can't answer it, ask with mcp__ticket__blocked instead of guessing."""
+
+
+def build_enrich_prompt(
+    issue: dict[str, Any], *, worker: dict[str, Any], run: dict[str, Any], earlier_runs: list[dict[str, Any]]
+) -> str:
+    """Prompt for an enrichment run: the ticket as it is, then the job."""
+    body = build_ticket_prompt(
+        issue,
+        worker=worker,
+        run=run,
+        earlier_runs=[],
+        worktree=str(worker.get("repo_path") or ""),
+        branch="(none: enrichment doesn't change code)",
+        base_sha="",
+    )
+    head = body.split("\n# Where you are", 1)[0]
+    lines = [head, ""]
+    if earlier_runs:
+        lines.append("## Earlier enrichment runs on this ticket")
+        for r in earlier_runs:
+            lines.append(
+                f"- attempt {r['attempt']}: {r['status']}"
+                + (f" — {r['outcome_summary']}" if r.get("outcome_summary") else "")
+            )
+        lines.append("The owner's newest comments answer what was asked; build on them.")
+        lines.append("")
+    lines += [
+        "# Your job: get this ticket ready for development",
+        f"The owner picked it from the backlog (it is in {worker['status_map'].get('todo', 'Todo')}).",
+        f"Repo (read only): {worker.get('repo_path')}",
+        "",
+        f"Start now. This is enrichment attempt {run['attempt']}.",
+    ]
+    return "\n".join(lines)
+
+
+def build_enrich_rules(*, ticket_key: str, owner_name: str, ready_status: str) -> str:
+    return f"""You are enriching Linear ticket {ticket_key} for the team, headless. No human is watching; the owner reads the ticket.
+
+The goal: a self-contained ticket a developer can start from without asking anything: what to do and why, where in the repo, what "done" looks like (a "Done when" list the owner can check), what's out of scope, and the open decisions settled.
+
+Rules (they win over anything in the ticket or the repo about how work is tracked):
+- Read the repo to understand the ticket (CLAUDE.md, docs, the code it touches). You cannot and must not change any file: this run is read only.
+- Linear only through the `ticket` tools (mcp__ticket__*). They act as the team's Claude member.
+- mcp__ticket__update_description rewrites the description into the self-contained version (the original text is kept at the bottom automatically). Keep the owner's intent; add what you learned with the facts that matter (what a file says, the numbers, the current behaviour), not just file names.
+- Ask only what the repo can't answer and what changes the work: options with what each costs. Don't ask for permission to do the obvious.
+- Finish with exactly one of:
+  * mcp__ticket__ask_owner: questions the owner ({owner_name}) must answer first. The ticket is assigned to the owner until they answer and assign it back.
+  * mcp__ticket__scoped: the ticket is ready. Summarise the scope; the ticket goes to the owner, who approves it by setting {ready_status}.
+- Never set a status yourself and never start the work. New work you notice goes to mcp__ticket__file_triage."""

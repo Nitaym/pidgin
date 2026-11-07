@@ -175,7 +175,7 @@
     <h2><span class="num">1</span>Summary</h2>
     <p>
       The owner already works with coding agents through Linear tickets: an agent claims a ticket, comments, commits with
-      the ticket id and hands off through a <em>Needs owner</em> status. Today a person has to open a Claude Code session
+      the ticket id and hands off by assigning the ticket to the owner. Today a person has to open a Claude Code session
       for every ticket. The <strong>Developer Worker</strong> closes that gap inside Pidgin. The owner hires a
       <strong>Developer</strong>, connects Linear with the API key of a <strong>dedicated Linear member</strong> (so the
       worker acts as "Claude", never as the owner), points it at a <strong>local repo</strong>, and sets its rules. Next to
@@ -185,7 +185,7 @@
     <p>
       A ticket assigned to them goes through fixed phases (§4.1). The <strong>Lead scopes it</strong>: it enriches the
       ticket until it is self-contained and asks questions in comments, handing the ticket to the owner while a question
-      waits. The <strong>owner approves the scope</strong> by moving it to <em>Ready</em>. The <strong>Dev</strong> reviews
+      waits. The <strong>owner approves the scope</strong> by moving it to <em>Ready for Dev</em>. The <strong>Dev</strong> reviews
       it, asks the Lead anything still unclear, then works it in its own <strong>git worktree on a branch per
       ticket</strong> with <strong>headless Claude Code</strong>. When done it deploys a <strong>review build</strong> the
       owner can play live and hands the ticket to the owner <em>In review</em>. The owner comments; the Lead turns the
@@ -214,13 +214,13 @@
         <h3>In scope</h3>
         <ul>
           <li><strong>Owner experience:</strong> hiring a Team Lead and a Developer, connecting Linear with a dedicated member for each, choosing a repo, setting rules; the work dashboard, review page, run page, logs, Stop/Retry; hand-offs and approvals in Linear and in Pidgin.</li>
-          <li><strong>The ticket flow</strong> (§4.1): phases as Linear statuses (Scoping → Ready → In Progress → In Review → Approved → Done), assignee as whose move, questions that flip the assignee and back, the owner's two approvals (scope and result), skipping phases by setting a status, and the failure path back to the Lead.</li>
+          <li><strong>The ticket flow</strong> (§4.1): phases as Linear statuses (Todo → Ready for Dev → In Progress → In Review → Approved → Done), assignee as whose move, questions that flip the assignee and back, the owner's two approvals (scope and result), skipping phases by setting a status, and the failure path back to the Lead.</li>
           <li>A <code>team_lead</code> recipe: scopes tickets until they're self-contained, answers the Dev, escalates to the owner only what it can't answer, turns review comments into tasks, retries failed runs up to a limit.</li>
           <li><strong>Review builds</strong>: a deployed build of the ticket's branch the owner can play live, linked from the ticket with what changed and what wasn't verified.</li>
           <li><strong>Automatic merge after the owner's approval</strong>: rebase onto main, test, fast-forward or rebase-merge (never a merge commit); hand back to the Lead on conflict or failing tests.</li>
           <li>A <code>linear</code> connector: reads (tickets, inbox, comments, team states/labels/members), writes (comment, status, assignee, labels, new Triage ticket), API-key auth, health check.</li>
           <li>A <strong>Linear watcher</strong>: outbound-only polling (a new-ticket check every 15 s, running tickets every 15 s with the owner's new comments forwarded into the live session, slowing itself when Linear's rate headers run low) that starts assigned work at once and writes change rows for the change-gated wakeup. This fills the "connector-side watcher" gap the change-gated wakeup and autonomy specs left out of scope.</li>
-          <li><strong>Trigger rules</strong> per worker, on status + assignee (assigned to the Lead; Ready or handed back to the Dev; Approved; comments and mentions).</li>
+          <li><strong>Trigger rules</strong> per worker, on status + assignee (assigned to the Lead; Ready for Dev or handed back to the Dev; Approved; comments and mentions).</li>
           <li>A <code>claude_code</code> executor: a dev slot switched to the ticket's branch (a worktree per ticket when there are no slots), prompt from the ticket, concurrency cap, never the same ticket twice, crash recovery by reconciling with Linear, failure handling with a <code>runner-failed</code> label, logs, token usage.</li>
           <li><strong>Ticket tools</strong> handed to each run (a small MCP server scoped to that one ticket), so Claude Code talks to Linear through Pidgin's gate without holding the key.</li>
           <li>A <code>developer</code> recipe: review the ticket and ask the Lead, claim, comment progress, ticket id in commits, hand off <em>In review</em> with a review build, self-contained comments, the target repo's own <code>CLAUDE.md</code> and skills.</li>
@@ -250,7 +250,7 @@
       The owner runs a game studio repo (ActualGameplay) where every task is a Linear ticket, and agents already follow a
       ticket discipline written into the repo's <code>tickets</code> skill: claim (status <em>In progress</em>, assigned
       to Claude, a <code>Started:</code> comment), comment when something real happens, put the id at the end of each
-      commit subject, finish as <em>Done</em> or hand off as <em>Needs owner</em> assigned to the owner, file new work in
+      commit subject, hand off by assigning the owner (the status stays), file new work in
       <em>Triage</em>, and pick up <code>agent-ready</code> tickets when working alone. The owner created a dedicated
       Linear member, <strong>Claude</strong> (<code>claude@gravitize.co.il</code>), so agent work is never attributed to
       them.
@@ -273,7 +273,7 @@
     <p>
       Every ticket is shared by two hired workers and the owner. The <strong>Team Lead</strong> scopes it, answers the
       Dev, and turns review comments into tasks. The <strong>Developer</strong> writes the code, deploys a review build and
-      merges. The <strong>owner</strong> answers questions and approves twice: the scope (<em>Ready</em>) and the result
+      merges. The <strong>owner</strong> answers questions and approves twice: the scope (<em>Ready for Dev</em>) and the result
       (<em>Approved</em>). Both workers are Pidgin personas with their own recipe and their own Linear member, so Linear's
       assignee column shows Lead, Dev or owner at a glance.
     </p>
@@ -289,9 +289,9 @@
     <table>
       <thead><tr><th>Status</th><th>Phase</th><th>Usually assigned to</th><th>Who moves it here</th></tr></thead>
       <tbody>
-        <tr><td class="q">Triage · Backlog · Todo</td><td class="d">Not started. The owner's own states; the workers don't act on them.</td><td>Anyone</td><td>Owner</td></tr>
-        <tr><td class="q"><em>Scoping</em></td><td class="d">The Lead makes the ticket self-contained and asks questions until it's fully scoped.</td><td>Lead; the owner while a question waits</td><td>The Lead's watcher, when a ticket is assigned to the Lead</td></tr>
-        <tr><td class="q"><em>Ready</em></td><td class="d">Scope approved. The Dev reviews the ticket and asks the Lead what's still unclear.</td><td>Dev; the Lead (or owner) while a question waits</td><td><strong>Owner only</strong></td></tr>
+        <tr><td class="q">Triage · Backlog</td><td class="d">Not started. Backlog = accepted, not picked. The workers never act on them.</td><td>Anyone</td><td>Owner</td></tr>
+        <tr><td class="q"><em>Todo</em></td><td class="d">The owner picked it from the backlog to be worked on. The Lead makes the ticket self-contained and asks questions until it's fully scoped (enrichment).</td><td>Lead; the owner while a question waits</td><td><strong>Owner</strong> (picking it from the backlog)</td></tr>
+        <tr><td class="q"><em>Ready for Dev</em></td><td class="d">Scope approved. The Dev reviews the ticket and asks the Lead what's still unclear.</td><td>Dev; the Lead (or owner) while a question waits</td><td><strong>Owner only</strong></td></tr>
         <tr><td class="q"><em>In Progress</em></td><td class="d">The Dev is working the code, on the ticket's branch.</td><td>Dev; the Lead (or owner) while a question waits; the Lead after a failed run</td><td>Dev, when it claims; the Lead, when it sends review tasks back</td></tr>
         <tr><td class="q"><em>In Review</em></td><td class="d">The owner tests the review build and comments.</td><td>Owner; the Lead while it turns comments into tasks</td><td>Dev, when its review build is deployed</td></tr>
         <tr><td class="q"><em>Approved</em></td><td class="d">Result approved. The branch is rebased onto main, tested and merged automatically.</td><td>Dev</td><td><strong>Owner only</strong></td></tr>
@@ -300,12 +300,12 @@
       </tbody>
     </table>
     <p><strong>The owner can skip any phase</strong> by setting the status directly, for example a clear ticket straight from
-      Todo to <em>Ready</em> (no scoping), or to <em>Approved</em> after testing the build themselves. The workers act on
+      Backlog to <em>Ready for Dev</em> (no enrichment), or to <em>Approved</em> after testing the build themselves. The workers act on
       <em>status + assignee</em> as they find them, never on the path the ticket took; a ticket the owner moved to
-      <em>Ready</em> without an assignee is given to the Dev.</p>
+      <em>Ready for Dev</em> without an assignee is given to the Dev.</p>
 
-<pre><code>             assign to Lead            owner approves scope           Dev claims
-Todo/Backlog ─────────────▶ Scoping ─────────────────────────▶ Ready ─────────────▶ In Progress
+<pre><code>         owner picks              owner approves scope                 Dev claims
+Backlog ─────────────────▶ Todo ─────────────────────────▶ Ready for Dev ─────────▶ In Progress
                             ▲   │ question ⇄ owner                │ question ⇄ Lead     │ question ⇄ Lead (⇄ owner)
                             │   │                                 │ (⇄ owner)           │ run fails → Lead (retry ≤ 2)
                             └───┴──── Lead re-scopes ◀────────────┴─────────────────────┤
@@ -320,10 +320,10 @@ Done ◀──── merged ──── Approved ◀─────────
     <table>
       <thead><tr><th>#</th><th>Step</th><th>Status → assignee</th><th>Who acts</th><th>Trigger</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td class="d">Ticket assigned to the Lead</td><td><em>Scoping</em> → Lead</td><td>Lead</td><td>Watcher: newly assigned to the Lead in an open status other than the ones below (rule 1, §5.3).</td></tr>
-        <tr><td>2–4</td><td class="d">Lead reviews and enriches the ticket: whatever referenced files say goes into the ticket text; asks the owner in a comment</td><td><em>Scoping</em> → owner while a question waits, → Lead when answered</td><td>Lead (a Pidgin turn; no code run)</td><td>Assigned to the Lead in Scoping; a commander comment on a ticket assigned to the owner in Scoping (rule 4).</td></tr>
-        <tr><td>5</td><td class="d">Owner approves the scope</td><td><em>Ready</em> → Dev</td><td>Owner sets the status; the Lead assigns the Dev if the owner didn't</td><td>Status changed to Ready by a commander (rule 2).</td></tr>
-        <tr><td>6</td><td class="d">Dev reviews the ticket; asks the Lead if needed; the Lead escalates to the owner only what it can't answer</td><td><em>Ready</em> → Lead (→ owner) → back to Dev</td><td>Dev (a Pidgin turn; no code run yet); Lead answers</td><td>Assigned to the Dev in Ready (rule 2); a comment on a ticket assigned to the Lead or owner (rule 4).</td></tr>
+        <tr><td>1</td><td class="d">The owner picks a ticket from the backlog</td><td><em>Todo</em> → Lead</td><td>Owner</td><td>Watcher: a ticket arrives in <em>Todo</em>, unassigned or assigned to the Lead (rule 1, §5.3).</td></tr>
+        <tr><td>2–4</td><td class="d">Lead reviews and enriches the ticket: whatever referenced files say goes into the ticket text; asks the owner in a comment</td><td><em>Todo</em> → owner while a question waits, → Lead when answered</td><td>Lead (a Pidgin turn; no code run)</td><td>In Todo, unassigned or assigned to the Lead; a commander comment on a ticket assigned to the owner in Todo (rule 4).</td></tr>
+        <tr><td>5</td><td class="d">Owner approves the scope</td><td><em>Ready for Dev</em> → Dev</td><td>Owner sets the status; the Lead assigns the Dev if the owner didn't</td><td>Status changed to Ready by a commander (rule 2).</td></tr>
+        <tr><td>6</td><td class="d">Dev reviews the ticket; asks the Lead if needed; the Lead escalates to the owner only what it can't answer</td><td><em>Ready for Dev</em> → Lead (→ owner) → back to Dev</td><td>Dev (a Pidgin turn; no code run yet); Lead answers</td><td>Assigned to the Dev in Ready (rule 2); a comment on a ticket assigned to the Lead or owner (rule 4).</td></tr>
         <tr><td>7</td><td class="d">Dev claims</td><td><em>In Progress</em> → Dev</td><td>Executor</td><td>The Dev's turn calls <code>execute(…, mode: start)</code>; the executor re-checks and claims (§5.5.2).</td></tr>
         <tr><td>8</td><td class="d">Development, with Q&amp;A as needed</td><td><em>In Progress</em>; flips to the Lead (→ owner) while a question waits</td><td>Dev run; Lead answers</td><td>Asking ends the run (<code>ticket.ask_lead</code>); the answer, reassigning to the Dev, starts a fresh run (rule 3).</td></tr>
         <tr><td>9</td><td class="d">Dev completed: review build deployed, review comment posted</td><td><em>In Review</em> → owner</td><td>Executor (deploy) + Dev run (comment)</td><td>The run calls <code>ticket.in_review</code> (§5.6); the executor deploys the build and posts the review link (§4.1.4).</td></tr>
@@ -339,7 +339,7 @@ Done ◀──── merged ──── Approved ◀─────────
       <li><strong>Failure goes to the Lead, not the owner.</strong> A Dev run that crashes, times out or gets stuck (no output,
           turn limit) leaves the ticket <em>In Progress</em>, assigns it to the Lead, and comments the reason, the last step
           and the log link. The Lead may <strong>retry up to a configurable limit (default 2 retries)</strong>, each a fresh
-          run on the same branch with the failure in the prompt. Past the limit it re-scopes (back to <em>Scoping</em> with
+          run on the same branch with the failure in the prompt. Past the limit it re-scopes (back to <em>Todo</em> with
           what it learned) or asks the owner (assigns the owner with a question). The owner's Retry button in Pidgin still
           works at any time and doesn't count against the limit.</li>
       <li><strong>Review rounds keep the Dev's session</strong> (the owner's choice). When the Dev finishes (step 9) the run
@@ -510,7 +510,7 @@ Done ◀──── merged ──── Approved ◀─────────
             <div class="m-panel">
               <p class="m-eyebrow">HR assist</p>
               <p style="margin:0 0 8px">Give your developer its <strong>own Linear member</strong>. Everything it writes in Linear then shows as Claude, not as you, and you can see at a glance who did what.</p>
-              <p style="margin:0 0 8px" class="m-muted">It works tickets you've moved to <strong>Ready</strong>, after its Team Lead (<strong>Claude Lead</strong>) has scoped them. Not hired yet? <span class="m-btn ghost">Hire a Team Lead</span></p>
+              <p style="margin:0 0 8px" class="m-muted">It works tickets you've moved to <strong>Ready for Dev</strong>, after its Team Lead (<strong>Claude Lead</strong>) has scoped them. Not hired yet? <span class="m-btn ghost">Hire a Team Lead</span></p>
               <p style="margin:0" class="m-muted">Your repo's <code>CLAUDE.md</code> and skills apply in every run.</p>
             </div>
           </div>
@@ -551,13 +551,13 @@ Done ◀──── merged ──── Approved ◀─────────
     <table>
       <thead><tr><th>Rule</th><th>Default</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td class="q">Starts work when</td><td class="d">Lead: a ticket is assigned to it (→ Scoping) · Dev: a ticket is Ready and assigned to it · both: comments and mentions on their tickets</td><td>Exact rules in §5.3. Moving a ticket to Todo on its own never starts work.</td></tr>
+        <tr><td class="q">Starts work when</td><td class="d">Lead: a ticket is arrives in Todo · Dev: a ticket is Ready for Dev and assigned to it · both: comments and mentions on their tickets</td><td>Exact rules in §5.3. Moving a ticket to Todo on its own never starts work.</td></tr>
         <tr><td class="q">Skip tickets labelled</td><td class="d"><code>owner-only</code>, <code>runner-failed</code></td><td>Also skips tickets with an open "blocked by" relation.</td></tr>
         <tr><td class="q">Retries after a failed run</td><td class="d">2</td><td>The Lead's limit per ticket phase; then it re-scopes or asks the owner (§4.1.3).</td></tr>
         <tr><td class="q">Review build</td><td class="d">The repo's review deploy command and URL pattern</td><td>Required for the In Review step; without one the review comment links the branch instead and says the build wasn't deployed (§5.5.9).</td></tr>
         <tr><td class="q">Runs at once</td><td class="d">2</td><td>Concurrency cap per worker (and a machine-wide cap on the integration).</td></tr>
         <tr><td class="q">Time limits</td><td class="d">60 min per run · 10 min with no output · 200 Claude Code turns</td><td>Hitting any one is a failure (§5.5.7).</td></tr>
-        <tr><td class="q">Statuses</td><td class="d"><em>Scoping</em> · <em>Ready</em> · <em>In Progress</em> · <em>In Review</em> · <em>Approved</em> · <em>Done</em> · new work → <em>Triage</em></td><td>Mapped to the team's workflow states at hire (§4.1.1). The wizard lists states the team is missing; the owner adds them in Linear (Team settings → Workflow).</td></tr>
+        <tr><td class="q">Statuses</td><td class="d"><em>Todo</em> · <em>Ready for Dev</em> · <em>In Progress</em> · <em>In Review</em> · <em>Approved</em> · <em>Done</em> · new work → <em>Triage</em></td><td>Mapped to the team's workflow states at hire (§4.1.1). The wizard lists states the team is missing; the owner adds them in Linear (Team settings → Workflow).</td></tr>
         <tr><td class="q">When approved</td><td class="d">Rebase onto main, test, push, PR, rebase-merge</td><td>Automatic after the owner sets <em>Approved</em>; no merge commits; hands back to the Lead on conflict or failing tests (§4.1.5).</td></tr>
         <tr><td class="q">Claude Code</td><td class="d">Model: repo/CLI default · permissions: repo allowlist + accept edits · no <code>git push</code> inside a run</td><td>Pushing happens only in the merge step, by the executor. Open question §8 on permission mode.</td></tr>
         <tr><td class="q">Usage</td><td class="d">Warn when a run passes 2 M tokens; pause new runs past the plan's limit</td><td>Runs use the owner's Claude subscription login (no API key), so cost figures are notional; usage limits come from the plan.</td></tr>
@@ -576,7 +576,7 @@ Done ◀──── merged ──── Approved ◀─────────
             <div>
               <div class="m-panel">
                 <h4>Starts work when</h4>
-                <div class="m-opt"><span class="m-toggle"></span><div>A ticket is <strong>Ready</strong> and assigned to <strong>Claude</strong><div class="m-faint">You approved the scope. It reviews the ticket, asks Claude Lead what's unclear, then starts.</div></div></div>
+                <div class="m-opt"><span class="m-toggle"></span><div>A ticket is <strong>Ready for Dev</strong> and assigned to <strong>Claude</strong><div class="m-faint">You approved the scope. It reviews the ticket, asks Claude Lead what's unclear, then starts.</div></div></div>
                 <div class="m-opt"><span class="m-toggle"></span><div>It's <strong>assigned back</strong> to Claude with an answer or review tasks<div class="m-faint">After a review it picks up its earlier session with the new tasks; otherwise a fresh run that reads the thread.</div></div></div>
                 <div class="m-opt"><span class="m-toggle"></span><div>You set a ticket to <strong>Approved</strong><div class="m-faint">It rebases onto main, tests and merges, then marks it Done.</div></div></div>
                 <p class="m-faint" style="margin:8px 0 0">Moving a ticket to Todo on its own does nothing. Skips <code>owner-only</code>, <code>runner-failed</code> and blocked tickets.</p>
@@ -595,8 +595,8 @@ Done ◀──── merged ──── Approved ◀─────────
               <div class="m-panel">
                 <h4>Statuses</h4>
                 <table class="m-tbl">
-                  <tr><td class="m-muted">Scoping</td><td><span class="m-chip">Scoping</span> ✓</td></tr>
-                  <tr><td class="m-muted">Ready</td><td><span class="m-chip">Ready</span> ✓</td></tr>
+                  <tr><td class="m-muted">Enriches in</td><td><span class="m-chip">Todo</span> ✓</td></tr>
+                  <tr><td class="m-muted">Codes from</td><td><span class="m-chip">Ready for Dev</span> ✓</td></tr>
                   <tr><td class="m-muted">Working</td><td><span class="m-chip acc">In Progress</span> ✓</td></tr>
                   <tr><td class="m-muted">Review</td><td><span class="m-chip warn">In Review</span> <span class="m-faint">missing in ACG · add it in Linear</span></td></tr>
                   <tr><td class="m-muted">Approved</td><td><span class="m-chip ok">Approved</span> <span class="m-faint">missing in ACG</span></td></tr>
@@ -673,7 +673,7 @@ Done ◀──── merged ──── Approved ◀─────────
           <div class="m-panel">
             <h4>Queue</h4>
             <table class="m-tbl">
-              <tr><td><span class="m-key">ACG-140</span> Pour Sort: level 12 unsolvable</td><td><span class="m-chip acc">Ready</span></td><td class="m-muted">Waiting for a free slot · next</td></tr>
+              <tr><td><span class="m-key">ACG-140</span> Pour Sort: level 12 unsolvable</td><td><span class="m-chip acc">Ready for Dev</span></td><td class="m-muted">Waiting for a free slot · next</td></tr>
               <tr><td><span class="m-key">ACG-122</span> Tower Grabber: bot skips the shop</td><td><span class="m-chip">Ready · asked Lead</span></td><td class="m-muted">Waits for Claude Lead's answer</td></tr>
             </table>
           </div>
@@ -762,8 +762,8 @@ Done ◀──── merged ──── Approved ◀─────────
     <table>
       <thead><tr><th>Moment</th><th>In Linear</th><th>In Pidgin</th></tr></thead>
       <tbody>
-        <tr><td class="q">Scoping question</td><td class="d">The Lead's comment <code>Question:</code> with the options and what each costs, ticket assigned to the owner, status stays <em>Scoping</em>. The owner answers in a comment; the Lead takes it back.</td><td>Counted in "waiting on you" on the Lead's dashboard. No approval item: the question is in Linear.</td></tr>
-        <tr><td class="q">Scope ready</td><td class="d">The Lead's comment <code>Scoped:</code> summarising what the ticket now says and what's left to decide, ticket assigned to the owner. The owner approves by setting <em>Ready</em>.</td><td>—</td></tr>
+        <tr><td class="q">Enrichment question</td><td class="d">The Lead's comment <code>Question:</code> with the options and what each costs, ticket assigned to the owner, status stays <em>Todo</em>. The owner answers in a comment; the Lead takes it back.</td><td>Counted in "waiting on you" on the Lead's dashboard. No approval item: the question is in Linear.</td></tr>
+        <tr><td class="q">Scope ready</td><td class="d">The Lead's comment <code>Scoped:</code> summarising what the ticket now says and what's left to decide, ticket assigned to the owner. The owner approves by setting <em>Ready for Dev</em>.</td><td>—</td></tr>
         <tr><td class="q">Dev question</td><td class="d">The Dev's comment <code>Question for the Lead:</code>, ticket assigned to the Lead. The Lead answers, or asks the owner (<code>Question:</code>, assigned to the owner) if it can't.</td><td>The Dev's queue shows "waits for Claude Lead's answer".</td></tr>
         <tr><td class="q">Claimed</td><td class="d">In Progress, assigned to the Dev, comment <code>Started: &lt;plan in one line&gt;</code> with a link to the run page.</td><td>Run moves to Running.</td></tr>
         <tr><td class="q">Progress</td><td class="d">A comment when something real happens: a finding that changes the plan, a part done, a blocker. Not every step.</td><td>Same comment in the run timeline.</td></tr>
@@ -780,7 +780,7 @@ Done ◀──── merged ──── Approved ◀─────────
       <div class="m-main" style="min-width:560px">
         <p class="m-eyebrow">ACG-131 · comments (as seen in Linear)</p>
         <div class="m-comment"><span class="m-avatar h">N</span><span class="who">Nitay</span><span class="when">13:20</span><p>Boss drops too fast on level 7 phones. <span class="m-faint">→ assigned to Claude Lead</span></p></div>
-        <div class="m-comment"><span class="m-avatar" style="background:#8a5cd2">L</span><span class="who">Claude Lead</span><span class="when">13:24</span><p><strong>Question:</strong> how long should the landing take? <code>DESIGN.md</code> §Boss says "a heavy slam" with no number; the ad clips show ~1.5 s. Options: 1.0 s (snappier, still reads as a fall), 1.5 s (matches the ads), 2.0 s (slow, may drag on later levels). <span class="m-faint">→ assigned to Nitay · Scoping</span></p></div>
+        <div class="m-comment"><span class="m-avatar" style="background:#8a5cd2">L</span><span class="who">Claude Lead</span><span class="when">13:24</span><p><strong>Question:</strong> how long should the landing take? <code>DESIGN.md</code> §Boss says "a heavy slam" with no number; the ad clips show ~1.5 s. Options: 1.0 s (snappier, still reads as a fall), 1.5 s (matches the ads), 2.0 s (slow, may drag on later levels). <span class="m-faint">→ assigned to Nitay · Todo</span></p></div>
         <div class="m-comment"><span class="m-avatar h">N</span><span class="who">Nitay</span><span class="when">13:40</span><p>1.5 s. <span class="m-faint">→ back to Claude Lead</span></p></div>
         <div class="m-comment"><span class="m-avatar" style="background:#8a5cd2">L</span><span class="who">Claude Lead</span><span class="when">13:42</span><p><strong>Scoped:</strong> the boss takes ~1.5 s to land on levels 5–9 (gravity is applied per tick in <code>sim.ts</code>). Done when: the bot clears level 7 and the drop reads as a slam. Impact shake: "a short shake on heavy hits", length the Dev's call. <span class="m-faint">→ Nitay sets Ready · assigned to Claude</span></p></div>
         <div class="m-comment"><span class="m-avatar">C</span><span class="who">Claude</span><span class="when">13:51</span><p><strong>Started:</strong> slow the boss's fall in the sim, then check level 7 with the bot. Run log: pidgin run 01JC… <span class="m-faint">· In Progress</span></p></div>
@@ -816,7 +816,7 @@ issues, inbox ◀─────────────── Linear watcher (p
                                  │ probe source 4 (watched-resource change) &gt; 0 → wake
                                  ▼
                                Team Lead turn  (scopes, answers, review tasks, retries; Linear writes only)
-                               Developer turn  (reviews Ready tickets, asks the Lead, starts runs)
+                               Developer turn  (reviews Ready for Dev tickets, asks the Lead, starts runs)
                                  │ each worker reads the batch of changes for tickets assigned to it
                                  │ execute(claude_code:repo/actualgameplay, {ticket, mode})
                                  ▼ gate → agent_action_log
@@ -935,15 +935,30 @@ merged, Done ◀────────────────── │ on Ap
     <table>
       <thead><tr><th>#</th><th>Worker</th><th>Rule</th><th>Condition</th><th>Effect</th></tr></thead>
       <tbody>
-        <tr><td>1</td><td>Lead</td><td class="d"><strong>Assigned to the Lead</strong></td><td>Newly assigned to the Lead, in an open status before <em>Ready</em> (Triage, Backlog, Todo or Scoping).</td><td>The Lead moves it to <em>Scoping</em> (if it isn't) and starts scoping. Assigned in a later status (e.g. a failed run, a merge conflict, review comments) it acts on that phase instead.</td></tr>
-        <tr><td>2</td><td>Dev</td><td class="d"><strong>Ready for the Dev</strong></td><td>Status <em>Ready</em> and assigned to the Dev; or <em>Ready</em> with no assignee or the Lead as assignee and the status set by a commander (the Lead then assigns the Dev).</td><td>A Dev turn reviews the ticket (no run yet): it asks the Lead, or starts a run in the <strong>ready</strong> class. Highest priority first, then oldest.</td></tr>
-        <tr><td>3</td><td>Dev</td><td class="d"><strong>Back to the Dev</strong></td><td>Assigned back to the Dev in <em>Ready</em> or <em>In Progress</em> (an answer, review tasks, a retry from the Lead).</td><td>A <strong>follow-up</strong> run on the existing branch. After a review it resumes the Dev's last session with the Lead's new comment (fresh from the thread and branch if it can't be resumed); after an answer or a retry it is a fresh run reading the whole thread.</td></tr>
+        <tr><td>1</td><td>Lead</td><td class="d"><strong>Arrived in Todo</strong></td><td>A ticket enters <em>Todo</em> (the owner picked it from the backlog), unassigned or assigned to the Lead; not labelled <code>owner-only</code> or <code>runner-failed</code>, not blocked, not assigned to the owner (a question waits on them). Only tickets that entered Todo after enrichment was switched on, plus ones the owner pushes from the Work page.</td><td>The Lead assigns itself (the status stays <em>Todo</em>) and enriches: at most 2 enrichments at once (configurable). Assigned in a later status (e.g. a failed run, a merge conflict, review comments) it acts on that phase instead.</td></tr>
+        <tr><td>2</td><td>Dev</td><td class="d"><strong>Ready for the Dev</strong></td><td>Status <em>Ready for Dev</em> and assigned to the Dev; or <em>Ready for Dev</em> with no assignee (the Dev assigns itself when it claims).</td><td>A Dev turn reviews the ticket (no run yet): it asks the Lead, or starts a run in the <strong>ready</strong> class. Highest priority first, then oldest.</td></tr>
+        <tr><td>3</td><td>Dev</td><td class="d"><strong>Back to the Dev</strong></td><td>Assigned back to the Dev in <em>Ready for Dev</em> or <em>In Progress</em> (an answer, review tasks, a retry from the Lead).</td><td>A <strong>follow-up</strong> run on the existing branch. After a review it resumes the Dev's last session with the Lead's new comment (fresh from the thread and branch if it can't be resumed); after an answer or a retry it is a fresh run reading the whole thread.</td></tr>
         <tr><td>4</td><td>Both</td><td class="d"><strong>Comment or mention</strong></td><td>A new comment by someone else on a ticket assigned to the worker; a mention of the worker anywhere in the team; or a commander comment on a ticket <em>assigned to the owner</em> that the worker last handed over (the answer to its question, or review comments on <em>In Review</em>, which go to the Lead).</td><td>Wakes that worker. It takes the ticket back (assigns itself) and acts: answer, continue scoping, or turn review comments into tasks.</td></tr>
         <tr><td>5</td><td>Dev</td><td class="d"><strong>Approved</strong></td><td>Status changed to <em>Approved</em> by a commander.</td><td>The executor runs the merge (§5.5.9) in the <strong>merge</strong> class, ahead of new work.</td></tr>
         <tr><td>6</td><td>Dev</td><td class="d"><strong>Own running ticket changed</strong></td><td>A human moves a ticket with an active run to Canceled/Backlog, or assigns it away from the Dev.</td><td>The executor stops the run ("stopped from Linear"). A reassignment the worker made itself (a question to the Lead) ends the run normally instead.</td></tr>
       </tbody>
     </table>
-    <p><strong>Owner-only statuses.</strong> <em>Ready</em> and <em>Approved</em> count only when a commander set them (the
+    <p><strong>Old tickets in Todo.</strong> When enrichment is switched on, Todo may already hold many old tickets
+      (64 on 2026-11-08, 15 of them <code>owner-only</code>). Switching it on records a watermark; only tickets that
+      entered Todo after it are enriched (the watcher filters <code>updatedAt</code> past the watermark in Linear, then
+      reads when each candidate last moved into Todo from its history, or its creation time if it was created there).
+      Older ones are enriched only when the owner pushes them one at a time from the Work page ("Enrich now" with the
+      key). Enrichments run at most 2 at a time (configurable), apart from code runs, and need no dev slot: they read
+      the main checkout and can't change files.</p>
+    <p><strong>Until the Lead exists.</strong> Until a separate Lead member exists (open question 15), the Developer
+      worker (Linear member <em>Claude</em>) does the enriching itself, as an <em>enrichment run</em>: Claude Code in the
+      main checkout with read-only tools and its own ticket tools (<code>update_description</code>, which keeps the
+      original text at the bottom; <code>ask_owner</code>, which assigns the owner; <code>scoped</code>, which hands the
+      ticket to the owner to set <em>Ready for Dev</em>). A code run finishes with <code>in_review</code> (In Review,
+      assigned to the owner), <code>hand_off</code> or <code>blocked</code>; hand-offs assign the owner and keep the
+      status. A failed code run goes back to <em>Ready for Dev</em> with <code>runner-failed</code>; a failed enrichment
+      stays in <em>Todo</em>, assigned to the owner with the label.</p>
+    <p><strong>Owner-only statuses.</strong> <em>Ready for Dev</em> and <em>Approved</em> count only when a commander set them (the
       watcher reads the actor from the issue history). If a worker or a teammate sets one, the worker comments "Only the
       owner approves; moved back" and restores the previous status. Skipping phases is just the owner setting a later
       status; the rules above pick the ticket up from there.</p>
@@ -958,7 +973,7 @@ merged, Done ◀────────────────── │ on Ap
       <strong>Interactive sessions also act as Claude.</strong> The owner's hand-opened Claude Code sessions sign in to Linear as
       the same member and claim tickets the same way. The worker treats only tickets with its own <code>code_runs</code>
       record as "its runs". A ticket an interactive session has In Progress is never touched by recovery (§5.5.6), and it
-      triggers nothing unless it is moved to <em>Ready</em> or <em>Approved</em> by the owner.
+      triggers nothing unless it is moved to <em>Ready for Dev</em> or <em>Approved</em> by the owner.
     </p>
 
     <h3>5.4 Linear watcher</h3>
@@ -973,7 +988,7 @@ merged, Done ◀────────────────── │ on Ap
           Using real watcher rows keeps change-gating's rule that only <em>explicitly watched</em> resources count
           (Change-Gated Wakeup §4.2, source 4).</li>
       <li><strong>Per poll</strong> (one request, small paginated lists filtered in Linear, every 15 s by default): the open tickets assigned to the worker, plus (for the Dev)
-          <em>Ready</em> and <em>Approved</em> tickets in the team, with the last status change's actor; tickets with active
+          <em>Ready for Dev</em> and <em>Approved</em> tickets in the team, with the last status change's actor; tickets with active
           runs (rule 6); notifications since the inbox cursor (rule 4).</li>
       <li><strong>Diff.</strong> Results are compared with a local mirror (<code>tracker_items</code>) and a seen-set keyed by
           (ticket, rule, Linear <code>updatedAt</code> or comment id). New entries become change rows; the mirror and cursor
@@ -1037,9 +1052,9 @@ merge runs:  queued ─▶ rebasing ─▶ testing ─▶ merging ─┬─▶ m
           <code>execute</code> returns the existing run.</li>
       <li><strong>Cap.</strong> A run starts when the worker has fewer than its cap running and the machine is under the
           integration-wide cap. Order: merge class first (short, and it unblocks the owner), then follow-ups (answers, review
-          rounds, retries), then new <em>Ready</em> tickets, each by priority then age.</li>
+          rounds, retries), then new <em>Ready for Dev</em> tickets, each by priority then age.</li>
       <li><strong>Claim with a re-check.</strong> Right before starting, the executor re-reads the ticket live. Still eligible
-          (<em>Ready</em> for a start; <em>In Progress</em> assigned to the Dev for a follow-up; <em>Approved</em> for a merge)
+          (<em>Ready for Dev</em> for a start; <em>In Progress</em> assigned to the Dev for a follow-up; <em>Approved</em> for a merge)
           → one <code>execute</code> (status + assign the Dev) and, for a start, one <code>post</code> (<code>Started:</code>
           line from the turn's plan, plus the run link). Moved, reassigned or relabelled meanwhile → <code>dropped</code>,
           logged, no comment.</li>
@@ -1147,7 +1162,7 @@ stdout → runs/&lt;id&gt;/stream.jsonl · stderr → stderr.log</code></pre>
       posts a comment ("Run failed: time limit after 60 min. Last step: running <code>npm test</code>. 2 commits on
       <code>claude/acg-115-…</code>. Log: &lt;link&gt;. Retry 1 of 2."); keeps the status; <strong>assigns the ticket to the
       Lead</strong>. The Lead's turn decides: retry (a fresh run with the failure in the note), re-scope (back to
-      <em>Scoping</em> with what it learned), or ask the owner. The executor counts retries per ticket and phase and refuses a
+      <em>Todo</em> with what it learned), or ask the owner. The executor counts retries per ticket and phase and refuses a
       third <code>retry</code> from the Lead (default limit 2); past it the Lead must re-scope or ask, and if it gives up it
       adds <code>runner-failed</code>, which stops every rule until the owner removes it or presses Retry. A run that exits
       cleanly but never called a finishing tool ends <code>ended_open</code> and goes to the Lead the same way, so the
@@ -1222,7 +1237,7 @@ gh pr merge --rebase              # linear history: no merge commits
           who set a status, who commented), mapped to a principal. Linear users mapped as commanders (the owner, set at
           hire) produce <code>internal-authenticated</code> rows; other members of the Linear workspace produce
           <code>external-verified</code>; text inside tickets written by non-commanders is data.</li>
-      <li><strong>The owner's approvals are statuses only a commander can set.</strong> <em>Ready</em> and <em>Approved</em>
+      <li><strong>The owner's approvals are statuses only a commander can set.</strong> <em>Ready for Dev</em> and <em>Approved</em>
           count only when the issue history shows a commander set them (§5.3). A teammate assigning a ticket to the Lead is
           staged for approval ("Sara assigned ACG-150 to Claude Lead. Scope it?"); a teammate can never approve a scope or a
           merge.</li>
@@ -1262,7 +1277,7 @@ gh pr merge --rebase              # linear history: no merge commits
 }</code></pre>
     <p><strong>The role's rules</strong> (system prompt; the per-run subset goes into every Claude Code prompt):</p>
     <ol>
-      <li><strong>Review before you start.</strong> On a <em>Ready</em> ticket, read it and the thread; anything unclear goes
+      <li><strong>Review before you start.</strong> On a <em>Ready for Dev</em> ticket, read it and the thread; anything unclear goes
           to the Lead as a question (assign the Lead), never straight to the owner.</li>
       <li><strong>Claim before work.</strong> In Progress, assigned to itself, a <code>Started:</code> comment with the plan in
           one line. Never start a ticket someone else has In Progress.</li>
@@ -1298,13 +1313,13 @@ gh pr merge --rebase              # linear history: no merge commits
 }</code></pre>
     <p><strong>The Lead's rules:</strong></p>
     <ol>
-      <li><strong>Scope until it's self-contained.</strong> On a ticket assigned to it: move it to <em>Scoping</em>, read the
+      <li><strong>Scope until it's self-contained.</strong> On a ticket in <em>Todo</em>: read the
           repo files it refers to and write what they say into the ticket (the rule, the numbers, the options), add a "Done
           when" list. The ticket alone must be enough for the Dev and the owner.</li>
       <li><strong>Ask the owner in comments, one question per decision</strong>, with the options and what each costs; assign
-          the owner while it waits; take the ticket back when answered. Status stays <em>Scoping</em>.</li>
+          the owner while it waits; take the ticket back when answered. Status stays <em>Todo</em>.</li>
       <li><strong>Never approve.</strong> When scoping is done, post <code>Scoped:</code> and assign the owner. Only the owner
-          sets <em>Ready</em> and <em>Approved</em>.</li>
+          sets <em>Ready for Dev</em> and <em>Approved</em>.</li>
       <li><strong>Answer the Dev.</strong> A Dev question is answered from the ticket, the thread and the repo; only what it
           can't answer goes to the owner. Hand the ticket back to the Dev with the answer.</li>
       <li><strong>Turn review comments into tasks.</strong> Reply to each owner comment, then post <code>Review round N
@@ -1359,8 +1374,8 @@ gh pr merge --rebase              # linear history: no merge commits
         <tr><td class="q">Where do worktrees live?</td><td class="d">Outside the repo, under the Pidgin home by default; never in Dropbox/OneDrive.</td><td>The repo is in Dropbox; syncing <code>node_modules</code> per worktree would be slow and noisy.</td></tr>
         <tr><td class="q">Base for new branches</td><td class="d">The local base branch (e.g. <code>main</code>), not <code>origin</code>.</td><td>The owner commits locally and often doesn't push first.</td></tr>
         <tr><td class="q">How are phases and turns tracked?</td><td class="d">Status = phase, assignee = whose move. Questions flip the assignee, never the status.</td><td>Owner's flow. The owner's queue is just "assigned to me", and nothing hides in a status like "Needs owner" that mixes phase and turn.</td></tr>
-        <tr><td class="q">One worker or two?</td><td class="d">A Team Lead and a Developer, each a Pidgin persona with its own recipe and Linear member.</td><td>Owner's flow. Scoping and answering are cheap Pidgin turns; code runs are expensive. The assignee column must tell Lead from Dev.</td></tr>
-        <tr><td class="q">Who approves?</td><td class="d">Only the owner: the scope (<em>Ready</em>) and the result (<em>Approved</em>), as statuses that count only when a commander sets them. The owner can skip any phase.</td><td>Owner's flow. A status is visible in Linear, needs no new UI, and the issue history shows who set it.</td></tr>
+        <tr><td class="q">One worker or two?</td><td class="d">A Team Lead and a Developer, each a Pidgin persona with its own recipe and Linear member.</td><td>Owner's flow. Enrichment and answering are cheap Pidgin turns; code runs are expensive. The assignee column must tell Lead from Dev.</td></tr>
+        <tr><td class="q">Who approves?</td><td class="d">Only the owner: the scope (<em>Ready for Dev</em>) and the result (<em>Approved</em>), as statuses that count only when a commander sets them. The owner can skip any phase.</td><td>Owner's flow. A status is visible in Linear, needs no new UI, and the issue history shows who set it.</td></tr>
         <tr><td class="q">How does the Dev ask?</td><td class="d">To the Lead, through the ticket; the Lead escalates to the owner only what it can't answer. Asking ends the run.</td><td>Owner's flow; keeps the owner's interruptions to real decisions, and no process waits on a human.</td></tr>
         <tr><td class="q">What does "done" hand the owner?</td><td class="d">A deployed review build of the branch with direct links, what changed and what wasn't verified; <em>In Review</em>, assigned to the owner.</td><td>Owner's flow. Games are judged by playing them; a diff isn't a review.</td></tr>
         <tr><td class="q">Who merges, and how?</td><td class="d">Automatic after <em>Approved</em>: rebase onto main, test, PR, rebase-merge. Never a merge commit. Conflict or failing tests: back to the Lead, nothing merged.</td><td>Owner's flow: linear history and no git chores for the owner, without ever merging untested code.</td></tr>
@@ -1370,7 +1385,7 @@ gh pr merge --rebase              # linear history: no merge commits
         <tr><td class="q">Billing</td><td class="d">Runs use the owner's Claude subscription login, never an API key; costs are notional, limits are the plan's.</td><td>Owner's call: a monthly plan, no per-token spend.</td></tr>
         <tr><td class="q">Recovery source of truth</td><td class="d">Local run records + the stream file + the ticket in Linear; only tickets with a run record are reconciled.</td><td>Interactive sessions also act as Claude in Linear; resetting their tickets would break the owner's live work.</td></tr>
         <tr><td class="q">Process output</td><td class="d">Straight to files, process detached.</td><td>Survives a pidgind restart; the run's state can be rebuilt from disk.</td></tr>
-        <tr><td class="q">Hand-offs: Linear or Pidgin?</td><td class="d">Ticket decisions in Linear (questions, Ready, Approved); machine decisions (gated actions, stop, retry) in Pidgin. The review page's buttons write to Linear, so both stay in sync.</td><td>One source of truth per decision; the owner can review from either place.</td></tr>
+        <tr><td class="q">Hand-offs: Linear or Pidgin?</td><td class="d">Ticket decisions in Linear (questions, Ready for Dev, Approved); machine decisions (gated actions, stop, retry) in Pidgin. The review page's buttons write to Linear, so both stay in sync.</td><td>One source of truth per decision; the owner can review from either place.</td></tr>
       </tbody>
     </table>
   </section>
@@ -1390,7 +1405,11 @@ gh pr merge --rebase              # linear history: no merge commits
         <li><s>1. What happens to the branch, who merges</s>: branch per ticket; after the owner's <em>Approved</em>, rebase onto main, test, PR and rebase-merge automatically; never a merge commit (§4.1.5).</li>
         <li><s>3. Billing</s>: the owner's Claude subscription login, no API key; costs are notional (the owner's call, earlier the same day).</li>
         <li><s>4. "Moving to Todo alone does nothing"</s>: replaced by status + assignee. Assigning to the Lead starts scoping from any open status before Ready; the owner can set any status directly (§5.3).</li>
-        <li><s>9. Approve from Linear?</s>: yes, by status. The owner approves the scope with <em>Ready</em> and the result with <em>Approved</em>; Pidgin's review page sets the same statuses. Pidgin approvals stay only for gated machine actions.</li>
+        <li><s>9. Approve from Linear?</s>: yes, by status. The owner approves the scope with <em>Ready for Dev</em> and the result with <em>Approved</em>; Pidgin's review page sets the same statuses. Pidgin approvals stay only for gated machine actions.</li>
+        <li><s>14. The new Linear statuses</s>: set up by the owner 2026-11-08: Triage · Backlog · <em>Todo</em> (picked
+            from the backlog: enrichment, the spec's old "Scoping") · <em>Ready for Dev</em> (scope approved, owner only) ·
+            In Progress · In Review · Approved · Done · Canceled · Duplicate. <em>Needs owner</em> is dropped: a hand-off
+            assigns the owner and keeps the status.</li>
         <li><s>6. Latency</s>: as fast as possible, by polling. New tickets are checked every 15 s and a qualifying assignment
             is claimed and started in the same pass (~15 s on average to Claude's first output); running tickets every 15 s,
             with the owner's comments forwarded into the live session; the
@@ -1402,7 +1421,7 @@ gh pr merge --rebase              # linear history: no merge commits
         <li><strong>[2] Claude Code permissions.</strong> The repo's own allowlist + accept-edits (safer; some runs will stall
             on a denied command), or bypass permissions inside the worktree (smoother; it can run anything on this PC)?</li>
         <li><strong>[5] agent-ready.</strong> Does the unassigned <code>agent-ready</code> label still feed the flow (the Lead
-            picks such tickets up into Scoping when idle), or is assignment the only way in?</li>
+            picks such tickets up into Todo when idle), or is assignment the only way in?</li>
         <li><strong>[7] Explicit action?</strong> Keep Claude Code as <code>execute</code> on an executor resource, or add a
             named 15th action (e.g. <code>run_code</code>) to the runtime's vocabulary?</li>
         <li><strong>[10] Your Claude Code memory.</strong> Claude Code keys project memory by folder, so runs in a worktree
@@ -1418,14 +1437,11 @@ gh pr merge --rebase              # linear history: no merge commits
             the existing dev server (<code>dev.gravitize.co.il</code>, behind your password) serving each review branch at
             <code>/review/acg-131/</code>; a static host with branch previews (e.g. Cloudflare Pages); or a local server on
             this PC reachable only on your network. Which one, and should testers' guest links ever reach a review build?</li>
-        <li><strong>14. The new Linear statuses.</strong> ACG lacks <em>Scoping</em>, <em>Ready</em>, <em>In Review</em> and
-            <em>Approved</em> (and never had <em>Needs owner</em>). Add them as named here, or map to names you prefer? And
-            does <em>Needs owner</em> stay for interactive sessions, or go away?</li>
         <li><strong>15. A second Linear member for the Lead.</strong> The flow needs "Claude Lead" as its own member (a seat).
             OK to add one, and with what name and email?</li>
         <li><strong>16. Review tasks go back to In Progress.</strong> Step 11 sends the Lead's tasks to the Dev in <em>In
-            Progress</em>, not back to <em>Ready</em>: the scope was already approved, so a review round doesn't need your
-            approval again. Right, or should a round that changes the scope go back through <em>Ready</em>?</li>
+            Progress</em>, not back to <em>Ready for Dev</em>: the scope was already approved, so a review round doesn't need your
+            approval again. Right, or should a round that changes the scope go back through <em>Ready for Dev</em>?</li>
         <li><strong>17. How retries are counted.</strong> Default: 2 retries per phase entry (a new review round resets it).
             Or 2 per ticket for its whole life?</li>
       </ol>

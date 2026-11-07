@@ -25,6 +25,8 @@ export type QueueItem = {
   title: string;
   url: string;
   class: "assigned" | "agent_ready";
+  kind?: "code" | "enrich";
+  pushed?: boolean;
   priority: number;
   reason: string;
   follow_up: boolean;
@@ -56,12 +58,15 @@ export type DevWorker = {
   allowed_tools: string;
   rules: {
     assigned: boolean;
-    agent_ready: boolean;
-    agent_ready_label: string;
+    ready_unassigned: boolean;
+    enrich: boolean;
+    enrich_since: string | null;
+    max_enrich: number;
+    enrich_push: string[];
     skip_labels: string[];
     failed_label: string;
   };
-  status_map: Record<"todo" | "in_progress" | "needs_owner" | "done" | "triage", string>;
+  status_map: Record<"todo" | "ready" | "in_progress" | "in_review" | "approved" | "done" | "triage", string>;
   queue: QueueItem[];
   last_poll_at: string | null;
   last_poll_ok_at: string | null;
@@ -76,6 +81,7 @@ export type CodeRun = {
   ticket_title: string | null;
   ticket_url: string | null;
   trigger_class: string;
+  kind?: "code" | "enrich";
   attempt: number;
   status: string;
   outcome: string | null;
@@ -202,6 +208,11 @@ export const devApi = {
     }),
   run: (slug: string, runId: string) => call<RunDetail>(`${base(slug)}/runs/${runId}`),
   terminals: (slug: string, handle: string) => call<Terminals>(`${base(slug)}/${handle}/terminals`),
+  enrich: (slug: string, handle: string, key: string) =>
+    call<{ status: string; key: string; title: string }>(`/${slug}/api/dev/${handle}/enrich`, {
+      method: "POST",
+      body: JSON.stringify({ key }),
+    }),
   stop: (slug: string, runId: string, reason?: string) =>
     call<{ status: string }>(`${base(slug)}/runs/${runId}/stop`, {
       method: "POST",
@@ -217,8 +228,8 @@ export const RUN_STATUS_LABEL: Record<string, string> = {
   preparing: "Preparing",
   running: "Running",
   done: "Done",
-  handed_off: "Needs owner",
-  ended_open: "Needs owner",
+  handed_off: "Handed to you",
+  ended_open: "Handed to you",
   failed: "Failed",
   timed_out: "Failed · limit",
   cancelled: "Stopped",

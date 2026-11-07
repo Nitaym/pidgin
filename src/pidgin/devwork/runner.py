@@ -16,9 +16,12 @@ One background thread (``DevRunner``) inside the Pidgin server:
 Each run's preparation (claim, slot or worktree, spawn) happens on its own
 short-lived thread so it never blocks polling or monitoring.
 
-v1 note: rules 1–2 and 5 are applied deterministically here; mentions and
-comments (rules 3–4) are not wired yet. To continue a handed-off ticket, the
-owner assigns it back to the developer in Todo; the comments go into the prompt.
+The owner's flow (ActualGameplay's statuses): Todo = picked from the backlog,
+which starts an *enrichment* run (make the ticket self-contained, ask the owner;
+read only); Ready for Dev = scope approved, which starts a *code* run (claim In
+Progress, branch, work, hand to the owner In Review). Hand-offs assign the owner
+and keep the status; there is no "Needs owner" status. Only tickets that enter
+Todo after enrichment is switched on are enriched (plus ones the owner pushes).
 """
 
 from __future__ import annotations
@@ -45,12 +48,19 @@ from pidgin.devwork.linear_api import (
     LinearRateLimited,
     RateInfo,
 )
-from pidgin.devwork.prompt import build_resume_prompt, build_rules, build_ticket_prompt
+from pidgin.devwork.prompt import (
+    build_enrich_prompt,
+    build_enrich_rules,
+    build_resume_prompt,
+    build_rules,
+    build_ticket_prompt,
+)
 from pidgin.util.ids import utc_now_iso
 
 log = logging.getLogger(__name__)
 
 TICK_SECONDS = 0.5
+WAITING = "Waiting for a free slot"
 META_TTL_SECONDS = 600
 RUNNING_CHECK_SECONDS = 15  # running tickets: stop signals + the owner's new comments
 HEARTBEAT_SECONDS = 5
@@ -255,6 +265,7 @@ class DevRunner:
         self._slots_cache: dict[str, tuple[float, bool]] = {}
         self._poll_state: dict[str, dict[str, Any]] = {}
         self._blocked_cache: dict[str, tuple[float, bool]] = {}
+        self._entered_todo: dict[str, str] = {}  # ticket id -> when it entered Todo
         # Live sessions: messages written to each run's stdin vs. echoed back by
         # Claude (--replay-user-messages), and the latest result event per run.
         self._sent: dict[str, int] = {}
@@ -370,7 +381,11 @@ class DevRunner:
         return self._poll_state.get(ai_employee_id)
 
     def _note_rate(
-        self, worker: dict[str, Any], client: LinearClient, poll_ms: int | None, poll_cost: int | None
+        self,
+        worker: dict[str, Any],
+        client: LinearClient,
+        poll_ms: int | None,
+        poll_cost: int | None,
     ) -> None:
         wid = worker["ai_employee_id"]
         base = self._base_interval(worker)
@@ -379,9 +394,16 @@ class DevRunner:
         before = self._poll_state.get(wid, {}).get("slowed")
         if note != before:
             if note:
-                log.warning("[devrunner] %s: slowing new-ticket checks to every %.0f s (%s)", wid, every, note)
+                log.warning(
+                    "[devrunner] %s: slowing new-ticket checks to every %.0f s (%s)",
+                    wid,
+                    every,
+                    note,
+                )
             elif before:
-                log.info("[devrunner] %s: Linear budget recovered; checking every %.0f s", wid, every)
+                log.info(
+                    "[devrunner] %s: Linear budget recovered; checking every %.0f s", wid, every
+                )
         state = self._poll_state.setdefault(wid, {})
         state.update({"every": every, "base": base, "slowed": note})
         if poll_ms is not None:
@@ -433,23 +455,8 @@ class DevRunner:
                 )
                 worker = store.get_worker(conn, wid) or worker
             meta = self._team_meta(client, worker)
-            todo_id = self._state_id(meta, worker, "todo")
-            if not todo_id:
-                raise LinearError(
-                    f"No '{worker['status_map']['todo']}' status in team {worker.get('team_key')}"
-                )
-            rules = worker["rules"]
             t0 = time.monotonic()
-            issues = client.todo_issues(
-                worker["team_id"],
-                todo_id,
-                viewer_id=worker.get("viewer_id") if rules.get("assigned", True) else None,
-                ready_label=(
-                    str(rules.get("agent_ready_label") or "agent-ready")
-                    if rules.get("agent_ready", True)
-                    else None
-                ),
-            )
+            issues = self._trigger_issues(client, worker, meta)
             self._mark_blocked(client, issues)
             poll_ms = int((time.monotonic() - t0) * 1000)
             rate = client.rate
@@ -477,6 +484,66 @@ class DevRunner:
             log.warning("[devrunner] poll failed for %s: %s", wid, exc)
         return False
 
+    def _trigger_issues(
+        self, client: LinearClient, worker: dict[str, Any], meta: dict[str, Any]
+    ) -> list[Issue]:
+        """The lists the rules pick from, filtered in Linear, in one request.
+
+        ready_mine / ready_free: Ready for Dev assigned to the worker / unassigned
+        (code runs). todo_mine / todo_free: Todo assigned to the worker / unassigned,
+        touched since enrichment was switched on (enrichment); todo_push: tickets
+        the owner pushed from the Work page. Tickets assigned to the owner (a
+        question waits) are never in a list. Old Todo tickets are dropped by when
+        they entered Todo.
+        """
+        rules = worker["rules"]
+        viewer = worker.get("viewer_id")
+        team = {"team": {"id": {"eq": worker["team_id"]}}}
+        lists: dict[str, dict[str, Any]] = {}
+        ready_id = self._state_id(meta, worker, "ready")
+        if ready_id is None:
+            raise LinearError(
+                f"No '{worker['status_map'].get('ready')}' status in team {worker.get('team_key')}"
+            )
+        ready = {**team, "state": {"id": {"eq": ready_id}}}
+        if rules.get("assigned", True) and viewer:
+            lists["ready_mine"] = {**ready, "assignee": {"id": {"eq": viewer}}}
+        if rules.get("ready_unassigned", True):
+            lists["ready_free"] = {**ready, "assignee": {"null": True}}
+        todo_id = self._state_id(meta, worker, "todo")
+        since = rules.get("enrich_since")
+        if rules.get("enrich") and todo_id and since:
+            todo = {**team, "state": {"id": {"eq": todo_id}}, "updatedAt": {"gt": since}}
+            if viewer:
+                lists["todo_mine"] = {**todo, "assignee": {"id": {"eq": viewer}}}
+            lists["todo_free"] = {**todo, "assignee": {"null": True}}
+        pushed = [str(x) for x in rules.get("enrich_push") or []]
+        if rules.get("enrich") and todo_id and pushed:
+            owner = {"id": {"neq": worker.get("owner_linear_id") or "-"}}
+            lists["todo_push"] = {
+                **team,
+                "state": {"id": {"eq": todo_id}},
+                "id": {"in": pushed},
+                "or": [{"assignee": {"null": True}}, {"assignee": owner}],
+            }
+            if not worker.get("owner_linear_id"):
+                lists["todo_push"].pop("or")
+        if not lists:
+            return []
+        found = client.issue_lists(lists)
+        todo = found.get("todo_mine", []) + found.get("todo_free", [])
+        # Old Todo tickets: only the ones that entered Todo after the switch-on.
+        seen = {i.id for i in todo}
+        self._entered_todo = {k: v for k, v in self._entered_todo.items() if k in seen}
+        missing = [i.id for i in todo if i.id not in self._entered_todo]
+        if missing and todo_id:
+            self._entered_todo.update(client.entered_state_at(missing, todo_id))
+        fresh = [i for i in todo if self._entered_todo.get(i.id, "") > str(since)]
+        push_ids = {i.id for i in found.get("todo_push", [])}
+        out: list[Issue] = found.get("ready_mine", []) + found.get("ready_free", [])
+        out += [i for i in fresh if i.id not in push_ids] + found.get("todo_push", [])
+        return out
+
     def _mark_blocked(self, client: LinearClient, issues: list[Issue]) -> None:
         """Blocked check for just the tickets the trigger query returned, cached a minute."""
         now = time.monotonic()
@@ -497,20 +564,17 @@ class DevRunner:
     ) -> list[dict[str, Any]]:
         rules = worker["rules"]
         skip = {s.lower() for s in rules.get("skip_labels", [])}
-        ready_label = str(rules.get("agent_ready_label") or "agent-ready").lower()
         viewer = worker.get("viewer_id")
+        owner = worker.get("owner_linear_id")
         out: list[dict[str, Any]] = []
         for issue in issues:
-            if issue.assignee_id == viewer and rules.get("assigned", True):
-                klass = "assigned"
-            elif (
-                issue.assignee_id is None
-                and rules.get("agent_ready", True)
-                and issue.has_label(ready_label)
-            ):
-                klass = "agent_ready"
-            else:
-                continue  # Todo on its own is never a trigger.
+            source = str(
+                issue.raw.get("_list") or ("ready_mine" if issue.assignee_id == viewer else "")
+            )
+            if not source or (owner and issue.assignee_id == owner):
+                continue  # assigned to the owner: a question or a review waits on them
+            kind = "enrich" if source.startswith("todo") else "code"
+            klass = "assigned" if issue.assignee_id == viewer else "agent_ready"
             skipped = sorted(skip.intersection(issue.label_names))
             reason = ""
             if skipped:
@@ -527,6 +591,17 @@ class DevRunner:
                 and last.get("ticket_updated_after_stop") == issue.updated_at
             ):
                 reason = "Stopped; waiting for you to touch the ticket again"
+            if (
+                not reason
+                and last
+                and last.get("kind", "code") == kind
+                and last["status"] not in ("cancelled", "dropped")
+                and (last.get("ended_at") or "") >= issue.updated_at
+                and source != "todo_push"
+            ):
+                reason = "Nothing changed since the last run; comment or reassign to restart"
+            if last and last.get("kind", "code") != kind:
+                last = None  # a code run after enrichment is a first code run
             out.append(
                 {
                     "id": issue.id,
@@ -534,6 +609,8 @@ class DevRunner:
                     "title": issue.title,
                     "url": issue.url,
                     "class": klass,
+                    "kind": kind,
+                    "pushed": source == "todo_push",
                     "priority": issue.priority,
                     "created_at": issue.created_at,
                     "updated_at": issue.updated_at,
@@ -544,19 +621,19 @@ class DevRunner:
                 }
             )
 
-        def order(item: dict[str, Any]) -> tuple[int, int, str]:
+        def order(item: dict[str, Any]) -> tuple[int, int, int, str]:
             prio = item["priority"] if item["priority"] > 0 else 5
-            return (0 if item["class"] == "assigned" else 1, prio, item["created_at"])
+            return (
+                0 if item["kind"] == "code" else 1,
+                0 if item["class"] == "assigned" else 1,
+                prio,
+                item["created_at"],
+            )
 
         out.sort(key=order)
-        has_assigned = any(i["class"] == "assigned" and not i["reason"] for i in out)
         for item in out:
             if not item["reason"]:
-                item["reason"] = (
-                    "Waits until no assigned ticket is waiting"
-                    if item["class"] == "agent_ready" and has_assigned
-                    else "Waiting for a free slot"
-                )
+                item["reason"] = WAITING
         return out
 
     def _check_running(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> None:
@@ -567,7 +644,9 @@ class DevRunner:
         running = [r for r in store.active_runs(conn, wid) if r["status"] == "running"]
         if not running:
             return
-        cursors = [r.get("comment_cursor") or r.get("started_at") or r["created_at"] for r in running]
+        cursors = [
+            r.get("comment_cursor") or r.get("started_at") or r["created_at"] for r in running
+        ]
         try:
             client = linear_for_worker(conn, worker)
             issues = {
@@ -601,7 +680,9 @@ class DevRunner:
                 continue
             self._forward_comments(conn, run, issue)
 
-    def _forward_comments(self, conn: sqlite3.Connection, run: dict[str, Any], issue: Issue) -> None:
+    def _forward_comments(
+        self, conn: sqlite3.Connection, run: dict[str, Any], issue: Issue
+    ) -> None:
         """Write the owner's new comments into the running session, oldest first."""
         cursor = run.get("comment_cursor") or run.get("started_at") or run["created_at"]
         comments = sorted(
@@ -669,36 +750,50 @@ class DevRunner:
     # -- admission -------------------------------------------------------------------
     def _admit(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> None:
         active = store.active_runs(conn, worker["ai_employee_id"])
-        slots = int(worker.get("max_concurrent") or 1) - len(active)
-        if slots <= 0:
+        waiting = [q for q in worker["queue"] if q["reason"] == WAITING]
+        if not waiting:
             return
-        if not any(
-            q["reason"] in ("Waiting for a free slot", "Waits until no assigned ticket is waiting")
-            for q in worker["queue"]
-        ):
+        picks: list[dict[str, Any]] = []
+        # Enrichment runs: read only, no slot, their own cap.
+        enrich_free = int(worker["rules"].get("max_enrich") or 2) - len(
+            [r for r in active if r.get("kind") == "enrich"]
+        )
+        picks += [q for q in waiting if q.get("kind") == "enrich"][: max(0, enrich_free)]
+        picks += self._code_picks(
+            conn, worker, active, [q for q in waiting if q.get("kind", "code") == "code"]
+        )
+        if not picks:
             return
+        self._start_runs(conn, worker, picks)
+
+    def _code_picks(
+        self,
+        conn: sqlite3.Connection,
+        worker: dict[str, Any],
+        active: list[dict[str, Any]],
+        waiting: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        slots = int(worker.get("max_concurrent") or 1) - len(
+            [r for r in active if r.get("kind", "code") == "code"]
+        )
+        if slots <= 0 or not waiting:
+            return []
         if self._uses_slots(conn, worker):
             from pidgin.devwork import terminals as dt
 
             settings = dev_slots.get_settings(conn)
             # Runs not yet holding their slot's lock count against the free ones.
-            unlocked = len([r for r in store.active_runs(conn) if r["status"] in ("queued", "claiming")])
+            unlocked = len(
+                [r for r in store.active_runs(conn) if r["status"] in ("queued", "claiming")]
+            )
             slots = min(slots, dev_slots.free_run_slots(settings, dt.list_devs(conn)) - unlocked)
-            if slots <= 0:
-                return
-        queue = [
-            q
-            for q in worker["queue"]
-            if q["reason"]
-            in ("Waiting for a free slot", "Waits until no assigned ticket is waiting")
-        ]
-        assigned = [q for q in queue if q["class"] == "assigned"]
-        picks = assigned[:slots]
-        if not assigned:
-            picks = [q for q in queue if q["class"] == "agent_ready"][:slots]
-        if not picks:
-            return
+        return waiting[: max(0, slots)]
+
+    def _start_runs(
+        self, conn: sqlite3.Connection, worker: dict[str, Any], picks: list[dict[str, Any]]
+    ) -> None:
         remaining = [q for q in worker["queue"] if q["id"] not in {p["id"] for p in picks}]
+        pushed = list(worker["rules"].get("enrich_push") or [])
         for item in picks:
             klass = item["class"]
             if item.get("follow_up"):
@@ -715,14 +810,23 @@ class DevRunner:
                 trigger_class=klass,
                 ticket_touched_at=item.get("updated_at"),
                 ticket_seen_at=item.get("seen_at"),
+                kind=item.get("kind", "code"),
             )
             if run_id is None:
                 continue
-            store.add_event(
-                conn, run_id, "queued", f"Queued ({item['class'].replace('_', '-')} ticket in Todo)"
+            what = (
+                f"enrichment ({'pushed from Pidgin' if item.get('pushed') else 'new in ' + worker['status_map'].get('todo', 'Todo')})"
+                if item.get("kind") == "enrich"
+                else f"{'assigned' if item['class'] == 'assigned' else 'unassigned'} ticket in {worker['status_map'].get('ready', 'Ready for Dev')}"
             )
+            store.add_event(conn, run_id, "queued", f"Queued: {what}")
+            if item["id"] in pushed:
+                pushed.remove(item["id"])
             self._start_prepare(run_id, recovering=False)
-        store.update_worker(conn, worker["ai_employee_id"], {"queue": remaining})
+        updates: dict[str, Any] = {"queue": remaining}
+        if pushed != list(worker["rules"].get("enrich_push") or []):
+            updates["rules"] = {**worker["rules"], "enrich_push": pushed}
+        store.update_worker(conn, worker["ai_employee_id"], updates)
 
     def _uses_slots(self, conn: sqlite3.Connection, worker: dict[str, Any]) -> bool:
         """Runs work in the dev slots when the slots folder holds this repo's worktrees;
@@ -784,10 +888,14 @@ class DevRunner:
         store.update_run(conn, run_id, status="claiming")
         full = client.issue_full(run["ticket_id"])
         issue = LinearClient.as_issue(full)
-        already_ours = issue.state_id == in_progress and issue.assignee_id == viewer
-        eligible = issue.state_id == self._state_id(meta, worker, "todo") and (
-            issue.assignee_id == viewer
-            or (issue.assignee_id is None and run["trigger_class"] == "agent_ready")
+        enrich = run.get("kind") == "enrich"
+        start_state = self._state_id(meta, worker, "todo" if enrich else "ready")
+        already_ours = (
+            issue.state_id == (start_state if enrich else in_progress)
+            and issue.assignee_id == viewer
+        )
+        eligible = issue.state_id == start_state and (
+            issue.assignee_id == viewer or issue.assignee_id is None
         )
         if not (eligible or (recovering and already_ours)):
             store.update_run(
@@ -800,6 +908,17 @@ class DevRunner:
             store.add_event(
                 conn, run_id, "dropped", "Dropped: the ticket changed before it started"
             )
+            return
+        if enrich:
+            if issue.assignee_id != viewer:
+                client.update_issue(issue.id, assignee_id=viewer)
+            store.add_event(
+                conn,
+                run_id,
+                "claimed",
+                f"Enriching: assigned to {worker.get('viewer_name') or 'the developer'}, status stays {issue.state_name}",
+            )
+            self._prepare_enrich(conn, run, worker, client, full, issue)
             return
         if not already_ours:
             client.update_issue(issue.id, state_id=in_progress, assignee_id=viewer)
@@ -856,7 +975,11 @@ class DevRunner:
             )
 
         # 3. Prompt, rules, ticket tools, then Claude Code.
-        earlier = [r for r in store.runs_for_ticket(conn, issue.id) if r["id"] != run_id]
+        earlier = [
+            r
+            for r in store.runs_for_ticket(conn, issue.id)
+            if r["id"] != run_id and r.get("kind", "code") == "code"
+        ]
         resume_from = resumable_session(earlier, str(path))
         if resume_from:
             previous, resume_session = resume_from
@@ -882,6 +1005,127 @@ class DevRunner:
         rules = build_rules(
             ticket_key=issue.key, owner_name=worker.get("owner_linear_name") or "the owner"
         )
+        tools = [t.strip() for t in str(worker.get("allowed_tools") or "").split(",") if t.strip()]
+        perm = (
+            ["--permission-mode", "bypassPermissions"]
+            if worker.get("permission_mode") == "bypass"
+            else ["--permission-mode", "acceptEdits", "--allowedTools", *tools, "mcp__ticket"]
+        )
+        self._spawn(
+            conn,
+            run,
+            worker,
+            client,
+            full,
+            issue,
+            path=Path(path),
+            log_dir=log_dir,
+            prompt=prompt,
+            rules=rules,
+            perm=perm,
+            resume_session=resume_session,
+            branch=branch,
+            comment_start=not already_ours,
+        )
+
+    def _prepare_enrich(
+        self,
+        conn: sqlite3.Connection,
+        run: dict[str, Any],
+        worker: dict[str, Any],
+        client: LinearClient,
+        full: dict[str, Any],
+        issue: Issue,
+    ) -> None:
+        """Enrichment: Claude Code in the main checkout, read only, with the enrich tools."""
+        run_id = run["id"]
+        path = Path(worker["repo_path"])
+        log_dir = self._db_path.parent / "runs" / run_id if self._db_path else path / ".pidgin-run"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        store.update_run(
+            conn, run_id, status="preparing", worktree_path=str(path), log_dir=str(log_dir)
+        )
+        earlier = [
+            r
+            for r in store.runs_for_ticket(conn, issue.id)
+            if r["id"] != run_id and r.get("kind") == "enrich"
+        ]
+        resume_from = resumable_session(earlier, str(path))
+        if resume_from:
+            previous, resume_session = resume_from
+            prompt = build_resume_prompt(full, worker=worker, run=run, previous=previous)
+        else:
+            resume_session = None
+            prompt = build_enrich_prompt(full, worker=worker, run=run, earlier_runs=earlier)
+        rules = build_enrich_rules(
+            ticket_key=issue.key,
+            owner_name=worker.get("owner_linear_name") or "the owner",
+            ready_status=worker["status_map"].get("ready", "Ready for Dev"),
+        )
+        read_only = [
+            "Read",
+            "Glob",
+            "Grep",
+            "WebFetch",
+            "TodoWrite",
+            "Bash(git log:*)",
+            "Bash(git show:*)",
+            "Bash(git diff:*)",
+            "Bash(git status:*)",
+            "Bash(ls:*)",
+            "Bash(rg:*)",
+            "Bash(grep:*)",
+            "Bash(cat:*)",
+        ]
+        perm = [
+            "--permission-mode",
+            "default",
+            "--allowedTools",
+            *read_only,
+            "mcp__ticket",
+            "--disallowedTools",
+            "Edit",
+            "Write",
+            "MultiEdit",
+            "NotebookEdit",
+        ]
+        self._spawn(
+            conn,
+            run,
+            worker,
+            client,
+            full,
+            issue,
+            path=path,
+            log_dir=log_dir,
+            prompt=prompt,
+            rules=rules,
+            perm=perm,
+            resume_session=resume_session,
+            branch=None,
+            comment_start=False,
+        )
+
+    def _spawn(
+        self,
+        conn: sqlite3.Connection,
+        run: dict[str, Any],
+        worker: dict[str, Any],
+        client: LinearClient,
+        full: dict[str, Any],
+        issue: Issue,
+        *,
+        path: Path,
+        log_dir: Path,
+        prompt: str,
+        rules: str,
+        perm: list[str],
+        resume_session: str | None,
+        branch: str | None,
+        comment_start: bool,
+    ) -> None:
+        run_id = run["id"]
+        already_ours = not comment_start
         (log_dir / "prompt.md").write_text(prompt, encoding="utf-8")
         (log_dir / "rules.md").write_text(rules, encoding="utf-8")
         import sys
@@ -928,13 +1172,7 @@ class DevRunner:
             args += ["--resume", resume_session]
         if worker.get("model"):
             args += ["--model", str(worker["model"])]
-        if worker.get("permission_mode") == "bypass":
-            args += ["--permission-mode", "bypassPermissions"]
-        else:
-            tools = [
-                t.strip() for t in str(worker.get("allowed_tools") or "").split(",") if t.strip()
-            ]
-            args += ["--permission-mode", "acceptEdits", "--allowedTools", *tools, "mcp__ticket"]
+        args += perm
         # Runs use the machine's logged-in Claude subscription, never API billing:
         # drop Pidgin's own API keys so `claude` can't pick them up.
         env = {
@@ -965,10 +1203,14 @@ class DevRunner:
         self._results.pop(run_id, None)
         self._write_user(run_id, prompt)  # the ticket prompt is the first message
         comment_times = [
-            str(c.get("createdAt")) for c in (full.get("comments") or {}).get("nodes", []) if c.get("createdAt")
+            str(c.get("createdAt"))
+            for c in (full.get("comments") or {}).get("nodes", [])
+            if c.get("createdAt")
         ]
         store.update_run(
-            conn, run_id, comment_cursor=max(comment_times) if comment_times else full.get("createdAt")
+            conn,
+            run_id,
+            comment_cursor=max(comment_times) if comment_times else full.get("createdAt"),
         )
         now = utc_now_iso()
         store.update_run(
@@ -982,7 +1224,9 @@ class DevRunner:
             last_output_at=now,
         )
         slots_dir = dev_slots.get_settings(conn)["slots_dir"]
-        if os.path.normcase(str(Path(path).parent)) == os.path.normcase(str(Path(slots_dir))):
+        if branch and os.path.normcase(str(Path(path).parent)) == os.path.normcase(
+            str(Path(slots_dir))
+        ):
             # The slot stays taken for as long as this Claude Code process lives,
             # even across a Pidgin restart.
             dev_slots.write_lock(
@@ -1026,7 +1270,8 @@ class DevRunner:
                 if prefer is None:
                     earlier = store.runs_for_ticket(conn, run["ticket_id"])
                     last_path = next(
-                        (r["worktree_path"] for r in reversed(earlier) if r.get("worktree_path")), None
+                        (r["worktree_path"] for r in reversed(earlier) if r.get("worktree_path")),
+                        None,
                     )
                     if last_path and os.path.normcase(str(Path(last_path).parent)) == slots_dir:
                         prefer = Path(last_path).name
@@ -1069,7 +1314,11 @@ class DevRunner:
         if not path:
             return
         lock = dev_slots.read_lock(Path(path))
-        if lock and lock.get("mode") == "pidgin-run" and lock.get("ticket") == run.get("ticket_key"):
+        if (
+            lock
+            and lock.get("mode") == "pidgin-run"
+            and lock.get("ticket") == run.get("ticket_key")
+        ):
             dev_slots.clear_lock(path, None)
 
     def _worktree_for_branch(self, repo: Path, branch: str) -> Path | None:
@@ -1258,7 +1507,7 @@ class DevRunner:
         if how == "cancelled":
             self._stop_ticket(conn, client, worker, run)
             return
-        if outcome == "done":
+        if outcome in ("done", "in_review", "scoped"):
             store.update_run(conn, run["id"], status="done")
             return
         if outcome in ("needs_owner", "blocked"):
@@ -1297,10 +1546,16 @@ class DevRunner:
                     why += ". Log in again: run `claude` in a terminal on this computer and use /login."
             self._fail(conn, run, why, commits=commits, client=client)
             return
-        # Clean exit but no hand-off: hand it to the owner so it never sits In Progress unowned.
+        # Clean exit but no hand-off: hand it to the owner (status unchanged) so it never sits unowned.
         last_text = str(result.get("result") or "").strip()
+        enrich = run.get("kind") == "enrich"
+        again = (
+            "Comment and assign it back to me to continue."
+            if enrich
+            else f"To continue, comment, move it to {worker['status_map'].get('ready', 'Ready for Dev')} and assign it to me."
+        )
         body = (
-            "**Needs owner:** the run ended without a hand-off.\n\n"
+            f"**For you:** the {'enrichment' if enrich else 'run'} ended without a hand-off.\n\n"
             + (
                 f"Its last message:\n\n> {last_text[:1500].replace(chr(10), chr(10) + '> ')}\n\n"
                 if last_text
@@ -1311,16 +1566,11 @@ class DevRunner:
                 if run.get("branch")
                 else ""
             )
-            + "Assign it back to me in Todo with a comment to continue."
+            + again
         )
         try:
-            meta = self._team_meta(client, worker)
             client.comment(run["ticket_id"], body)
-            client.update_issue(
-                run["ticket_id"],
-                state_id=self._state_id(meta, worker, "needs_owner"),
-                assignee_id=worker.get("owner_linear_id"),
-            )
+            client.update_issue(run["ticket_id"], assignee_id=worker.get("owner_linear_id"))
         except LinearError as exc:
             store.add_event(conn, run["id"], "error", f"Could not hand off in Linear: {exc}")
         store.update_run(
@@ -1339,7 +1589,9 @@ class DevRunner:
         commits: list[str] | None = None,
         client: LinearClient | None = None,
     ) -> None:
-        """Failure path (spec §5.5.7): comment, back to Todo, label runner-failed."""
+        """Failure path (spec §5.5.7): comment and label runner-failed. A code run goes
+        back to Ready for Dev (still assigned, skipped until the label is removed); an
+        enrichment stays in Todo and goes to the owner."""
         store.update_run(
             conn, run["id"], status=status, failure_reason=reason[:500], ended_at=utc_now_iso()
         )
@@ -1354,16 +1606,27 @@ class DevRunner:
             label_name = worker.get("rules", {}).get("failed_label", "runner-failed")
             label_id = client.ensure_label(label_name, worker["team_id"])
             issue = client.issue(run["ticket_id"])
-            body = f"**Run failed:** {reason}."
+            enrich = run.get("kind") == "enrich"
+            body = f"**{'Enrichment' if enrich else 'Run'} failed:** {reason}."
             if run.get("branch"):
                 body += f"\n\n- Branch kept: `{run['branch']}` ({len(commits or [])} commits). Worktree: `{run.get('worktree_path')}`"
-            body += f"\n- Back in Todo with `{label_name}`. Remove the label (or press Retry in Pidgin) to try again."
-            client.comment(issue.id, body)
-            client.update_issue(
-                issue.id,
-                state_id=self._state_id(meta, worker, "todo"),
-                label_ids=list({*issue.label_ids.values(), label_id}),
-            )
+            if enrich:
+                body += f"\n- Labelled `{label_name}` and assigned to you. Remove the label and assign it back to me to try again."
+                client.comment(issue.id, body)
+                client.update_issue(
+                    issue.id,
+                    assignee_id=worker.get("owner_linear_id"),
+                    label_ids=list({*issue.label_ids.values(), label_id}),
+                )
+            else:
+                ready = worker["status_map"].get("ready", "Ready for Dev")
+                body += f"\n- Back in {ready} with `{label_name}`. Remove the label (or press Retry in Pidgin) to try again."
+                client.comment(issue.id, body)
+                client.update_issue(
+                    issue.id,
+                    state_id=self._state_id(meta, worker, "ready"),
+                    label_ids=list({*issue.label_ids.values(), label_id}),
+                )
         except LinearError as exc:
             store.add_event(
                 conn, run["id"], "error", f"Could not report the failure in Linear: {exc}"
@@ -1382,13 +1645,13 @@ class DevRunner:
         if who == "Linear":
             return  # The owner already moved the ticket; don't fight it.
         try:
-            meta = self._team_meta(client, worker)
             client.comment(
                 run["ticket_id"],
-                f"**Stopped** by {who} in Pidgin. Branch kept: `{run.get('branch')}`. "
-                "It won't restart until the ticket is touched again (re-assign, edit or comment).",
+                f"**Stopped** by {who} in Pidgin"
+                + (f". Branch kept: `{run.get('branch')}`" if run.get("branch") else "")
+                + ". Assigned to you, status unchanged; assign it back to me to continue.",
             )
-            client.update_issue(run["ticket_id"], state_id=self._state_id(meta, worker, "todo"))
+            client.update_issue(run["ticket_id"], assignee_id=worker.get("owner_linear_id"))
             issue = client.issue(run["ticket_id"])
             store.update_run(conn, run["id"], ticket_updated_after_stop=issue.updated_at)
         except LinearError as exc:

@@ -26,6 +26,12 @@ PROTOCOL_VERSION = "2025-06-18"
 MAX_COMMENTS = 12
 MIN_COMMENT_GAP_S = 120
 
+_READ_TOOL: dict[str, Any] = {
+    "name": "read",
+    "description": "Re-read this ticket: description, status and all comments (to see replies mid-run).",
+    "inputSchema": {"type": "object", "properties": {}},
+}
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "read",
@@ -42,22 +48,26 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "done",
-        "description": "Finish: comment what was done (and the commits), set the ticket to Done. Ends the run.",
+        "name": "in_review",
+        "description": "Finish: the work is done and checked. Comments what changed and what to check, sets In Review and assigns the owner. Ends the run.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "summary": {
                     "type": "string",
-                    "description": "What was done, commits, how it was checked.",
-                }
+                    "description": "What changed, the commits, how you checked it.",
+                },
+                "check": {
+                    "type": "string",
+                    "description": "What the owner should check and exactly how.",
+                },
             },
-            "required": ["summary"],
+            "required": ["summary", "check"],
         },
     },
     {
-        "name": "needs_owner",
-        "description": "Hand off to the owner: set Needs owner, assign the owner, post a self-contained hand-off. Ends the run.",
+        "name": "hand_off",
+        "description": "Hand off to the owner (status unchanged, assigned to the owner) with a self-contained comment. Ends the run.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -149,19 +159,18 @@ class TicketTools:
         )
         self.conn.commit()
 
-    def _hand_to_owner(self, body: str) -> str:
+    def _hand_to_owner(self, body: str, *, state: str | None = None) -> str:
+        """Post the comment and assign the owner; the status changes only when asked."""
         owner_id = self.worker.get("owner_linear_id")
-        needs_owner = self._state_id("needs_owner")
-        if needs_owner:
-            self._post(body)
-            self.linear.update_issue(
-                self.run["ticket_id"], state_id=needs_owner, assignee_id=owner_id
-            )
-            return "Ticket set to Needs owner and assigned to the owner."
-        # Fallback from the repo's tracking doc: In Progress + owner + "Needs owner:" comment.
-        self._post(body if body.startswith("**Needs owner") else f"Needs owner: {body}")
-        self.linear.update_issue(self.run["ticket_id"], assignee_id=owner_id)
-        return "No 'Needs owner' status in this team; assigned to the owner with a 'Needs owner:' comment."
+        self._post(body)
+        state_id = self._state_id(state) if state else None
+        self.linear.update_issue(self.run["ticket_id"], assignee_id=owner_id, state_id=state_id)
+        where = f"set to {self.worker['status_map'].get(state)} and " if state_id else ""
+        return f"Ticket {where}assigned to the owner."
+
+    @property
+    def tools(self) -> list[dict[str, Any]]:
+        return ENRICH_TOOLS if self.run.get("kind") == "enrich" else TOOLS
 
     # -- tools --------------------------------------------------------------
     def call(self, name: str, args: dict[str, Any]) -> str:
@@ -198,20 +207,59 @@ class TicketTools:
             self._event("comment", body.splitlines()[0][:200])
             return "Comment posted."
 
-        if name == "done":
-            summary = str(args.get("summary") or "").strip()
-            self._post(f"**Done:** {summary}")
-            done_id = self._state_id("done")
-            if done_id:
-                self.linear.update_issue(self.run["ticket_id"], state_id=done_id)
-            self._finish("done", summary)
-            self._event("outcome", "Done", {"summary": summary})
-            return "Ticket set to Done. You can stop now."
+        if name not in {t["name"] for t in self.tools}:
+            raise ValueError(f"Unknown tool: {name}")
 
-        if name in ("needs_owner", "blocked"):
-            if name == "needs_owner":
+        if name == "in_review":
+            summary = str(args.get("summary") or "").strip()
+            body = f"**In review:** {summary}\n\n- **Check:** {str(args.get('check') or '').strip()}"
+            run = store.get_run(self.conn, self.run_id) or self.run
+            if run.get("branch"):
+                body += f"\n- **Branch:** `{run['branch']}` (not pushed)."
+            result = self._hand_to_owner(body, state="in_review")
+            self._finish("in_review", summary)
+            self._event("outcome", "In review: handed to the owner", {"summary": summary})
+            return result + " You can stop now."
+
+        if name == "update_description":
+            new = str(args.get("description") or "").strip()
+            if not new:
+                return "Empty description not saved."
+            current = self.linear.issue_full(self.run["ticket_id"]).get("description") or ""
+            original = current.split(ORIGINAL_MARK, 1)[1] if ORIGINAL_MARK in current else current
+            text = new
+            if original.strip():
+                text += f"\n\n---\n{ORIGINAL_MARK}\n**Original description:**\n\n{original.strip()}"
+            self.linear.update_issue(self.run["ticket_id"], description=text)
+            self._event("description", "Rewrote the description", {"length": len(new)})
+            return "Description updated (the original is kept at the bottom)."
+
+        if name == "ask_owner":
+            parts = [f"**Questions before this is ready:**\n\n{str(args.get('questions') or '').strip()}"]
+            if args.get("context"):
+                parts += ["", str(args["context"]).strip()]
+            parts += ["", "_Assign it back to me when you've answered._"]
+            result = self._hand_to_owner("\n".join(parts))
+            summary = "Asked the owner: " + str(args.get("questions") or "").strip()[:300]
+            self._finish("blocked", summary)
+            self._event("outcome", "Asked the owner", {"summary": summary})
+            return result + " You can stop now."
+
+        if name == "scoped":
+            summary = str(args.get("summary") or "").strip()
+            ready = self.worker["status_map"].get("ready", "Ready for Dev")
+            result = self._hand_to_owner(
+                f"**Scope ready for your review:**\n\n{summary}\n\n"
+                f"_Set **{ready}** to start it, or comment and assign it back to me._"
+            )
+            self._finish("scoped", summary)
+            self._event("outcome", "Scoped: handed to the owner to approve", {"summary": summary})
+            return result + " You can stop now."
+
+        if name in ("hand_off", "blocked"):
+            if name == "hand_off":
                 parts = [
-                    f"**Needs owner:** {args.get('done', '').strip()}",
+                    f"**For you to check:** {args.get('done', '').strip()}",
                     "",
                     f"- **Check:** {args.get('check', '').strip()}",
                 ]
@@ -221,7 +269,7 @@ class TicketTools:
                     parts.append(f"- **Not done:** {str(args['not_done']).strip()}")
                 summary = str(args.get("done", ""))
             else:
-                parts = [f"**Needs owner (blocked):** {str(args.get('question', '')).strip()}"]
+                parts = [f"**Blocked, question for you:** {str(args.get('question', '')).strip()}"]
                 if args.get("context"):
                     parts += ["", str(args["context"]).strip()]
                 summary = "Blocked: " + str(args.get("question", ""))
@@ -231,7 +279,7 @@ class TicketTools:
                     f"- **Branch:** `{run['branch']}` (not pushed). Worktree: `{run.get('worktree_path')}`"
                 )
             result = self._hand_to_owner("\n".join(p for p in parts if p is not None))
-            outcome = "needs_owner" if name == "needs_owner" else "blocked"
+            outcome = "needs_owner" if name == "hand_off" else "blocked"
             self._finish(outcome, summary)
             self._event(
                 "outcome",
@@ -286,7 +334,7 @@ def serve(tools: TicketTools) -> None:
                     "serverInfo": {"name": "pidgin-ticket", "version": "0.1.0"},
                 }
             elif method == "tools/list":
-                result = {"tools": TOOLS}
+                result = {"tools": tools.tools}
             elif method == "tools/call":
                 params = msg.get("params") or {}
                 try:
@@ -324,3 +372,42 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+ENRICH_TOOLS: list[dict[str, Any]] = [
+    _READ_TOOL,
+    TOOLS[1],  # comment
+    {
+        "name": "update_description",
+        "description": "Rewrite the ticket's description into the self-contained version (the original is kept at the bottom).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"description": {"type": "string", "description": "The full new description (markdown)."}},
+            "required": ["description"],
+        },
+    },
+    {
+        "name": "ask_owner",
+        "description": "Ask the owner what only they can answer; the ticket is assigned to them until they reply. Ends the run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "questions": {"type": "string", "description": "Numbered questions, each with the options and what each costs."},
+                "context": {"type": "string", "description": "What you found so far, self-contained. Optional."},
+            },
+            "required": ["questions"],
+        },
+    },
+    {
+        "name": "scoped",
+        "description": "The ticket is ready for development: summarise the scope; it goes to the owner to approve. Ends the run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"summary": {"type": "string", "description": "The scope in a few lines, and the Done when list."}},
+            "required": ["summary"],
+        },
+    },
+    TOOLS[-1],  # file_triage
+]
+
+ORIGINAL_MARK = "<!-- original description -->"

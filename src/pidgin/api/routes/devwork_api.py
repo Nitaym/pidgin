@@ -24,6 +24,7 @@ from pidgin.devwork.runner import (
     linear_for_worker,
 )
 from pidgin.devwork.transcript import transcript
+from pidgin.util.ids import utc_now_iso
 
 router = APIRouter(prefix="/{workspace_slug}/api/dev", tags=["devwork"])
 
@@ -55,6 +56,10 @@ class WorkerConfigBody(BaseModel):
 class RepoCheckBody(BaseModel):
     path: str
     base_branch: str = "main"
+
+
+class EnrichBody(BaseModel):
+    key: str
 
 
 class StopBody(BaseModel):
@@ -220,7 +225,13 @@ def api_dev_config(
             pass
     if "rules" in updates:
         current = store.get_worker(conn, agent["id"]) or {}
-        updates["rules"] = {**current.get("rules", {}), **updates["rules"]}
+        before = current.get("rules", {})
+        updates["rules"] = {**before, **updates["rules"]}
+        if updates["rules"].get("enrich") and not before.get("enrich"):
+            # Switching enrichment on: only tickets that enter Todo from now on.
+            updates["rules"]["enrich_since"] = utc_now_iso()
+        if "max_enrich" in updates["rules"]:
+            updates["rules"]["max_enrich"] = max(1, min(int(updates["rules"]["max_enrich"] or 2), 6))
     if "status_map" in updates:
         current = store.get_worker(conn, agent["id"]) or {}
         updates["status_map"] = {**current.get("status_map", {}), **updates["status_map"]}
@@ -228,6 +239,34 @@ def api_dev_config(
     if updates.get("enabled") == 1:
         store.update_worker(conn, agent["id"], {"last_poll_at": None})
     return store.get_worker(conn, agent["id"]) or {}
+
+
+@router.post("/{handle}/enrich")
+def api_dev_enrich(workspace_slug: str, handle: str, body: EnrichBody, request: Request) -> dict[str, Any]:
+    """Push one Todo ticket into enrichment, whenever it entered Todo."""
+    session = require_workspace_session(request, workspace_slug)
+    conn = session.conn
+    agent = _agent(conn, handle)
+    worker = store.get_worker(conn, agent["id"])
+    if worker is None or not worker.get("linear_installation_id"):
+        raise HTTPException(status_code=400, detail="Set up Linear first")
+    if not worker["rules"].get("enrich"):
+        raise HTTPException(status_code=400, detail="Switch on enrichment first")
+    key = body.key.strip().upper()
+    try:
+        issue = linear_for_worker(conn, worker).issue(key)
+    except LinearError as exc:
+        raise HTTPException(status_code=404, detail=f"{key}: {exc}") from exc
+    todo = worker["status_map"].get("todo", "Todo")
+    if issue.state_name.lower() != todo.lower():
+        raise HTTPException(status_code=400, detail=f"{key} is in {issue.state_name}, not {todo}")
+    if worker.get("owner_linear_id") and issue.assignee_id == worker["owner_linear_id"]:
+        raise HTTPException(status_code=400, detail=f"{key} is assigned to you; assign it to Claude or unassign it")
+    pushed = [x for x in worker["rules"].get("enrich_push") or [] if x != issue.id] + [issue.id]
+    store.update_worker(
+        conn, agent["id"], {"rules": {**worker["rules"], "enrich_push": pushed}, "last_poll_at": None}
+    )
+    return {"status": "queued", "key": issue.key, "title": issue.title}
 
 
 @router.post("/{handle}/poll-now")

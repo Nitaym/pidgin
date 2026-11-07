@@ -13,17 +13,27 @@ ACTIVE_STATUSES = ("queued", "claiming", "preparing", "running")
 FINAL_STATUSES = ("done", "handed_off", "ended_open", "failed", "timed_out", "cancelled", "dropped")
 
 DEFAULT_RULES: dict[str, Any] = {
-    "assigned": True,  # rule 1: assigned to the worker in Todo
-    "agent_ready": True,  # rule 2: unassigned agent-ready in Todo, when nothing assigned waits
-    "agent_ready_label": "agent-ready",
+    # Code: Ready for Dev (the owner approved the scope) assigned to the worker...
+    "assigned": True,
+    # ...or unassigned (the worker assigns it to itself when it starts).
+    "ready_unassigned": True,
+    # Enrichment: a ticket arriving in Todo (the owner picked it from the backlog)
+    # is made self-contained, with questions to the owner. Only tickets that enter
+    # Todo after the rule is switched on (enrich_since), plus ones the owner pushes.
+    "enrich": False,
+    "enrich_since": None,
+    "max_enrich": 2,
+    "enrich_push": [],
     "skip_labels": ["owner-only", "runner-failed"],
     "failed_label": "runner-failed",
 }
 
 DEFAULT_STATUS_MAP: dict[str, str] = {
-    "todo": "Todo",
+    "todo": "Todo",  # picked from the backlog: enrichment
+    "ready": "Ready for Dev",  # scope approved by the owner: code
     "in_progress": "In Progress",
-    "needs_owner": "Needs owner",
+    "in_review": "In Review",
+    "approved": "Approved",
     "done": "Done",
     "triage": "Triage",
 }
@@ -100,6 +110,7 @@ def get_worker(conn: sqlite3.Connection, ai_employee_id: str) -> dict[str, Any] 
     data = dict(row)
     data["rules"] = {**DEFAULT_RULES, **json.loads(data.pop("rules_json") or "{}")}
     data["status_map"] = {**DEFAULT_STATUS_MAP, **json.loads(data.pop("status_map_json") or "{}")}
+    data["status_map"].pop("needs_owner", None)  # no such status in the owner's flow
     data["queue"] = json.loads(data.pop("queue_json") or "[]")
     if not data.get("allowed_tools"):
         data["allowed_tools"] = DEFAULT_ALLOWED_TOOLS
@@ -189,6 +200,7 @@ def create_run(
     trigger_class: str,
     ticket_touched_at: str | None = None,
     ticket_seen_at: str | None = None,
+    kind: str = "code",
 ) -> str | None:
     """Insert a queued run. Returns None if the ticket already has an active run."""
     attempt_row = conn.execute(
@@ -200,8 +212,8 @@ def create_run(
         conn.execute(
             """INSERT INTO code_runs (id, ai_employee_id, ticket_id, ticket_key, ticket_title,
                  ticket_url, trigger_class, attempt, status, created_at,
-                 ticket_touched_at, ticket_seen_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)""",
+                 ticket_touched_at, ticket_seen_at, kind)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)""",
             (
                 run_id,
                 ai_employee_id,
@@ -214,6 +226,7 @@ def create_run(
                 utc_now_iso(),
                 ticket_touched_at,
                 ticket_seen_at,
+                kind,
             ),
         )
         conn.commit()

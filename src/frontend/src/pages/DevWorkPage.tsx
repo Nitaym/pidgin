@@ -274,35 +274,55 @@ function SetupPanel({
         <label className="dw-toggle-row">
           <input
             type="checkbox"
-            checked={rules.assigned}
-            onChange={(e) => set({ rules: { ...rules, assigned: e.target.checked } })}
+            checked={rules.enrich}
+            onChange={(e) => set({ rules: { ...rules, enrich: e.target.checked } })}
           />
           <span>
-            A ticket is <strong>assigned to {w.viewer_name ?? "the developer"}</strong> and in{" "}
-            <strong>{statusMap.todo}</strong>
-            <div className="muted">Assigned work always goes first.</div>
+            <strong>Enrich</strong>: a ticket arrives in <strong>{statusMap.todo}</strong> (you picked it from the backlog)
+            <div className="muted">
+              It makes the ticket self-contained and asks you what only you can answer (assigned to you until you reply and
+              assign it back), then hands it to you to set <strong>{statusMap.ready}</strong>. Reads the repo, never changes
+              it.{" "}
+              {rules.enrich && w.rules.enrich_since
+                ? `Only tickets that entered ${statusMap.todo} after ${new Date(w.rules.enrich_since).toLocaleString()}; push older ones from the queue.`
+                : `Only tickets that enter ${statusMap.todo} after you switch this on; older ones can be pushed one at a time.`}
+            </div>
           </span>
         </label>
         <label className="dw-toggle-row">
           <input
             type="checkbox"
-            checked={rules.agent_ready}
-            onChange={(e) => set({ rules: { ...rules, agent_ready: e.target.checked } })}
+            checked={rules.assigned}
+            onChange={(e) => set({ rules: { ...rules, assigned: e.target.checked } })}
           />
           <span>
-            An <strong>unassigned</strong> {statusMap.todo} ticket has the <code>{rules.agent_ready_label}</code> label
-            <div className="muted">Only when nothing assigned is waiting. It assigns the ticket to itself when it starts.</div>
+            <strong>Code</strong>: a ticket in <strong>{statusMap.ready}</strong> is assigned to{" "}
+            <strong>{w.viewer_name ?? "the developer"}</strong>
+            <div className="muted">
+              It claims it ({statusMap.in_progress}), works on a branch in a dev slot, and hands it to you in{" "}
+              {statusMap.in_review}.
+            </div>
+          </span>
+        </label>
+        <label className="dw-toggle-row">
+          <input
+            type="checkbox"
+            checked={rules.ready_unassigned}
+            onChange={(e) => set({ rules: { ...rules, ready_unassigned: e.target.checked } })}
+          />
+          <span>
+            <strong>Code</strong>: an <strong>unassigned</strong> {statusMap.ready} ticket
+            <div className="muted">It assigns the ticket to itself when it starts.</div>
           </span>
         </label>
         <p className="muted" style={{ margin: "6px 0 0" }}>
-          Moving a ticket to {statusMap.todo} on its own does nothing. Skips tickets labelled{" "}
+          Never touches Backlog or tickets assigned to you. Skips tickets labelled{" "}
           {rules.skip_labels.map((l) => (
             <code key={l} style={{ marginRight: 4 }}>
               {l}
             </code>
           ))}
-          and blocked ones. Mentions and comments don't start work yet: to continue a handed-off ticket, assign it back
-          in {statusMap.todo}.
+          and blocked ones. Hand-offs assign the ticket to you and keep its status.
         </p>
       </div>
 
@@ -321,6 +341,16 @@ function SetupPanel({
           <input type="number" value={v("max_turns")} onChange={(e) => set({ max_turns: Number(e.target.value) })} />
         </div>
         <div className="field">
+          <label>Enrichments at once</label>
+          <input
+            type="number"
+            min={1}
+            max={6}
+            value={rules.max_enrich}
+            onChange={(e) => set({ rules: { ...rules, max_enrich: Number(e.target.value) } })}
+          />
+        </div>
+        <div className="field">
           <label>Check for new tickets every (s)</label>
           <input type="number" min={5} value={v("poll_seconds")} onChange={(e) => set({ poll_seconds: Number(e.target.value) })} />
         </div>
@@ -328,10 +358,20 @@ function SetupPanel({
 
       <h4 style={{ margin: "8px 0 0" }}>Statuses</h4>
       <div className="dw-grid4">
-        {(["todo", "in_progress", "needs_owner", "done", "triage"] as const).map((key) => (
+        {(["todo", "ready", "in_progress", "in_review", "approved", "done", "triage"] as const).map((key) => (
           <div className="field" key={key}>
             <label>
-              {{ todo: "Picks up from", in_progress: "Claims as", needs_owner: "Hands off as", done: "Finishes as", triage: "Files new work in" }[key]}
+              {
+                {
+                  todo: "Enriches from",
+                  ready: "Codes from (scope approved)",
+                  in_progress: "Claims as",
+                  in_review: "Hands in as",
+                  approved: "You approve as",
+                  done: "Done",
+                  triage: "Files new work in",
+                }[key]
+              }
             </label>
             {states.length ? (
               <select
@@ -354,9 +394,7 @@ function SetupPanel({
       {missingStatuses.length ? (
         <div className="dw-banner warn">
           Not in this team's workflow: {missingStatuses.map(([, n]) => n).join(", ")}.
-          {missingStatuses.some(([k]) => k === "needs_owner")
-            ? " Hand-offs will stay In Progress, assigned to the owner, with a comment starting 'Needs owner:'."
-            : ""}
+
         </div>
       ) : null}
 
@@ -418,8 +456,8 @@ function WorkerTerminals({ slug, handle, enabled }: { slug: string; handle: stri
         </div>
         <div className="ct-body ct-dim">
           {enabled
-            ? "Assign a ticket to Claude in Todo; a terminal opens here when a worker picks it up."
-            : "Paused. Start picking up tickets, then assign one to Claude in Todo."}
+            ? "Move a ticket to Ready for Dev (assigned to Claude or unassigned), or to Todo for enrichment; a terminal opens here when a worker picks it up."
+            : "Paused. Start picking up tickets, then move one to Ready for Dev."}
         </div>
       </div>
     );
@@ -617,7 +655,30 @@ export function DevWorkPage() {
       </div>
 
       <div className="panel stack">
-        <h3 style={{ margin: 0 }}>Queue</h3>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+          <h3 style={{ margin: 0 }}>Queue</h3>
+          {w.rules.enrich ? (
+            <form
+              className="row"
+              style={{ gap: 6 }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                const input = (e.currentTarget.elements.namedItem("key") as HTMLInputElement) ?? null;
+                const key = input?.value.trim();
+                if (!key) return;
+                void act("enrich", async () => {
+                  await devApi.enrich(slug, handle, key);
+                  if (input) input.value = "";
+                });
+              }}
+            >
+              <input name="key" placeholder="ACG-123" style={{ width: 110 }} title={`Enrich an older ${w.status_map.todo} ticket now`} />
+              <button type="submit" className="secondary" disabled={busy !== null}>
+                Enrich now
+              </button>
+            </form>
+          ) : null}
+        </div>
         {queue.length === 0 ? (
           <p className="muted" style={{ margin: 0 }}>
             {enabled ? "No tickets waiting." : "Paused. Start it to read the queue from Linear."}
@@ -631,8 +692,8 @@ export function DevWorkPage() {
                     <TicketCell run={{ ticket_key: q.key, ticket_title: q.title, ticket_url: q.url }} />
                   </td>
                   <td>
-                    <span className={`dw-chip ${q.class === "assigned" ? "acc" : ""}`}>
-                      {q.class === "assigned" ? "assigned" : "agent-ready"}
+                    <span className={`dw-chip ${q.kind === "enrich" ? "" : "acc"}`}>
+                      {q.kind === "enrich" ? (q.pushed ? "enrich · pushed" : "enrich") : q.class === "assigned" ? "code · assigned" : "code · unassigned"}
                     </span>
                     {q.follow_up ? <span className="dw-chip" style={{ marginLeft: 4 }}>follow-up</span> : null}
                   </td>
