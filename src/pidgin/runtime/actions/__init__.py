@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from pidgin.gate.policy import gate
@@ -15,6 +16,23 @@ log = logging.getLogger(__name__)
 
 # Hard ceiling on connector read output fed back to the LLM (AGENT_RUNTIME_SPEC §5.3).
 _READ_RESULT_CAP = 32 * 1024
+
+# Wizard-only assist protocols (see hr_assist/coach.py and hr_assist/finder.py):
+# the hire wizard parses these fenced blocks into an "Apply to form" button. In an
+# ordinary conversation nothing parses them, so a stray block would dump raw JSON in
+# front of the human. Strip it from anything we send outward as a safety net — the
+# HR persona no longer instructs emitting them, but models still imitate the pattern.
+_PROTOCOL_BLOCK = re.compile(r"```pidgin-(?:suggestion|candidates)\b.*?```", re.DOTALL)
+
+
+def _strip_protocol_blocks(text: str) -> str:
+    cleaned = _PROTOCOL_BLOCK.sub("", text)
+    if cleaned == text:
+        return text
+    # Tidy the blank gap the removed block leaves behind; keep the original if
+    # stripping would empty the message (a block-only send has nothing to salvage).
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned or text
 
 
 def execute_action(action_ctx: ActionContext, action: ProposedAction) -> str:
@@ -62,6 +80,7 @@ def _execute_say(action_ctx: ActionContext, action: ProposedAction) -> str:
             action_ctx.turn.id, action.params,
         )
         return "Missing text — say requires non-empty text; nothing was sent."
+    text = _strip_protocol_blocks(text)
     action_ctx.egress.write(text=text, turn_id=action_ctx.turn.id)
     return f"Sent message ({len(text)} chars)"
 
@@ -75,6 +94,7 @@ def _execute_post(action_ctx: ActionContext, action: ProposedAction) -> str:
         return "Missing target"
     if not text:
         return "Missing text"
+    text = _strip_protocol_blocks(text)
     conn = action_ctx.workspace.db_bridge
     if conn is None:
         return "Post requires connector bridge (not configured)"
