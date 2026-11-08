@@ -2,7 +2,6 @@
 name = "pidgin"
 version = "0.1.0"
 description = "AI workforce workspace runtime"
-readme = "specs/README.md"
 requires-python = ">=3.12"
 dependencies = [
     "bcrypt>=4.2.0",
