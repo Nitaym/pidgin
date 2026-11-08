@@ -75,6 +75,12 @@ export function ChatView({
   const [draft, setDraft] = useState<DraftMessage | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
+  // Whether the agent's reply is spoken aloud in voice mode. When off, you talk
+  // to the agent but read its replies on screen instead of hearing them back.
+  const [readBack, setReadBack] = useState(() => localStorage.getItem("voice_read_back") !== "false");
+  useEffect(() => { localStorage.setItem("voice_read_back", String(readBack)); }, [readBack]);
+  const readBackRef = useRef(readBack);
+  useEffect(() => { readBackRef.current = readBack; }, [readBack]);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -202,8 +208,9 @@ export function ChatView({
             fullResponse += parsed.delta;
             setLlm((p) => (p.firstByte === undefined ? { ...p, firstByte: performance.now() } : p));
             // Pipeline TTS: speak each sentence as soon as it streams in,
-            // rather than waiting for the full response.
-            if (voiceMode) feedText(parsed.delta);
+            // rather than waiting for the full response — unless read-back is off,
+            // in which case the reply is only shown on screen.
+            if (voiceMode && readBackRef.current) feedText(parsed.delta);
             setDraft((prev) =>
               prev ? { ...prev, text: prev.text + parsed.delta } : prev,
             );
@@ -227,7 +234,15 @@ export function ChatView({
               setMessages(fresh.messages);
             });
             setStreaming(false);
-            if (voiceMode) finishSpeaking(); // flush any trailing partial sentence
+            if (voiceMode) {
+              if (readBackRef.current) {
+                finishSpeaking(); // flush the trailing partial; TTS resumes listening
+              } else {
+                // No read-back: there's no audio turn to drive the hands-free
+                // resume, so re-open the mic ourselves for the next turn.
+                void startRecording();
+              }
+            }
           }
         };
         source.onerror = () => {
@@ -531,6 +546,14 @@ export function ChatView({
                     : speakers.map((d) => <option key={d.deviceId} value={d.deviceId}>{d.label}</option>)
                   }
                 </select>
+              </label>
+              <label className="voice-readback-label">
+                <input
+                  type="checkbox"
+                  checked={readBack}
+                  onChange={(e) => setReadBack(e.target.checked)}
+                />
+                Read replies aloud
               </label>
             </div>
             <button

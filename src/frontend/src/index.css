@@ -1072,6 +1072,20 @@ button.danger:disabled {
   border-color: var(--accent);
 }
 
+.voice-readback-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.voice-readback-label input {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .voice-exit-btn {
   position: absolute;
   bottom: 10px;
