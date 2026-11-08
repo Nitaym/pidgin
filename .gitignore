@@ -1,3 +1,7 @@
+### Secrets — never commit credentials
+secrets/
+.tmp_cookies.txt
+
 ### Python
 # Byte-compiled files
 __pycache__/
